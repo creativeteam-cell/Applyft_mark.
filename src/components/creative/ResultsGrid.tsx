@@ -46,7 +46,7 @@ export function ResultsGrid({ images, onBack, onStartOver }: ResultsGridProps) {
       </div>
 
       {/* Группировка по платформам */}
-      {[...new Set(images.map(i => i.platform))].map(platform => (
+      {Array.from(new Set(images.map(i => i.platform))).map(platform => (
         <div key={platform}>
           <h3 className="text-xs font-mono tracking-widest text-gray-500 uppercase mb-3">{platform}</h3>
           <div className="grid grid-cols-2 gap-4">
