@@ -13,7 +13,7 @@ interface FormatSelectorProps {
 }
 
 export function FormatSelector({ formats, selected, onChange, onBack, onGenerate, loading, loadingMessage }: FormatSelectorProps) {
-  const platforms = [...new Set(formats.map(f => f.platform))]
+  const platforms = Array.from(new Set(formats.map(f => f.platform)))
 
   function toggle(id: string) {
     onChange(selected.includes(id) ? selected.filter(s => s !== id) : [...selected, id])
