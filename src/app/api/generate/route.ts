@@ -3,7 +3,6 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { generatePrompt } from '@/lib/openai'
 import { generateImage } from '@/lib/imagen'
-import { prisma } from '@/lib/prisma'
 
 export async function POST(req: NextRequest) {
   // Проверяем авторизацию
@@ -30,13 +29,6 @@ export async function POST(req: NextRequest) {
     // Генерим изображение через Imagen 3
     const imageBase64 = await generateImage(finalPrompt)
 
-    // Сохраняем промпт в проект
-    if (projectId) {
-      await prisma.project.update({
-        where: { id: projectId },
-        data: { prompt: finalPrompt },
-      })
-    }
 
     return NextResponse.json({
       prompt: finalPrompt,
