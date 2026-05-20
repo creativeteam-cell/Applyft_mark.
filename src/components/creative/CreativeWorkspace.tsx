@@ -24,7 +24,7 @@ export function CreativeWorkspace() {
   // Шаг 1 → 2: генерим промпт
   async function handleGeneratePrompt() {
     setLoading(true)
-    setLoadingMessage('Анализирую бриф и референс...')
+    setLoadingMessage('Analyzing brief and reference...')
     
     try {
       const res = await fetch('/api/generate', {
@@ -53,7 +53,7 @@ export function CreativeWorkspace() {
   // Шаг 3 → 4: регенерим если нужно и ресайзим
   async function handleGenerate() {
     setLoading(true)
-    setLoadingMessage('Генерирую изображение...')
+    setLoadingMessage('Generating image...')
     
     try {
       // Генерим финальное изображение с кастомным промптом
@@ -65,7 +65,7 @@ export function CreativeWorkspace() {
       const genData = await genRes.json()
       if (genData.error) throw new Error(genData.error)
 
-      setLoadingMessage('Подготавливаю форматы...')
+      setLoadingMessage('Preparing formats...')
 
       // Ресайзим под выбранные форматы
       const resizeRes = await fetch('/api/resize', {
@@ -106,7 +106,7 @@ export function CreativeWorkspace() {
                 {i + 1}
               </div>
               <span className={`text-sm capitalize ${step === s ? 'text-white' : 'text-gray-500'}`}>
-                {s === 'brief' ? 'Бриф' : s === 'prompt' ? 'Промпт' : s === 'formats' ? 'Форматы' : 'Результат'}
+                {s === 'brief' ? 'Brief' : s === 'prompt' ? 'Prompt' : s === 'formats' ? 'Formats' : 'Results'}
               </span>
             </div>
             {i < 3 && <div className="w-8 h-px" style={{ background: 'var(--border)' }} />}

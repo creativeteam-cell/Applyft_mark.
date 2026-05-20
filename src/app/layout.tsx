@@ -18,15 +18,14 @@ const spaceMono = Space_Mono({
 export const metadata: Metadata = {
   title: 'Creative Studio — ApplyFT',
   description: 'AI-powered creative generator for advertising',
+  icons: {
+    icon: '/favicon.svg',
+  },
 }
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ru">
+    <html lang="en">
       <body className={`${syne.variable} ${spaceMono.variable} font-sans`}>
         <Providers>{children}</Providers>
       </body>
