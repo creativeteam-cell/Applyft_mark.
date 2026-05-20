@@ -12,7 +12,7 @@ export async function generateImage(prompt: string): Promise<string> {
         instances: [{ prompt }],
         parameters: {
           sampleCount: 1,
-          aspectRatio: '4:5',
+          aspectRatio: '3:4',
         },
       }),
     }
