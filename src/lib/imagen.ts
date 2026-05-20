@@ -1,19 +1,16 @@
-// Генерация изображений через Google Imagen 3
+// Генерация изображений через Gemini imagen preview
 
 export async function generateImage(prompt: string): Promise<string> {
   const apiKey = process.env.GOOGLE_AI_API_KEY!
-  
+
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        instances: [{ prompt }],
-        parameters: {
-          sampleCount: 1,
-          aspectRatio: '1:1', // Генерим квадратную — потом ресайзим через Sharp
-        },
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseModalities: ['IMAGE', 'TEXT'] },
       }),
     }
   )
@@ -24,8 +21,14 @@ export async function generateImage(prompt: string): Promise<string> {
   }
 
   const data = await response.json()
-  const base64Image = data.predictions[0].bytesBase64Encoded
   
-  // Возвращаем base64 строку
-  return `data:image/png;base64,${base64Image}`
+  // Ищем картинку в ответе
+  const parts = data.candidates?.[0]?.content?.parts || []
+  const imagePart = parts.find((p: any) => p.inlineData)
+  
+  if (!imagePart) {
+    throw new Error('No image in response')
+  }
+
+  return `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`
 }
