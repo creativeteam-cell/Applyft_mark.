@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
         code: app.code.toUpperCase(),
         name: app.name || app.code,
         description: '',
-        painPoints: '',
+        painPoints: [],
         style: '',
         colors: '',
         restrictions: '',
