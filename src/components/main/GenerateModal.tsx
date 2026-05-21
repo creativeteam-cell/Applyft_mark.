@@ -66,21 +66,35 @@ export function GenerateModal({ appCode, selectedPain, prompt, reference, onClos
     setStage('generating-all')
 
     try {
-      const results: Record<string, string> = { '4x5': previewImage }
+      // Сначала ресайзим 4x5 до точных пикселей
+      const resize4x5 = await fetch('/api/resize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: previewImage, size: '4x5' }),
+      })
+      const resize4x5Data = await resize4x5.json()
+      const results: Record<string, string> = { '4x5': resize4x5Data.imageBase64 || previewImage }
 
-      // Генерим остальные 3 размера параллельно с тем же промптом
+      // Генерим остальные 3 размера параллельно
       await Promise.all(
         ['1x1', '9x16', '1.91x1'].map(async (size) => {
-          const res = await fetch('/api/generate', {
+          const genRes = await fetch('/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              customPrompt: currentPrompt,
-              appCode,
-            }),
+            body: JSON.stringify({ customPrompt: currentPrompt, appCode }),
           })
-          const data = await res.json()
-          if (!data.error) results[size] = data.imageBase64
+          const genData = await genRes.json()
+          
+          if (!genData.error && genData.imageBase64) {
+            // Ресайзим до точных пикселей
+            const resizeRes = await fetch('/api/resize', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ imageBase64: genData.imageBase64, size }),
+            })
+            const resizeData = await resizeRes.json()
+            results[size] = resizeData.imageBase64 || genData.imageBase64
+          }
         })
       )
 

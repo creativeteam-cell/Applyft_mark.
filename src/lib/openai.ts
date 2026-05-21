@@ -46,7 +46,7 @@ CRITICAL RULES:
 - Composition: clear visual hierarchy, one dominant hero element, strong contrast
 - Include realistic text in the image: a bold headline, optional subheadline, and a CTA button
 - Typography: bold, readable, modern — warm and elegant for lifestyle apps
-- ${hasLogo ? 'The app has a logo — do NOT generate or include any logo in the image. Leave space for logo overlay.' : 'Do NOT include any logos, brand marks, or watermarks in the image.'}
+- Do NOT include any logos, brand marks, app icons, or watermarks anywhere in the image. No exceptions.
 - The image must look like a professional social media ad, NOT a stock photo
 - Always write the prompt in English regardless of input language
 - Be very specific about: lighting, colors, mood, composition, subject, text content
