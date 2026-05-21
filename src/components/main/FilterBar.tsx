@@ -27,11 +27,7 @@ export function FilterBar({
   function handleAppChange(code: string) {
     localStorage.setItem('cs_selected_app', code)
     onAppChange(code)
-    onPainChange('')
-  }
-
-  function handlePainChange(pain: string) {
-    onPainChange(pain)
+    onPainChange('none') // сброс боли при смене апки
   }
 
   function handleMarketerChange(code: string) {
@@ -55,13 +51,14 @@ export function FilterBar({
         </select>
       </div>
 
-      {/* Pain */}
+      {/* Pain — показываем всегда если есть pain points */}
       {painPoints.length > 0 && (
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500 uppercase tracking-widest font-mono">Pain</span>
-          <select value={selectedPain} onChange={e => handlePainChange(e.target.value)}
+          <select value={selectedPain || 'none'} onChange={e => onPainChange(e.target.value)}
             className="px-3 py-1.5 rounded-lg text-sm font-medium outline-none cursor-pointer max-w-xs"
             style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+            <option value="none">— None —</option>
             {painPoints.map((pain, i) => (
               <option key={i} value={pain}>{pain}</option>
             ))}

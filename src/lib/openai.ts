@@ -9,6 +9,7 @@ interface AppInfo {
   name: string
   description?: string
   painPoints?: string[]
+  logoBase64?: string
 }
 
 interface GeneratePromptOptions {
@@ -16,84 +17,87 @@ interface GeneratePromptOptions {
   selectedPain?: string
   userText?: string
   referenceBase64?: string
-  fixNote?: string // если это правка существующей картинки
+  fixNote?: string
+  previousImageBase64?: string
 }
 
 export async function generatePrompt(options: GeneratePromptOptions): Promise<string> {
-  const { appInfo, selectedPain, userText, referenceBase64, fixNote } = options
+  const { appInfo, selectedPain, userText, referenceBase64, fixNote, previousImageBase64 } = options
 
-  // Проверяем есть ли вообще что-то для генерации
   const hasApp = appInfo?.description || appInfo?.name
-  const hasPain = selectedPain
+  const hasPain = selectedPain && selectedPain !== 'none'
   const hasUserText = userText?.trim()
   const hasReference = referenceBase64
+  const hasFix = fixNote?.trim()
 
-  if (!hasApp && !hasPain && !hasUserText && !hasReference) {
+  if (!hasApp && !hasPain && !hasUserText && !hasReference && !hasFix) {
     throw new Error('NOT_ENOUGH_DATA')
   }
 
-  // Строим системный промпт
+  const hasLogo = !!appInfo?.logoBase64
+
   const systemPrompt = `You are an expert advertising creative director specializing in social media ad creatives.
 
-Your task is to write a detailed image generation prompt for Gemini AI that will create a high-quality advertising banner/poster.
+Your task is to write a detailed image generation prompt for Gemini AI that creates a high-quality advertising banner/poster.
 
-IMPORTANT RULES FOR THE PROMPT YOU WRITE:
-- The creative must follow social media safe zones (keep important elements away from edges, especially top and bottom 15%)
-- Follow marketing composition rules: clear visual hierarchy, one dominant element, strong contrast
-- Include space for text overlay (headline + CTA button area)
-- The image must be attention-grabbing and emotionally compelling
-- Typography should be minimal in the image itself — just describe the mood and style
+CRITICAL RULES:
+- Format: 4:5 vertical (1200x1500px), suitable for Instagram/Facebook feed
+- Safe zones: keep ALL text and important elements at least 15% away from edges
+- Composition: clear visual hierarchy, one dominant hero element, strong contrast
+- Include realistic text in the image: a bold headline, optional subheadline, and a CTA button
+- Typography: bold, readable, modern — warm and elegant for lifestyle apps
+- ${hasLogo ? 'The app has a logo — do NOT generate or include any logo in the image. Leave space for logo overlay.' : 'Do NOT include any logos, brand marks, or watermarks in the image.'}
+- The image must look like a professional social media ad, NOT a stock photo
 - Always write the prompt in English regardless of input language
-- Be specific about: lighting, color palette, mood, composition, style, key visual elements
-- The output should look like a professional advertising poster, NOT a stock photo
+- Be very specific about: lighting, colors, mood, composition, subject, text content
 
-${fixNote ? `This is a FIX REQUEST. The user wants to modify an existing creative. Apply the fix while keeping the overall concept.` : ''}
+${hasFix ? `IMPORTANT: This is a FIX of an existing creative. The user wants SMALL changes only. Keep the overall concept, style, composition and mood. Only apply the requested fix: "${fixNote}"` : ''}
 
-Return ONLY the image generation prompt, nothing else. No explanations, no preamble.`
+Return ONLY the image generation prompt (150-250 words). Nothing else.`
 
-  // Строим контент сообщения
   const contentParts: any[] = []
 
-  // Если есть референс — анализируем его
-  if (referenceBase64) {
+  // Референс конкурента
+  if (referenceBase64 && !hasFix) {
     contentParts.push({
       type: 'image_url',
       image_url: { url: referenceBase64 },
     })
   }
 
-  // Основной текст запроса
-  let userMessage = 'Create an advertising banner image generation prompt based on:\n\n'
+  // Предыдущая картинка для Fix
+  if (previousImageBase64 && hasFix) {
+    contentParts.push({
+      type: 'image_url',
+      image_url: { url: previousImageBase64 },
+    })
+  }
+
+  let userMessage = 'Create an advertising banner image generation prompt.\n\n'
 
   if (appInfo?.name) {
     userMessage += `APP: ${appInfo.name} (${appInfo.code})\n`
   }
-
   if (appInfo?.description) {
-    userMessage += `APP DESCRIPTION: ${appInfo.description}\n\n`
+    userMessage += `DESCRIPTION: ${appInfo.description}\n\n`
+  }
+  if (hasPain) {
+    userMessage += `EMOTIONAL PAIN POINT (main hook): "${selectedPain}"\n\n`
+  }
+  if (hasUserText) {
+    userMessage += `USER INSTRUCTIONS: ${userText}\n\n`
+  }
+  if (referenceBase64 && !hasFix) {
+    userMessage += `REFERENCE: Analyze the reference image. Extract style, colors, composition, mood. Create something similar but original for ${appInfo?.name || 'this app'}.\n\n`
+  }
+  if (hasFix && previousImageBase64) {
+    userMessage += `FIX REQUEST: I'm showing you the current creative. Apply ONLY this change: "${fixNote}". Keep everything else the same.\n\n`
+  }
+  if (!hasPain && !hasUserText && !hasReference) {
+    userMessage += `Create a compelling general advertising poster for this app targeting its audience.\n\n`
   }
 
-  if (selectedPain) {
-    userMessage += `USER PAIN POINT (the emotional hook for this ad): "${selectedPain}"\n\n`
-  }
-
-  if (userText?.trim()) {
-    userMessage += `ADDITIONAL INSTRUCTIONS FROM USER: ${userText}\n\n`
-  }
-
-  if (referenceBase64) {
-    userMessage += `REFERENCE IMAGE: Analyze the reference image above. Extract the visual style, color palette, composition approach, and mood. Create something similar but original for ${appInfo?.name || 'this app'}.\n\n`
-  }
-
-  if (fixNote) {
-    userMessage += `FIX REQUEST: ${fixNote}\n\n`
-  }
-
-  if (!selectedPain && !userText && !referenceBase64) {
-    userMessage += `Create a general advertising poster for this app that would appeal to its target audience.\n\n`
-  }
-
-  userMessage += `Write a detailed Gemini image generation prompt (150-250 words) that captures all of this.`
+  userMessage += `Write the Gemini image generation prompt now.`
 
   contentParts.push({ type: 'text', text: userMessage })
 

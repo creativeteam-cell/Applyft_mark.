@@ -13,7 +13,7 @@ export function MainPage() {
   const [apps, setApps] = useState<App[]>([])
   const [marketers, setMarketers] = useState<Marketer[]>([])
   const [selectedApp, setSelectedApp] = useState('')
-  const [selectedPain, setSelectedPain] = useState('')
+  const [selectedPain, setSelectedPain] = useState('none')
   const [selectedMarketer, setSelectedMarketer] = useState('')
   const [page, setPage] = useState(1)
   const [showModal, setShowModal] = useState(false)

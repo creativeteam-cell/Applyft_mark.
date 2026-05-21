@@ -13,12 +13,12 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { appCode, selectedPain, userText, referenceBase64, fixNote, customPrompt } = body
+    const { appCode, selectedPain, userText, referenceBase64, fixNote, previousImageBase64, customPrompt } = body
 
     let finalPrompt = customPrompt
+    let appLogoBase64: string | undefined
 
     if (!finalPrompt) {
-      // Получаем инфо о приложении из конфига
       let appInfo
       if (appCode) {
         const config = await getConfig()
@@ -29,23 +29,25 @@ export async function POST(req: NextRequest) {
             name: app.name,
             description: app.description,
             painPoints: app.painPoints,
+            logoBase64: app.logoBase64,
           }
+          appLogoBase64 = app.logoBase64
         }
       }
 
-      // Генерим промпт через GPT
       try {
         finalPrompt = await generatePrompt({
           appInfo,
-          selectedPain,
+          selectedPain: selectedPain !== 'none' ? selectedPain : undefined,
           userText,
           referenceBase64,
           fixNote,
+          previousImageBase64,
         })
       } catch (e: any) {
         if (e.message === 'NOT_ENOUGH_DATA') {
           return NextResponse.json(
-            { error: 'Please add a description, pain point, or reference image to generate a creative.' },
+            { error: 'Please add a description, select a pain point, or upload a reference image.' },
             { status: 400 }
           )
         }
@@ -53,8 +55,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Генерим изображение через Gemini
-    const imageBase64 = await generateImage(finalPrompt)
+    // Генерим через Gemini
+    // Для Fix передаём предыдущую картинку как референс
+    const imageBase64 = await generateImage(
+      finalPrompt,
+      fixNote && previousImageBase64 ? previousImageBase64 : undefined
+    )
 
     return NextResponse.json({
       prompt: finalPrompt,
