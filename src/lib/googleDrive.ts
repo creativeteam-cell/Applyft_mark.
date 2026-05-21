@@ -22,7 +22,7 @@ function getAuthClient() {
   
   return new google.auth.GoogleAuth({
     credentials: serviceAccountKey,
-    scopes: ['https://www.googleapis.com/auth/drive'],
+    scopes: ['https://www.googleapis.com/auth/drive.readonly'],
   })
 }
 
@@ -114,7 +114,7 @@ export async function getCreativesForApp(appCode: string, limit = 20): Promise<C
           size,
           fileId: file.id,
           fileName: file.name || '',
-          url: `/api/image?id=${file.id}`,
+          url: `https://drive.google.com/uc?id=${file.id}&export=view`,
         }
       }).filter(Boolean) as Creative['images']
 

@@ -15,11 +15,8 @@ export function AddAppModal({ onAdd, onClose }: AddAppModalProps) {
   async function handleSubmit() {
     if (!code.trim() || !name.trim()) return
     setLoading(true)
-    try {
-      await onAdd(code.toUpperCase().trim(), name.trim())
-    } finally {
-      setLoading(false)
-    }
+    await onAdd(code.toUpperCase().trim(), name.trim())
+    setLoading(false)
   }
 
   return (
@@ -67,6 +64,10 @@ export function AddAppModal({ onAdd, onClose }: AddAppModalProps) {
               onKeyDown={e => e.key === 'Enter' && handleSubmit()}
             />
           </div>
+
+          <p className="text-xs text-gray-500">
+            We'll check if a Drive folder exists for this abbreviation automatically.
+          </p>
         </div>
 
         <div className="flex gap-3">
@@ -76,7 +77,7 @@ export function AddAppModal({ onAdd, onClose }: AddAppModalProps) {
             className="flex-1 py-3 rounded-xl font-semibold text-sm transition-all disabled:opacity-40"
             style={{ background: 'var(--accent)' }}
           >
-            {loading ? 'Adding...' : 'Add App'}
+            {loading ? 'Checking Drive...' : 'Add App'}
           </button>
           <button
             onClick={onClose}
