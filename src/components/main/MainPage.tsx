@@ -6,16 +6,14 @@ import { CreativesGrid } from './CreativesGrid'
 import { GenerateModal } from './GenerateModal'
 import { FilterBar } from './FilterBar'
 
-interface App {
-  code: string
-  name: string
-  active: boolean
-}
+interface App { code: string; name: string; active: boolean }
+interface Marketer { code: string; name: string }
 
 export function MainPage() {
   const [apps, setApps] = useState<App[]>([])
+  const [marketers, setMarketers] = useState<Marketer[]>([])
   const [selectedApp, setSelectedApp] = useState('')
-  const [selectedDesigner, setSelectedDesigner] = useState('')
+  const [selectedMarketer, setSelectedMarketer] = useState('')
   const [page, setPage] = useState(1)
   const [showModal, setShowModal] = useState(false)
   const [prompt, setPrompt] = useState('')
@@ -25,9 +23,21 @@ export function MainPage() {
     fetch('/api/apps')
       .then(r => r.json())
       .then(data => {
-        const active = data.filter((a: App) => a.active)
-        setApps(active)
-        if (active.length > 0) setSelectedApp(active[0].code)
+        const activeApps = (data.apps || data).filter((a: App) => a.active)
+        setApps(activeApps)
+        setMarketers(data.marketers || [])
+
+        // Восстанавливаем выбор из localStorage
+        const savedApp = localStorage.getItem('cs_selected_app')
+        const savedMarketer = localStorage.getItem('cs_selected_marketer')
+
+        if (savedApp && activeApps.find((a: App) => a.code === savedApp)) {
+          setSelectedApp(savedApp)
+        } else if (activeApps.length > 0) {
+          setSelectedApp(activeApps[0].code)
+        }
+
+        if (savedMarketer) setSelectedMarketer(savedMarketer)
       })
   }, [])
 
@@ -38,16 +48,15 @@ export function MainPage() {
 
   return (
     <div className="relative">
-      {/* Фильтр бар */}
       <FilterBar
         apps={apps}
         selectedApp={selectedApp}
         onAppChange={(code) => { setSelectedApp(code); setPage(1) }}
-        selectedDesigner={selectedDesigner}
-        onDesignerChange={setSelectedDesigner}
+        selectedMarketer={selectedMarketer}
+        onMarketerChange={setSelectedMarketer}
+        marketers={marketers}
       />
 
-      {/* Панель генерации */}
       <GeneratePanel
         prompt={prompt}
         onPromptChange={setPrompt}
@@ -56,7 +65,6 @@ export function MainPage() {
         onGenerate={handleGenerate}
       />
 
-      {/* Лента креативов */}
       <div className="px-8 pb-8" style={{ marginTop: '160px' }}>
         <CreativesGrid
           appCode={selectedApp}

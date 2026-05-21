@@ -4,19 +4,30 @@ export interface App {
   code: string
   name: string
   description: string
+  painPoints: string
   style: string
   colors: string
   restrictions: string
   active: boolean
 }
 
-const APPS_FILE_NAME = 'creative-studio-apps.json'
+export interface Marketer {
+  code: string
+  name: string
+}
+
+export interface ConfigData {
+  apps: App[]
+  marketers: Marketer[]
+}
+
+const CONFIG_FILE_NAME = 'creative-studio-config.json'
 const CONFIG_FOLDER_ID = process.env.GOOGLE_DRIVE_CONFIG_FOLDER_ID!
 
-async function findAppsFile(): Promise<string | null> {
+async function findConfigFile(): Promise<string | null> {
   const drive = getDriveClient()
   const res = await drive.files.list({
-    q: `name = '${APPS_FILE_NAME}' and '${CONFIG_FOLDER_ID}' in parents and trashed = false`,
+    q: `name = '${CONFIG_FILE_NAME}' and '${CONFIG_FOLDER_ID}' in parents and trashed = false`,
     fields: 'files(id)',
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
@@ -24,71 +35,73 @@ async function findAppsFile(): Promise<string | null> {
   return res.data.files?.[0]?.id || null
 }
 
-export async function getApps(): Promise<App[]> {
+export async function getConfig(): Promise<ConfigData> {
   try {
     const drive = getDriveClient()
-    const fileId = await findAppsFile()
-
-    if (!fileId) return getDefaultApps()
+    const fileId = await findConfigFile()
+    if (!fileId) return getDefaultConfig()
 
     const res = await drive.files.get(
       { fileId, alt: 'media', supportsAllDrives: true } as any,
       { responseType: 'text' }
     )
-
     return JSON.parse(res.data as string)
   } catch (e) {
-    console.error('Failed to load apps:', e)
-    return getDefaultApps()
+    console.error('Failed to load config:', e)
+    return getDefaultConfig()
   }
 }
 
-export async function saveApps(apps: App[]): Promise<void> {
+export async function saveConfig(config: ConfigData): Promise<void> {
   const drive = getDriveClient()
-  const content = JSON.stringify(apps, null, 2)
-  const fileId = await findAppsFile()
+  const content = JSON.stringify(config, null, 2)
+  const fileId = await findConfigFile()
 
   if (fileId) {
     await drive.files.update({
       fileId,
       supportsAllDrives: true,
       requestBody: {},
-      media: {
-        mimeType: 'application/json',
-        body: content,
-      },
+      media: { mimeType: 'application/json', body: content },
     } as any)
   } else {
     await drive.files.create({
       supportsAllDrives: true,
-      requestBody: {
-        name: APPS_FILE_NAME,
-        parents: [CONFIG_FOLDER_ID],
-      },
-      media: {
-        mimeType: 'application/json',
-        body: content,
-      },
+      requestBody: { name: CONFIG_FILE_NAME, parents: [CONFIG_FOLDER_ID] },
+      media: { mimeType: 'application/json', body: content },
     } as any)
   }
 }
 
-export async function getActiveApps(): Promise<App[]> {
-  const apps = await getApps()
-  return apps.filter(a => a.active)
-}
-
-function getDefaultApps(): App[] {
-  return [
-    { code: 'UN', name: 'Universal Locators', description: '', style: '', colors: '', restrictions: '', active: true },
-    { code: 'KD', name: 'Kidden', description: '', style: '', colors: '', restrictions: '', active: true },
-    { code: 'LM', name: 'Looma', description: '', style: '', colors: '', restrictions: '', active: true },
-    { code: 'TR', name: 'Trace', description: '', style: '', colors: '', restrictions: '', active: true },
-    { code: 'GZ', name: 'GeoZilla', description: '', style: '', colors: '', restrictions: '', active: true },
-    { code: 'FA', name: 'FamLocate', description: '', style: '', colors: '', restrictions: '', active: true },
-    { code: 'FL', name: 'Family Locator', description: '', style: '', colors: '', restrictions: '', active: true },
-    { code: 'FM', name: 'Familo', description: '', style: '', colors: '', restrictions: '', active: true },
-    { code: 'SF', name: 'SafetyTips', description: '', style: '', colors: '', restrictions: '', active: true },
-    { code: 'RL', name: 'Refinely', description: '', style: '', colors: '', restrictions: '', active: true },
-  ]
+function getDefaultConfig(): ConfigData {
+  return {
+    apps: [
+      { code: 'UN', name: 'Universal Locators', description: '', painPoints: '', style: '', colors: '', restrictions: '', active: true },
+      { code: 'KD', name: 'Kidden', description: '', painPoints: '', style: '', colors: '', restrictions: '', active: true },
+      { code: 'LM', name: 'Looma', description: '', painPoints: '', style: '', colors: '', restrictions: '', active: true },
+      { code: 'TR', name: 'Trace', description: '', painPoints: '', style: '', colors: '', restrictions: '', active: true },
+      { code: 'GZ', name: 'GeoZilla', description: '', painPoints: '', style: '', colors: '', restrictions: '', active: true },
+      { code: 'FA', name: 'FamLocate', description: '', painPoints: '', style: '', colors: '', restrictions: '', active: true },
+      { code: 'FL', name: 'Family Locator', description: '', painPoints: '', style: '', colors: '', restrictions: '', active: true },
+      { code: 'FM', name: 'Familo', description: '', painPoints: '', style: '', colors: '', restrictions: '', active: true },
+      { code: 'SF', name: 'SafetyTips', description: '', painPoints: '', style: '', colors: '', restrictions: '', active: true },
+      { code: 'RL', name: 'Refinely', description: '', painPoints: '', style: '', colors: '', restrictions: '', active: true },
+    ],
+    marketers: [
+      { code: 'TMK', name: 'Tetiana Melnyk' },
+      { code: 'KZA', name: 'Kseniia Zadoia' },
+      { code: 'AHB', name: 'Anhelina Halbul' },
+      { code: 'ASR', name: 'Artem Sierov' },
+      { code: 'SMV', name: 'Sofiia Matviikiv' },
+      { code: 'DDT', name: 'Diana Drobotey' },
+      { code: 'VTL', name: 'Vladyslava Tsymbal' },
+      { code: 'YKH', name: 'Yuliia Khomukha' },
+      { code: 'DKR', name: 'Danylo Kyrylov' },
+      { code: 'ASM', name: 'Antonina Samoliuk' },
+      { code: 'NBL', name: 'Nataliia Bielousova' },
+      { code: 'RSK', name: 'Romana Skrabut' },
+      { code: 'KIS', name: 'Kseniia Ilienko' },
+      { code: 'MMM', name: 'Mariia Minaieva' },
+    ],
+  }
 }

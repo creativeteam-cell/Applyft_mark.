@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { getApps, saveApps } from '@/lib/appsStore'
+import { getConfig, saveConfig } from '@/lib/appsStore'
 
 export async function GET() {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const apps = await getApps()
-  return NextResponse.json(apps)
+  const config = await getConfig()
+  return NextResponse.json(config)
 }
 
 export async function POST(req: NextRequest) {
@@ -16,24 +16,31 @@ export async function POST(req: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const apps = await getApps()
+  const config = await getConfig()
 
-  const existing = apps.findIndex(a => a.code === body.code)
-  if (existing >= 0) {
-    apps[existing] = { ...apps[existing], ...body }
+  if (body.type === 'marketers') {
+    config.marketers = body.data
   } else {
-    apps.push({
-      code: body.code.toUpperCase(),
-      name: body.name || body.code,
-      description: '',
-      style: '',
-      colors: '',
-      restrictions: '',
-      active: true,
-    })
+    // type === 'app'
+    const app = body.data
+    const existing = config.apps.findIndex(a => a.code === app.code)
+    if (existing >= 0) {
+      config.apps[existing] = { ...config.apps[existing], ...app }
+    } else {
+      config.apps.push({
+        code: app.code.toUpperCase(),
+        name: app.name || app.code,
+        description: '',
+        painPoints: '',
+        style: '',
+        colors: '',
+        restrictions: '',
+        active: true,
+      })
+    }
   }
 
-  await saveApps(apps)
+  await saveConfig(config)
   return NextResponse.json({ success: true })
 }
 
@@ -44,9 +51,9 @@ export async function DELETE(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const code = searchParams.get('code')
 
-  const apps = await getApps()
-  const updated = apps.filter(a => a.code !== code)
-  await saveApps(updated)
+  const config = await getConfig()
+  config.apps = config.apps.filter(a => a.code !== code)
+  await saveConfig(config)
 
   return NextResponse.json({ success: true })
 }

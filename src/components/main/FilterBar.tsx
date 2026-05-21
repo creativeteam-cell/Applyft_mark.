@@ -1,36 +1,35 @@
 'use client'
 
-const DESIGNERS = [
-  { code: 'TMK', name: 'Tetiana Melnyk' },
-  { code: 'KZA', name: 'Kseniia Zadoia' },
-  { code: 'AHB', name: 'Anhelina Halbul' },
-  { code: 'ASR', name: 'Artem Sierov' },
-  { code: 'SMV', name: 'Sofiia Matviikiv' },
-  { code: 'DDT', name: 'Diana Drobotey' },
-  { code: 'VTL', name: 'Vladyslava Tsymbal' },
-  { code: 'YKH', name: 'Yuliia Khomukha' },
-  { code: 'DKR', name: 'Danylo Kyrylov' },
-  { code: 'ASM', name: 'Antonina Samoliuk' },
-  { code: 'NBL', name: 'Nataliia Bielousova' },
-  { code: 'RSK', name: 'Romana Skrabut' },
-  { code: 'KIS', name: 'Kseniia Ilienko' },
-  { code: 'MMM', name: 'Mariia Minaieva' },
-]
+import { useEffect } from 'react'
 
 interface App { code: string; name: string }
+interface Marketer { code: string; name: string }
 
 interface FilterBarProps {
   apps: App[]
   selectedApp: string
   onAppChange: (code: string) => void
-  selectedDesigner: string
-  onDesignerChange: (code: string) => void
+  selectedMarketer: string
+  onMarketerChange: (code: string) => void
+  marketers: Marketer[]
 }
 
 export function FilterBar({
   apps, selectedApp, onAppChange,
-  selectedDesigner, onDesignerChange,
+  selectedMarketer, onMarketerChange, marketers,
 }: FilterBarProps) {
+
+  // Запоминаем выбор в localStorage
+  function handleAppChange(code: string) {
+    localStorage.setItem('cs_selected_app', code)
+    onAppChange(code)
+  }
+
+  function handleMarketerChange(code: string) {
+    localStorage.setItem('cs_selected_marketer', code)
+    onMarketerChange(code)
+  }
+
   return (
     <div className="fixed left-0 right-0 z-40 border-b flex items-center gap-4 px-8 py-2.5"
       style={{ top: '56px', background: 'var(--bg)', borderColor: 'var(--border)' }}>
@@ -40,32 +39,28 @@ export function FilterBar({
         <span className="text-xs text-gray-500 uppercase tracking-widest font-mono">App</span>
         <select
           value={selectedApp}
-          onChange={e => onAppChange(e.target.value)}
+          onChange={e => handleAppChange(e.target.value)}
           className="px-3 py-1.5 rounded-lg text-sm font-medium outline-none cursor-pointer"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
         >
           {apps.map(app => (
-            <option key={app.code} value={app.code}>
-              {app.code} — {app.name}
-            </option>
+            <option key={app.code} value={app.code}>{app.code} — {app.name}</option>
           ))}
         </select>
       </div>
 
-      {/* Designer dropdown */}
+      {/* Marketer dropdown */}
       <div className="flex items-center gap-2">
-        <span className="text-xs text-gray-500 uppercase tracking-widest font-mono">Designer</span>
+        <span className="text-xs text-gray-500 uppercase tracking-widest font-mono">Marketer</span>
         <select
-          value={selectedDesigner}
-          onChange={e => onDesignerChange(e.target.value)}
+          value={selectedMarketer}
+          onChange={e => handleMarketerChange(e.target.value)}
           className="px-3 py-1.5 rounded-lg text-sm font-medium outline-none cursor-pointer"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
         >
-          <option value="">All designers</option>
-          {DESIGNERS.map(d => (
-            <option key={d.code} value={d.code}>
-              {d.code} — {d.name}
-            </option>
+          <option value="">All marketers</option>
+          {marketers.map(m => (
+            <option key={m.code} value={m.code}>{m.code} — {m.name}</option>
           ))}
         </select>
       </div>
