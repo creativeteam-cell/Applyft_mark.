@@ -42,7 +42,11 @@ export function MainPage() {
   }, [])
 
   function handleGenerate() {
-    if (!prompt.trim() && !reference) return
+    // Проверяем есть ли хоть что-то
+    if (!prompt.trim() && !reference && !selectedPain) {
+      alert('Please add a description, select a pain point, or upload a reference image.')
+      return
+    }
     setShowModal(true)
   }
 
@@ -51,7 +55,7 @@ export function MainPage() {
       <FilterBar
         apps={apps}
         selectedApp={selectedApp}
-        onAppChange={(code) => { setSelectedApp(code); setPage(1) }}
+        onAppChange={(code) => { setSelectedApp(code); setPage(1); setSelectedPain('') }}
         selectedPain={selectedPain}
         onPainChange={setSelectedPain}
         selectedMarketer={selectedMarketer}
@@ -78,6 +82,7 @@ export function MainPage() {
       {showModal && (
         <GenerateModal
           appCode={selectedApp}
+          selectedPain={selectedPain}
           prompt={prompt}
           reference={reference}
           onClose={() => setShowModal(false)}

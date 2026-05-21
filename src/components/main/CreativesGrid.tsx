@@ -71,7 +71,7 @@ export function CreativesGrid({ appCode, page, onPageChange }: CreativesGridProp
     </div>
   )
 
-  if (creatives.length === 0) return (
+  if (!loading && creatives.length === 0) return (
     <div className="flex items-center justify-center py-32">
       <div className="text-gray-500 text-sm">No creatives found for {appCode}</div>
     </div>
