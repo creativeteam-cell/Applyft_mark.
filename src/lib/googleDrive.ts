@@ -22,7 +22,7 @@ function getAuthClient() {
   
   return new google.auth.GoogleAuth({
     credentials: serviceAccountKey,
-    scopes: ['https://www.googleapis.com/auth/drive.readonly'],
+    scopes: ['https://www.googleapis.com/auth/drive'],
   })
 }
 
