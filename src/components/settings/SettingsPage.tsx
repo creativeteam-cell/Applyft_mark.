@@ -9,7 +9,7 @@ interface App {
   code: string
   name: string
   description: string
-  painPoints: string
+  painPoints: string[]
   style: string
   colors: string
   restrictions: string
