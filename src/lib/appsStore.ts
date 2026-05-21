@@ -14,7 +14,7 @@ export interface App {
 // ID файла apps.json на Google Drive
 // Создаётся автоматически при первом сохранении
 const APPS_FILE_NAME = 'creative-studio-apps.json'
-const ROOT_FOLDER_ID = process.env.GOOGLE_DRIVE_STATICS_FOLDER_ID!
+const ROOT_FOLDER_ID = process.env.GOOGLE_DRIVE_CONFIG_FOLDER_ID!
 
 async function findAppsFile(): Promise<string | null> {
   const drive = getDriveClient()
