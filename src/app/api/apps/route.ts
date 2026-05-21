@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { getApps, saveApps } from '@/lib/appsStore'
-import { findAppFolder } from '@/lib/googleDrive'
 
 export async function GET() {
   const session = await getServerSession(authOptions)
@@ -23,12 +22,6 @@ export async function POST(req: NextRequest) {
   if (existing >= 0) {
     apps[existing] = { ...apps[existing], ...body }
   } else {
-    let driveExists = false
-    try {
-      const folder = await findAppFolder(body.code)
-      driveExists = !!folder
-    } catch {}
-
     apps.push({
       code: body.code.toUpperCase(),
       name: body.name || body.code,
@@ -37,7 +30,6 @@ export async function POST(req: NextRequest) {
       colors: '',
       restrictions: '',
       active: true,
-      driveExists,
     })
   }
 
