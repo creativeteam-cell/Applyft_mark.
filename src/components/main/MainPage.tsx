@@ -1,29 +1,35 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { GeneratePanel } from './GeneratePanel'
 import { CreativesGrid } from './CreativesGrid'
 import { GenerateModal } from './GenerateModal'
+import { FilterBar } from './FilterBar'
 
-export const APPS = [
-  { code: 'UN', name: 'Universal Locators' },
-  { code: 'KD', name: 'Kidden' },
-  { code: 'LM', name: 'Looma' },
-  { code: 'TR', name: 'Trace' },
-  { code: 'GZ', name: 'GeoZilla' },
-  { code: 'FA', name: 'FamLocate' },
-  { code: 'FL', name: 'Family Locator' },
-  { code: 'FM', name: 'Familo' },
-  { code: 'SF', name: 'SafetyTips' },
-  { code: 'RL', name: 'Refinely' },
-]
+interface App {
+  code: string
+  name: string
+  active: boolean
+}
 
 export function MainPage() {
-  const [selectedApp, setSelectedApp] = useState(APPS[0].code)
+  const [apps, setApps] = useState<App[]>([])
+  const [selectedApp, setSelectedApp] = useState('')
+  const [selectedDesigner, setSelectedDesigner] = useState('')
   const [page, setPage] = useState(1)
   const [showModal, setShowModal] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [reference, setReference] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetch('/api/apps')
+      .then(r => r.json())
+      .then(data => {
+        const active = data.filter((a: App) => a.active)
+        setApps(active)
+        if (active.length > 0) setSelectedApp(active[0].code)
+      })
+  }, [])
 
   function handleGenerate() {
     if (!prompt.trim() && !reference) return
@@ -32,11 +38,17 @@ export function MainPage() {
 
   return (
     <div className="relative">
-      {/* Фиксированная панель генерации */}
-      <GeneratePanel
-        apps={APPS}
+      {/* Фильтр бар */}
+      <FilterBar
+        apps={apps}
         selectedApp={selectedApp}
         onAppChange={(code) => { setSelectedApp(code); setPage(1) }}
+        selectedDesigner={selectedDesigner}
+        onDesignerChange={setSelectedDesigner}
+      />
+
+      {/* Панель генерации */}
+      <GeneratePanel
         prompt={prompt}
         onPromptChange={setPrompt}
         reference={reference}
@@ -45,7 +57,7 @@ export function MainPage() {
       />
 
       {/* Лента креативов */}
-      <div className="pt-4 px-8 pb-8" style={{ marginTop: '200px' }}>
+      <div className="px-8 pb-8" style={{ marginTop: '160px' }}>
         <CreativesGrid
           appCode={selectedApp}
           page={page}
@@ -53,7 +65,6 @@ export function MainPage() {
         />
       </div>
 
-      {/* Модалка генерации */}
       {showModal && (
         <GenerateModal
           appCode={selectedApp}
