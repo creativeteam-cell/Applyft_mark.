@@ -8,19 +8,18 @@ export interface App {
   colors: string
   restrictions: string
   active: boolean
-  driveExists?: boolean
 }
 
-// ID файла apps.json на Google Drive
-// Создаётся автоматически при первом сохранении
 const APPS_FILE_NAME = 'creative-studio-apps.json'
-const ROOT_FOLDER_ID = process.env.GOOGLE_DRIVE_CONFIG_FOLDER_ID!
+const CONFIG_FOLDER_ID = process.env.GOOGLE_DRIVE_CONFIG_FOLDER_ID!
 
 async function findAppsFile(): Promise<string | null> {
   const drive = getDriveClient()
   const res = await drive.files.list({
-    q: `name = '${APPS_FILE_NAME}' and '${ROOT_FOLDER_ID}' in parents and trashed = false`,
+    q: `name = '${APPS_FILE_NAME}' and '${CONFIG_FOLDER_ID}' in parents and trashed = false`,
     fields: 'files(id)',
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
   })
   return res.data.files?.[0]?.id || null
 }
@@ -29,17 +28,14 @@ export async function getApps(): Promise<App[]> {
   try {
     const drive = getDriveClient()
     const fileId = await findAppsFile()
-    
-    if (!fileId) {
-      // Файла нет — возвращаем дефолтный список
-      return getDefaultApps()
-    }
+
+    if (!fileId) return getDefaultApps()
 
     const res = await drive.files.get(
-      { fileId, alt: 'media' },
+      { fileId, alt: 'media', supportsAllDrives: true } as any,
       { responseType: 'text' }
     )
-    
+
     return JSON.parse(res.data as string)
   } catch (e) {
     console.error('Failed to load apps:', e)
@@ -53,27 +49,27 @@ export async function saveApps(apps: App[]): Promise<void> {
   const fileId = await findAppsFile()
 
   if (fileId) {
-    // Обновляем существующий файл
     await drive.files.update({
       fileId,
+      supportsAllDrives: true,
       requestBody: {},
       media: {
         mimeType: 'application/json',
         body: content,
       },
-    })
+    } as any)
   } else {
-    // Создаём новый файл
     await drive.files.create({
+      supportsAllDrives: true,
       requestBody: {
         name: APPS_FILE_NAME,
-        parents: [ROOT_FOLDER_ID],
+        parents: [CONFIG_FOLDER_ID],
       },
       media: {
         mimeType: 'application/json',
         body: content,
       },
-    })
+    } as any)
   }
 }
 
