@@ -9,6 +9,7 @@ export interface App {
   colors: string
   restrictions: string
   active: boolean
+  logoBase64?: string
 }
 
 export interface Marketer {
