@@ -22,15 +22,6 @@ interface AppCardProps {
   onDelete: (code: string) => Promise<void>
 }
 
-const STYLE_OPTIONS = [
-  'Dramatic & emotional',
-  'Minimalist & clean',
-  'Bold & bright',
-  'Technological & modern',
-  'Warm & friendly',
-  'Dark & mysterious',
-]
-
 export function AppCard({ app, expanded, onExpand, onSave, onDelete }: AppCardProps) {
   const [form, setForm] = useState({
     ...app,
@@ -87,7 +78,7 @@ export function AppCard({ app, expanded, onExpand, onSave, onDelete }: AppCardPr
           </div>
         </div>
         <div className="text-xs text-gray-600 font-mono">
-          {Array.isArray(app.painPoints) ? app.painPoints.length : 0} pain points
+          {form.painPoints.length} pain points
         </div>
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none"
           className={`transition-transform text-gray-500 ${expanded ? 'rotate-180' : ''}`}>
@@ -134,9 +125,7 @@ export function AppCard({ app, expanded, onExpand, onSave, onDelete }: AppCardPr
                     <span className="text-xs text-gray-500 font-mono w-4">{i + 1}</span>
                     <span className="flex-1 text-sm">{pain}</span>
                     <button onClick={() => handleRemovePain(i)}
-                      className="text-red-400 text-xs hover:text-red-300 transition-all flex-shrink-0">
-                      ×
-                    </button>
+                      className="text-red-400 text-xs hover:text-red-300 transition-all">×</button>
                   </div>
                 ))}
               </div>
@@ -166,7 +155,6 @@ export function AppCard({ app, expanded, onExpand, onSave, onDelete }: AppCardPr
                 3 · Logo (PNG)
               </label>
               <input ref={logoRef} type="file" accept="image/png,image/svg+xml,image/jpeg" onChange={handleLogo} className="hidden" />
-              
               <div className="flex items-center gap-4">
                 {form.logoBase64 ? (
                   <div className="w-16 h-16 rounded-xl overflow-hidden flex items-center justify-center"
@@ -198,62 +186,6 @@ export function AppCard({ app, expanded, onExpand, onSave, onDelete }: AppCardPr
                   )}
                 </div>
               </div>
-            </div>
-
-            {/* Style */}
-            <div>
-              <label className="block text-xs text-gray-400 mb-2 uppercase tracking-widest font-mono">
-                Visual style & mood
-              </label>
-              <div className="flex flex-wrap gap-2 mb-3">
-                {STYLE_OPTIONS.map(s => (
-                  <button key={s} onClick={() => setForm({ ...form, style: s })}
-                    className="px-3 py-1.5 rounded-lg text-xs transition-all"
-                    style={{
-                      background: form.style === s ? 'var(--accent)' : 'var(--bg)',
-                      border: `1px solid ${form.style === s ? 'var(--accent)' : 'var(--border)'}`,
-                    }}>
-                    {s}
-                  </button>
-                ))}
-              </div>
-              <input
-                value={form.style}
-                onChange={e => setForm({ ...form, style: e.target.value })}
-                placeholder="Or describe the style in your own words..."
-                className="w-full rounded-xl px-4 py-2.5 text-sm outline-none"
-                style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }}
-                onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'}
-                onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'}
-              />
-            </div>
-
-            {/* Colors */}
-            <div>
-              <label className="block text-xs text-gray-400 mb-2 uppercase tracking-widest font-mono">Brand colors</label>
-              <input
-                value={form.colors}
-                onChange={e => setForm({ ...form, colors: e.target.value })}
-                placeholder="e.g. deep blue #1a2f9e, orange #f97316, white"
-                className="w-full rounded-xl px-4 py-2.5 text-sm outline-none"
-                style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }}
-                onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'}
-                onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'}
-              />
-            </div>
-
-            {/* Restrictions */}
-            <div>
-              <label className="block text-xs text-gray-400 mb-2 uppercase tracking-widest font-mono">What NOT to do</label>
-              <input
-                value={form.restrictions}
-                onChange={e => setForm({ ...form, restrictions: e.target.value })}
-                placeholder="e.g. no children, no explicit content, avoid stock photo look"
-                className="w-full rounded-xl px-4 py-2.5 text-sm outline-none"
-                style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }}
-                onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'}
-                onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'}
-              />
             </div>
 
             {/* Buttons */}
