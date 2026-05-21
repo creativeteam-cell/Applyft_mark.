@@ -14,6 +14,7 @@ interface App {
   colors: string
   restrictions: string
   active: boolean
+  logoBase64?: string
 }
 
 interface Marketer {
@@ -21,26 +22,9 @@ interface Marketer {
   name: string
 }
 
-const DEFAULT_MARKETERS: Marketer[] = [
-  { code: 'TMK', name: 'Tetiana Melnyk' },
-  { code: 'KZA', name: 'Kseniia Zadoia' },
-  { code: 'AHB', name: 'Anhelina Halbul' },
-  { code: 'ASR', name: 'Artem Sierov' },
-  { code: 'SMV', name: 'Sofiia Matviikiv' },
-  { code: 'DDT', name: 'Diana Drobotey' },
-  { code: 'VTL', name: 'Vladyslava Tsymbal' },
-  { code: 'YKH', name: 'Yuliia Khomukha' },
-  { code: 'DKR', name: 'Danylo Kyrylov' },
-  { code: 'ASM', name: 'Antonina Samoliuk' },
-  { code: 'NBL', name: 'Nataliia Bielousova' },
-  { code: 'RSK', name: 'Romana Skrabut' },
-  { code: 'KIS', name: 'Kseniia Ilienko' },
-  { code: 'MMM', name: 'Mariia Minaieva' },
-]
-
 export function SettingsPage() {
   const [apps, setApps] = useState<App[]>([])
-  const [marketers, setMarketers] = useState<Marketer[]>(DEFAULT_MARKETERS)
+  const [marketers, setMarketers] = useState<Marketer[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [expandedApp, setExpandedApp] = useState<string | null>(null)
@@ -63,6 +47,7 @@ export function SettingsPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'app', data: app }),
     })
+    setExpandedApp(null) // Auto-collapse после сохранения
     await loadApps()
   }
 
@@ -107,7 +92,6 @@ export function SettingsPage() {
         </button>
       </div>
 
-      {/* Apps */}
       {loading ? (
         <div className="text-gray-500 text-sm mb-8">Loading...</div>
       ) : (
@@ -125,20 +109,14 @@ export function SettingsPage() {
         </div>
       )}
 
-      {/* Marketers */}
       <div className="relative">
-        <MarketersSection
-          marketers={marketers}
-          onChange={handleSaveMarketers}
-        />
+        <MarketersSection marketers={marketers} onChange={handleSaveMarketers} />
         {marketersSaved && (
           <div className="absolute top-4 right-4 text-xs text-green-400 font-mono">✓ Saved!</div>
         )}
       </div>
 
-      {showAdd && (
-        <AddAppModal onAdd={handleAddApp} onClose={() => setShowAdd(false)} />
-      )}
+      {showAdd && <AddAppModal onAdd={handleAddApp} onClose={() => setShowAdd(false)} />}
     </div>
   )
 }
