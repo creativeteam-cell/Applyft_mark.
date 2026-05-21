@@ -1,0 +1,92 @@
+[
+  {
+    "code": "UN",
+    "name": "Universal Locators",
+    "description": "",
+    "style": "",
+    "colors": "",
+    "restrictions": "",
+    "active": true
+  },
+  {
+    "code": "KD",
+    "name": "Kidden",
+    "description": "",
+    "style": "",
+    "colors": "",
+    "restrictions": "",
+    "active": true
+  },
+  {
+    "code": "LM",
+    "name": "Looma",
+    "description": "",
+    "style": "",
+    "colors": "",
+    "restrictions": "",
+    "active": true
+  },
+  {
+    "code": "TR",
+    "name": "Trace",
+    "description": "",
+    "style": "",
+    "colors": "",
+    "restrictions": "",
+    "active": true
+  },
+  {
+    "code": "GZ",
+    "name": "GeoZilla",
+    "description": "",
+    "style": "",
+    "colors": "",
+    "restrictions": "",
+    "active": true
+  },
+  {
+    "code": "FA",
+    "name": "FamLocate",
+    "description": "",
+    "style": "",
+    "colors": "",
+    "restrictions": "",
+    "active": true
+  },
+  {
+    "code": "FL",
+    "name": "Family Locator",
+    "description": "",
+    "style": "",
+    "colors": "",
+    "restrictions": "",
+    "active": true
+  },
+  {
+    "code": "FM",
+    "name": "Familo",
+    "description": "",
+    "style": "",
+    "colors": "",
+    "restrictions": "",
+    "active": true
+  },
+  {
+    "code": "SF",
+    "name": "SafetyTips",
+    "description": "",
+    "style": "",
+    "colors": "",
+    "restrictions": "",
+    "active": true
+  },
+  {
+    "code": "RL",
+    "name": "Refinely",
+    "description": "",
+    "style": "",
+    "colors": "",
+    "restrictions": "",
+    "active": true
+  }
+]
