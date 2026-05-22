@@ -167,22 +167,37 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
               </div>
             )}
             {!error && previewImage && (
-              <div className="flex gap-3 justify-center">
-                <button onClick={handleApprove}
-                  className="px-8 py-3 rounded-xl font-semibold"
-                  style={{ background: 'var(--accent)' }}>
-                  ✓ Approve
-                </button>
-                <button onClick={() => setStage('fixing')}
-                  className="px-8 py-3 rounded-xl font-semibold"
-                  style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-                  ✎ Fix
-                </button>
-                <button onClick={onClose}
-                  className="px-8 py-3 rounded-xl font-semibold text-red-400"
-                  style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-                  ✕ Cancel
-                </button>
+              <div>
+                <div className="flex gap-3 justify-center mb-3">
+                  <button onClick={handleApprove}
+                    className="px-8 py-3 rounded-xl font-semibold"
+                    style={{ background: 'var(--accent)' }}>
+                    ✓ Approve
+                  </button>
+                  <button onClick={() => setStage('fixing')}
+                    className="px-8 py-3 rounded-xl font-semibold"
+                    style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                    ✎ Fix
+                  </button>
+                  <button onClick={onClose}
+                    className="px-8 py-3 rounded-xl font-semibold text-red-400"
+                    style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                    ✕ Cancel
+                  </button>
+                </div>
+                <div className="flex justify-center">
+                  <button
+                    onClick={() => {
+                      const link = document.createElement('a')
+                      link.href = previewImage!
+                      link.download = `${appCode}_preview_4x5.png`
+                      link.click()
+                    }}
+                    className="text-xs text-gray-500 hover:text-gray-300 transition-all flex items-center gap-1.5 px-4 py-2 rounded-lg"
+                    style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                    ⬇ Download preview
+                  </button>
+                </div>
               </div>
             )}
             {error && (

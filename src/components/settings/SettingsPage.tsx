@@ -52,11 +52,8 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [expandedApp, setExpandedApp] = useState<string | null>(null)
-
-  // Секции сворачиваемые
   const [appsOpen, setAppsOpen] = useState(true)
   const [producersOpen, setProducersOpen] = useState(false)
-  const [libraryOpen, setLibraryOpen] = useState(false)
 
   useEffect(() => { loadApps() }, [])
 
@@ -109,7 +106,7 @@ export function SettingsPage() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold">Settings</h1>
-          <p className="text-sm text-gray-500 mt-1">Manage apps, producers and creative library</p>
+          <p className="text-sm text-gray-500 mt-1">Manage apps and producers</p>
         </div>
         <button onClick={() => setShowAdd(true)}
           className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold"
@@ -118,14 +115,9 @@ export function SettingsPage() {
         </button>
       </div>
 
-      {/* Apps section */}
+      {/* Apps */}
       <div className="mb-6">
-        <SectionHeader
-          title="Apps"
-          count={apps.length}
-          expanded={appsOpen}
-          onToggle={() => setAppsOpen(!appsOpen)}
-        />
+        <SectionHeader title="Apps" count={apps.length} expanded={appsOpen} onToggle={() => setAppsOpen(!appsOpen)} />
         {appsOpen && (
           loading ? (
             <div className="text-gray-500 text-sm px-2">Loading...</div>
@@ -146,39 +138,11 @@ export function SettingsPage() {
         )}
       </div>
 
-      {/* Producers section */}
+      {/* Producers */}
       <div className="mb-6">
-        <SectionHeader
-          title="Producers"
-          count={marketers.length}
-          expanded={producersOpen}
-          onToggle={() => setProducersOpen(!producersOpen)}
-        />
+        <SectionHeader title="Producers" count={marketers.length} expanded={producersOpen} onToggle={() => setProducersOpen(!producersOpen)} />
         {producersOpen && (
           <MarketersSection marketers={marketers} onChange={handleSaveMarketers} />
-        )}
-      </div>
-
-      {/* Creative Library section */}
-      <div className="mb-6">
-        <SectionHeader
-          title="Creative Library"
-          expanded={libraryOpen}
-          onToggle={() => setLibraryOpen(!libraryOpen)}
-        />
-        {libraryOpen && (
-          <div className="px-2 py-2">
-            <p className="text-sm text-gray-500 mb-4">
-              Upload ad creatives to extract concepts. Open an app to manage its library.
-            </p>
-            {apps.length === 0 ? (
-              <div className="text-xs text-gray-600">No apps yet</div>
-            ) : (
-              <div className="text-sm text-gray-400">
-                Open any app card above to upload concepts for that app.
-              </div>
-            )}
-          </div>
         )}
       </div>
 
