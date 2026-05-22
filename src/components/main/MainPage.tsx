@@ -43,8 +43,9 @@ export function MainPage() {
   }, [])
 
   function handleGenerate() {
-    if (!prompt.trim() && !reference && selectedPain === 'none') {
-      alert('Please add a description, select a pain point, or upload a reference image.')
+    // Достаточно чтобы был выбран app — боль, промпт и референс опциональны
+    if (!selectedApp) {
+      alert('Please select an app first.')
       return
     }
     setShowModal(true)

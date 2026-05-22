@@ -60,6 +60,7 @@ RULES:
 - Bold readable typography matching the emotional tone
 - Look like a professional social media ad, not a stock photo
 - Write in English regardless of input language
+${hasPain ? '' : `- No pain point provided — focus on aspirational, benefit-driven, or curiosity-driven angle. Do NOT invent pain points.`}
 
 ${hasFix ? `SMALL FIX ONLY: Keep overall concept, style, composition. Apply only: "${fixNote}"` : ''}
 
@@ -100,30 +101,34 @@ Return ONLY the image generation prompt (120-200 words). No explanations.`
   return response.choices[0].message.content || ''
 }
 
-// Анализатор концептов — более actionable описание
+// Анализатор концептов — только визуальный/композиционный подход, без боли
 export async function analyzeConcept(imageBase64: string): Promise<string> {
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [
       {
         role: 'system',
-        content: `You are an advertising creative strategist. Analyze this ad and extract the creative concept as an actionable description for a designer/AI generator.
+        content: `You are an advertising creative strategist. Analyze this ad and extract the ABSTRACT creative concept — the underlying visual and compositional approach that can be reused for ANY product.
 
-Include:
-1. Creative approach (e.g. "social scene", "text as hero", "symbolic metaphor")
-2. Color palette mood (e.g. "warm and earthy", "cold and stark", "bright and acidic")  
-3. Typography style (e.g. "chaotic multi-size with accent color on key words", "clean centered hierarchy", "oversized single word")
-4. Text placement (e.g. "top headline + bottom CTA", "text overlaid on image left side", "split text above and below photo")
-5. Key visual element and emotional hook
+Return exactly these 5 points:
+1. Creative approach: abstract strategy name (e.g. "aspirational contrast", "before/after tension", "text as hero", "symbolic metaphor")
+2. Color palette mood: emotional tone of colors (e.g. "warm and cinematic with golden tones", "cold and clinical", "vibrant high-contrast")
+3. Typography style: font weight, role, and accent usage (e.g. "oversized bold headline dominates with one accent-color word", "clean minimal hierarchy")
+4. Text placement: layout zones in abstract terms (e.g. "top-right headline + bottom-left supporting details", "centered single statement")
+5. Key visual element and emotional hook: describe the COMPOSITIONAL PRINCIPLE, not specific objects (e.g. "split composition contrasting two opposing states", "extreme close-up creating intimacy", "lone figure in vast space suggesting isolation")
 
-Write 3-4 sentences. Be specific and actionable — describe HOW to recreate this approach, not just what it shows.
-Return ONLY the concept description.`,
+CRITICAL RULES:
+- Do NOT name specific objects, people, products, or brands from the image
+- Do NOT mention pain points, problems, or product features
+- Do NOT describe what the ad is selling or who it targets
+- Focus ONLY on HOW it's made visually — approach, composition, color, type
+- The output must be reusable as inspiration for a completely different product`,
       },
       {
         role: 'user',
         content: [
           { type: 'image_url', image_url: { url: imageBase64 } },
-          { type: 'text', text: 'Extract the creative concept.' },
+          { type: 'text', text: 'Extract the abstract creative concept.' },
         ],
       },
     ],

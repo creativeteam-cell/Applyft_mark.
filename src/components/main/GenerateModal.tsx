@@ -41,7 +41,7 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
           userText: prompt,
           referenceBase64: reference,
           fixNote: fix,
-          previousImageBase64: prevImage, // передаём предыдущую картинку для Fix
+          previousImageBase64: prevImage,
         }),
       })
 
@@ -53,7 +53,21 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
         return
       }
 
-      setPreviewImage(data.imageBase64)
+      // Ресайзим превью до точных пикселей 1200x1500 сразу
+      let finalImage = data.imageBase64
+      try {
+        const resizeRes = await fetch('/api/resize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: data.imageBase64, size: '4x5' }),
+        })
+        const resizeData = await resizeRes.json()
+        if (resizeData.imageBase64) finalImage = resizeData.imageBase64
+      } catch {
+        // если ресайз упал — показываем оригинал
+      }
+
+      setPreviewImage(finalImage)
       setCurrentPrompt(data.prompt)
       setStage('preview')
     } catch (e: any) {
@@ -67,14 +81,8 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
     setStage('generating-all')
 
     try {
-      // Сначала ресайзим 4x5 до точных пикселей
-      const resize4x5 = await fetch('/api/resize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: previewImage, size: '4x5' }),
-      })
-      const resize4x5Data = await resize4x5.json()
-      const results: Record<string, string> = { '4x5': resize4x5Data.imageBase64 || previewImage }
+      // 4x5 уже ресайзнут — берём как есть
+      const results: Record<string, string> = { '4x5': previewImage }
 
       // Генерим остальные 3 размера параллельно
       await Promise.all(
@@ -85,7 +93,7 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
             body: JSON.stringify({ customPrompt: currentPrompt, appCode }),
           })
           const genData = await genRes.json()
-          
+
           if (!genData.error && genData.imageBase64) {
             // Ресайзим до точных пикселей
             const resizeRes = await fetch('/api/resize', {
@@ -108,7 +116,6 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
   }
 
   async function handleSubmitFix() {
-    // Передаём текущую картинку как референс для Fix
     await generateFirst(fixNote, previewImage || undefined)
     setFixNote('')
   }
