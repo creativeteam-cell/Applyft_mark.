@@ -13,15 +13,16 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { appCode, selectedPain, userText, referenceBase64, fixNote, previousImageBase64, customPrompt } = body
+    const { appCode, selectedPain, selectedConceptId, userText, referenceBase64, fixNote, previousImageBase64, customPrompt } = body
 
     let finalPrompt = customPrompt
-    let appLogoBase64: string | undefined
 
     if (!finalPrompt) {
+      const config = await getConfig()
       let appInfo
+      let selectedConceptText: string | undefined
+
       if (appCode) {
-        const config = await getConfig()
         const app = config.apps.find(a => a.code === appCode)
         if (app) {
           appInfo = {
@@ -31,7 +32,20 @@ export async function POST(req: NextRequest) {
             painPoints: app.painPoints,
             logoBase64: app.logoBase64,
           }
-          appLogoBase64 = app.logoBase64
+        }
+
+        // Получаем концепт
+        const concepts = config.concepts?.[appCode] || []
+        if (concepts.length > 0) {
+          if (selectedConceptId && selectedConceptId !== 'none') {
+            // Конкретный концепт
+            const found = concepts.find(c => c.id === selectedConceptId)
+            if (found) selectedConceptText = found.concept
+          } else {
+            // Рандомный
+            const random = concepts[Math.floor(Math.random() * concepts.length)]
+            selectedConceptText = random.concept
+          }
         }
       }
 
@@ -39,6 +53,7 @@ export async function POST(req: NextRequest) {
         finalPrompt = await generatePrompt({
           appInfo,
           selectedPain: selectedPain !== 'none' ? selectedPain : undefined,
+          selectedConcept: selectedConceptText,
           userText,
           referenceBase64,
           fixNote,
@@ -55,23 +70,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Генерим через Gemini
-    // Для Fix передаём предыдущую картинку как референс
     const imageBase64 = await generateImage(
       finalPrompt,
       fixNote && previousImageBase64 ? previousImageBase64 : undefined
     )
 
-    return NextResponse.json({
-      prompt: finalPrompt,
-      imageBase64,
-    })
+    return NextResponse.json({ prompt: finalPrompt, imageBase64 })
 
   } catch (error: any) {
     console.error('Generate error:', error)
-    return NextResponse.json(
-      { error: error.message || 'Generation failed' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: error.message || 'Generation failed' }, { status: 500 })
   }
 }

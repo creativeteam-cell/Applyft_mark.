@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react'
 interface GenerateModalProps {
   appCode: string
   selectedPain: string
+  selectedConcept: string
   prompt: string
   reference: string | null
   onClose: () => void
@@ -14,7 +15,7 @@ type Stage = 'generating' | 'preview' | 'fixing' | 'generating-all' | 'done'
 
 const SIZES = ['4x5', '1x1', '9x16', '1.91x1']
 
-export function GenerateModal({ appCode, selectedPain, prompt, reference, onClose }: GenerateModalProps) {
+export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, reference, onClose }: GenerateModalProps) {
   const [stage, setStage] = useState<Stage>('generating')
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [allImages, setAllImages] = useState<Record<string, string>>({})

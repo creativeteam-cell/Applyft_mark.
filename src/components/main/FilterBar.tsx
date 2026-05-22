@@ -1,7 +1,10 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+
 interface App { code: string; name: string; painPoints?: string[] }
 interface Marketer { code: string; name: string }
+interface Concept { id: string; emoji: string; concept: string }
 
 interface FilterBarProps {
   apps: App[]
@@ -12,22 +15,35 @@ interface FilterBarProps {
   selectedMarketer: string
   onMarketerChange: (code: string) => void
   marketers: Marketer[]
+  selectedConcept: string
+  onConceptChange: (id: string) => void
 }
 
 export function FilterBar({
   apps, selectedApp, onAppChange,
   selectedPain, onPainChange,
-  selectedMarketer, onMarketerChange,
-  marketers,
+  selectedMarketer, onMarketerChange, marketers,
+  selectedConcept, onConceptChange,
 }: FilterBarProps) {
+  const [concepts, setConcepts] = useState<Concept[]>([])
 
   const currentApp = apps.find(a => a.code === selectedApp)
   const painPoints = currentApp?.painPoints || []
 
+  // Загружаем концепты при смене апки
+  useEffect(() => {
+    if (!selectedApp) return
+    fetch(`/api/concepts?app=${selectedApp}`)
+      .then(r => r.json())
+      .then(data => setConcepts(Array.isArray(data) ? data : []))
+      .catch(() => setConcepts([]))
+  }, [selectedApp])
+
   function handleAppChange(code: string) {
     localStorage.setItem('cs_selected_app', code)
     onAppChange(code)
-    onPainChange('none') // сброс боли при смене апки
+    onPainChange('none')
+    onConceptChange('none')
   }
 
   function handleMarketerChange(code: string) {
@@ -51,7 +67,7 @@ export function FilterBar({
         </select>
       </div>
 
-      {/* Pain — показываем всегда если есть pain points */}
+      {/* Pain */}
       {painPoints.length > 0 && (
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500 uppercase tracking-widest font-mono">Pain</span>
@@ -61,6 +77,21 @@ export function FilterBar({
             <option value="none">— None —</option>
             {painPoints.map((pain, i) => (
               <option key={i} value={pain}>{pain}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Concept */}
+      {concepts.length > 0 && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500 uppercase tracking-widest font-mono">Concept</span>
+          <select value={selectedConcept || 'none'} onChange={e => onConceptChange(e.target.value)}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium outline-none cursor-pointer"
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+            <option value="none">— Random —</option>
+            {concepts.map(c => (
+              <option key={c.id} value={c.id}>{c.emoji} {c.concept.slice(0, 40)}...</option>
             ))}
           </select>
         </div>

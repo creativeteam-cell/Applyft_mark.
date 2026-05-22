@@ -15,6 +15,7 @@ export function MainPage() {
   const [selectedApp, setSelectedApp] = useState('')
   const [selectedPain, setSelectedPain] = useState('none')
   const [selectedMarketer, setSelectedMarketer] = useState('')
+  const [selectedConcept, setSelectedConcept] = useState('none')
   const [page, setPage] = useState(1)
   const [showModal, setShowModal] = useState(false)
   const [prompt, setPrompt] = useState('')
@@ -42,8 +43,7 @@ export function MainPage() {
   }, [])
 
   function handleGenerate() {
-    // Проверяем есть ли хоть что-то
-    if (!prompt.trim() && !reference && !selectedPain) {
+    if (!prompt.trim() && !reference && selectedPain === 'none') {
       alert('Please add a description, select a pain point, or upload a reference image.')
       return
     }
@@ -55,12 +55,14 @@ export function MainPage() {
       <FilterBar
         apps={apps}
         selectedApp={selectedApp}
-        onAppChange={(code) => { setSelectedApp(code); setPage(1); setSelectedPain('') }}
+        onAppChange={(code) => { setSelectedApp(code); setPage(1); setSelectedPain('none'); setSelectedConcept('none') }}
         selectedPain={selectedPain}
         onPainChange={setSelectedPain}
         selectedMarketer={selectedMarketer}
         onMarketerChange={setSelectedMarketer}
         marketers={marketers}
+        selectedConcept={selectedConcept}
+        onConceptChange={setSelectedConcept}
       />
 
       <GeneratePanel
@@ -83,6 +85,7 @@ export function MainPage() {
         <GenerateModal
           appCode={selectedApp}
           selectedPain={selectedPain}
+          selectedConcept={selectedConcept}
           prompt={prompt}
           reference={reference}
           onClose={() => setShowModal(false)}
