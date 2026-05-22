@@ -5,6 +5,9 @@ import { generatePrompt } from '@/lib/openai'
 import { generateImage } from '@/lib/imagen'
 import { getConfig } from '@/lib/appsStore'
 
+// Говорим Vercel ждать максимум 120 секунд (Pro план позволяет до 300)
+export const maxDuration = 120
+
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions)
   if (!session?.user) {
@@ -38,7 +41,6 @@ export async function POST(req: NextRequest) {
         const concepts = config.concepts?.[appCode] || []
         if (concepts.length > 0) {
           if (selectedConceptId && selectedConceptId !== 'none') {
-            // Конкретный концепт
             const found = concepts.find(c => c.id === selectedConceptId)
             if (found) selectedConceptText = found.concept
           } else {

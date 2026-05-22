@@ -90,7 +90,7 @@ Return ONLY the image generation prompt (120-200 words). No explanations.`
   contentParts.push({ type: 'text', text: userMessage })
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: 'gpt-4o-mini',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: contentParts },
@@ -104,7 +104,7 @@ Return ONLY the image generation prompt (120-200 words). No explanations.`
 // Анализатор концептов — только визуальный/композиционный подход, без боли
 export async function analyzeConcept(imageBase64: string): Promise<string> {
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: 'gpt-4o-mini',
     messages: [
       {
         role: 'system',
