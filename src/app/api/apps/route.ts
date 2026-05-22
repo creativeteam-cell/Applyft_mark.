@@ -32,9 +32,6 @@ export async function POST(req: NextRequest) {
         name: app.name || app.code,
         description: '',
         painPoints: [],
-        style: '',
-        colors: '',
-        restrictions: '',
         active: true,
       })
     }
