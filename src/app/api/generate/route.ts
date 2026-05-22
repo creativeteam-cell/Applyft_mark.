@@ -6,7 +6,7 @@ import { generateImage } from '@/lib/imagen'
 import { getConfig } from '@/lib/appsStore'
 
 // Говорим Vercel ждать максимум 120 секунд (Pro план позволяет до 300)
-export const maxDuration = 120
+export const maxDuration = 210
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions)

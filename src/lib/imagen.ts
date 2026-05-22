@@ -1,6 +1,6 @@
 // Генерация изображений через Gemini 3.1 Flash Image Preview
 
-export async function generateImage(prompt: string, referenceBase64?: string): Promise<string> {
+async function tryGenerate(prompt: string, referenceBase64?: string, timeoutMs = 100000): Promise<string> {
   const apiKey = process.env.GOOGLE_AI_API_KEY!
 
   const parts: any[] = []
@@ -13,9 +13,8 @@ export async function generateImage(prompt: string, referenceBase64?: string): P
 
   parts.push({ text: prompt })
 
-  // Таймаут 90 секунд — если Gemini завис, падаем с понятной ошибкой
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 90000)
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
     const response = await fetch(
@@ -53,7 +52,27 @@ export async function generateImage(prompt: string, referenceBase64?: string): P
   } catch (e: any) {
     clearTimeout(timeout)
     if (e.name === 'AbortError') {
-      throw new Error('Image generation timed out after 90 seconds. Please try again.')
+      throw new Error('TIMEOUT')
+    }
+    throw e
+  }
+}
+
+export async function generateImage(prompt: string, referenceBase64?: string): Promise<string> {
+  // Первая попытка — 100 секунд
+  try {
+    return await tryGenerate(prompt, referenceBase64, 100000)
+  } catch (e: any) {
+    if (e.message !== 'TIMEOUT') throw e
+    console.log('Gemini timeout on attempt 1, retrying...')
+  }
+
+  // Вторая попытка — ещё 100 секунд
+  try {
+    return await tryGenerate(prompt, referenceBase64, 100000)
+  } catch (e: any) {
+    if (e.message === 'TIMEOUT') {
+      throw new Error('Image generation timed out. Gemini is under heavy load, please try again in a moment.')
     }
     throw e
   }
