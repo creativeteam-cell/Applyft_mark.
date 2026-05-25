@@ -1,4 +1,14 @@
-// Генерация изображений через Gemini 3.1 Flash Image Preview
+import OpenAI, { toFile } from 'openai'
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+
+// Ближайшие поддерживаемые размеры gpt-image-1
+const SIZE_MAP: Record<string, '1024x1024' | '1024x1536' | '1536x1024'> = {
+  '4x5':    '1024x1536', // portrait → Sharp обрежет до 1200x1500
+  '1x1':    '1024x1024', // square   → Sharp обрежет до 1200x1200
+  '9x16':   '1024x1536', // portrait → Sharp обрежет до 1080x1920
+  '1.91x1': '1536x1024', // landscape→ Sharp обрежет до 1200x628
+}
 
 const RECOMPOSE_PROMPTS: Record<string, string> = {
   '1x1': `Take this exact image and recompose it for a square 1:1 format. 
@@ -18,88 +28,45 @@ Spread elements horizontally: place the main visual on one side and text hierarc
 All text must be fully visible, readable and within safe zones.`,
 }
 
-async function tryGenerate(
-  prompt: string,
-  referenceBase64?: string,
-  timeoutMs = 100000
-): Promise<string> {
-  const apiKey = process.env.GOOGLE_AI_API_KEY!
-
-  const parts: any[] = []
-
-  if (referenceBase64) {
-    const base64Data = referenceBase64.replace(/^data:image\/\w+;base64,/, '')
-    const mimeType = referenceBase64.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg'
-    parts.push({ inlineData: { mimeType, data: base64Data } })
-  }
-
-  parts.push({ text: prompt })
-
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), timeoutMs)
-
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts }],
-          generationConfig: {
-            responseModalities: ['IMAGE', 'TEXT'],
-          },
-        }),
-        signal: controller.signal,
-      }
-    )
-
-    clearTimeout(timeout)
-
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(`Imagen API error: ${JSON.stringify(error)}`)
-    }
-
-    const data = await response.json()
-    const responseParts = data.candidates?.[0]?.content?.parts || []
-    const imagePart = responseParts.find((p: any) => p.inlineData)
-
-    if (!imagePart) throw new Error('No image in response')
-
-    return `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`
-
-  } catch (e: any) {
-    clearTimeout(timeout)
-    if (e.name === 'AbortError') throw new Error('TIMEOUT')
-    throw e
-  }
-}
-
-async function withRetry(prompt: string, referenceBase64?: string): Promise<string> {
-  try {
-    return await tryGenerate(prompt, referenceBase64, 100000)
-  } catch (e: any) {
-    if (e.message !== 'TIMEOUT') throw e
-    console.log('Gemini timeout on attempt 1, retrying...')
-  }
-
-  try {
-    return await tryGenerate(prompt, referenceBase64, 100000)
-  } catch (e: any) {
-    if (e.message === 'TIMEOUT') {
-      throw new Error('Image generation timed out. Gemini is under heavy load, please try again in a moment.')
-    }
-    throw e
-  }
-}
-
+// Основная генерация (4x5 превью)
 export async function generateImage(prompt: string, referenceBase64?: string): Promise<string> {
-  return withRetry(prompt, referenceBase64)
+  // Если есть референс (Fix) — используем edit endpoint
+  if (referenceBase64) {
+    return editImage(referenceBase64, prompt, '4x5')
+  }
+
+  const response = await openai.images.generate({
+    model: 'gpt-image-1',
+    prompt,
+    size: SIZE_MAP['4x5'],
+  })
+
+  const b64 = response.data[0].b64_json
+  if (!b64) throw new Error('No image in response')
+  return `data:image/png;base64,${b64}`
 }
 
+// Рекомпозиция готовой картинки под другой размер
 export async function recomposeImage(imageBase64: string, targetSize: string): Promise<string> {
   const prompt = RECOMPOSE_PROMPTS[targetSize]
   if (!prompt) throw new Error(`Unknown target size: ${targetSize}`)
-  return withRetry(prompt, imageBase64)
+  return editImage(imageBase64, prompt, targetSize)
+}
+
+// Edit — принимает картинку + промпт
+async function editImage(imageBase64: string, prompt: string, targetSize: string): Promise<string> {
+  const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '')
+  const buffer = Buffer.from(base64Data, 'base64')
+  const file = await toFile(buffer, 'image.png', { type: 'image/png' })
+
+  const response = await openai.images.edit({
+    model: 'gpt-image-1',
+    image: file,
+    prompt,
+    size: SIZE_MAP[targetSize] || '1024x1536',
+  })
+
+  const b64 = response.data[0].b64_json
+  if (!b64) throw new Error('No image in response')
+  return `data:image/png;base64,${b64}`
 }
