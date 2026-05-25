@@ -1,12 +1,5 @@
 // Генерация изображений через Gemini 3.1 Flash Image Preview
 
-const ASPECT_RATIO_MAP: Record<string, string> = {
-  '4x5':    '4:5',
-  '1x1':    '1:1',
-  '9x16':   '9:16',
-  '1.91x1': '16:9',
-}
-
 const RECOMPOSE_PROMPTS: Record<string, string> = {
   '1x1': `Take this exact image and recompose it for a square 1:1 format. 
 Keep all visual elements, typography, colors and overall style completely identical. 
@@ -28,7 +21,6 @@ All text must be fully visible, readable and within safe zones.`,
 async function tryGenerate(
   prompt: string,
   referenceBase64?: string,
-  aspectRatio?: string,
   timeoutMs = 100000
 ): Promise<string> {
   const apiKey = process.env.GOOGLE_AI_API_KEY!
@@ -43,13 +35,6 @@ async function tryGenerate(
 
   parts.push({ text: prompt })
 
-  const generationConfig: any = {
-    responseModalities: ['IMAGE', 'TEXT'],
-  }
-  if (aspectRatio) {
-    generationConfig.aspectRatio = aspectRatio
-  }
-
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
@@ -61,7 +46,9 @@ async function tryGenerate(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts }],
-          generationConfig,
+          generationConfig: {
+            responseModalities: ['IMAGE', 'TEXT'],
+          },
         }),
         signal: controller.signal,
       }
@@ -78,9 +65,7 @@ async function tryGenerate(
     const responseParts = data.candidates?.[0]?.content?.parts || []
     const imagePart = responseParts.find((p: any) => p.inlineData)
 
-    if (!imagePart) {
-      throw new Error('No image in response')
-    }
+    if (!imagePart) throw new Error('No image in response')
 
     return `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`
 
@@ -91,20 +76,16 @@ async function tryGenerate(
   }
 }
 
-async function withRetry(
-  prompt: string,
-  referenceBase64?: string,
-  aspectRatio?: string
-): Promise<string> {
+async function withRetry(prompt: string, referenceBase64?: string): Promise<string> {
   try {
-    return await tryGenerate(prompt, referenceBase64, aspectRatio, 100000)
+    return await tryGenerate(prompt, referenceBase64, 100000)
   } catch (e: any) {
     if (e.message !== 'TIMEOUT') throw e
     console.log('Gemini timeout on attempt 1, retrying...')
   }
 
   try {
-    return await tryGenerate(prompt, referenceBase64, aspectRatio, 100000)
+    return await tryGenerate(prompt, referenceBase64, 100000)
   } catch (e: any) {
     if (e.message === 'TIMEOUT') {
       throw new Error('Image generation timed out. Gemini is under heavy load, please try again in a moment.')
@@ -113,16 +94,12 @@ async function withRetry(
   }
 }
 
-// Основная генерация (4x5 превью)
 export async function generateImage(prompt: string, referenceBase64?: string): Promise<string> {
-  return withRetry(prompt, referenceBase64, '4:5')
+  return withRetry(prompt, referenceBase64)
 }
 
-// Рекомпозиция готовой картинки под другой размер
 export async function recomposeImage(imageBase64: string, targetSize: string): Promise<string> {
   const prompt = RECOMPOSE_PROMPTS[targetSize]
   if (!prompt) throw new Error(`Unknown target size: ${targetSize}`)
-
-  const aspectRatio = ASPECT_RATIO_MAP[targetSize]
-  return withRetry(prompt, imageBase64, aspectRatio)
+  return withRetry(prompt, imageBase64)
 }
