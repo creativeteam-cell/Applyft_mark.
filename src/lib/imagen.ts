@@ -1,6 +1,36 @@
 // Генерация изображений через Gemini 3.1 Flash Image Preview
 
-async function tryGenerate(prompt: string, referenceBase64?: string, timeoutMs = 100000): Promise<string> {
+const ASPECT_RATIO_MAP: Record<string, string> = {
+  '4x5':    '4:5',
+  '1x1':    '1:1',
+  '9x16':   '9:16',
+  '1.91x1': '16:9',
+}
+
+const RECOMPOSE_PROMPTS: Record<string, string> = {
+  '1x1': `Take this exact image and recompose it for a square 1:1 format. 
+Keep all visual elements, typography, colors and overall style completely identical. 
+Center the main subject and most important text. 
+Redistribute and rescale elements so the composition feels natural and balanced for a square format. 
+All text must be fully visible, readable and within safe zones.`,
+
+  '9x16': `Take this exact image and recompose it for a tall vertical 9:16 format. 
+Keep all visual elements, typography, colors and overall style completely identical. 
+Stack elements vertically: headline at top, main visual in the center, supporting details and CTA button near the bottom. 
+All text must be fully visible, readable and within safe zones.`,
+
+  '1.91x1': `Take this exact image and recompose it for a wide horizontal 16:9 landscape format. 
+Keep all visual elements, typography, colors and overall style completely identical. 
+Spread elements horizontally: place the main visual on one side and text hierarchy on the other, or arrange in a balanced wide panoramic layout. 
+All text must be fully visible, readable and within safe zones.`,
+}
+
+async function tryGenerate(
+  prompt: string,
+  referenceBase64?: string,
+  aspectRatio?: string,
+  timeoutMs = 100000
+): Promise<string> {
   const apiKey = process.env.GOOGLE_AI_API_KEY!
 
   const parts: any[] = []
@@ -13,6 +43,13 @@ async function tryGenerate(prompt: string, referenceBase64?: string, timeoutMs =
 
   parts.push({ text: prompt })
 
+  const generationConfig: any = {
+    responseModalities: ['IMAGE', 'TEXT'],
+  }
+  if (aspectRatio) {
+    generationConfig.aspectRatio = aspectRatio
+  }
+
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
@@ -24,9 +61,7 @@ async function tryGenerate(prompt: string, referenceBase64?: string, timeoutMs =
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts }],
-          generationConfig: {
-            responseModalities: ['IMAGE', 'TEXT'],
-          },
+          generationConfig,
         }),
         signal: controller.signal,
       }
@@ -51,29 +86,43 @@ async function tryGenerate(prompt: string, referenceBase64?: string, timeoutMs =
 
   } catch (e: any) {
     clearTimeout(timeout)
-    if (e.name === 'AbortError') {
-      throw new Error('TIMEOUT')
-    }
+    if (e.name === 'AbortError') throw new Error('TIMEOUT')
     throw e
   }
 }
 
-export async function generateImage(prompt: string, referenceBase64?: string): Promise<string> {
-  // Первая попытка — 100 секунд
+async function withRetry(
+  prompt: string,
+  referenceBase64?: string,
+  aspectRatio?: string
+): Promise<string> {
   try {
-    return await tryGenerate(prompt, referenceBase64, 100000)
+    return await tryGenerate(prompt, referenceBase64, aspectRatio, 100000)
   } catch (e: any) {
     if (e.message !== 'TIMEOUT') throw e
     console.log('Gemini timeout on attempt 1, retrying...')
   }
 
-  // Вторая попытка — ещё 100 секунд
   try {
-    return await tryGenerate(prompt, referenceBase64, 100000)
+    return await tryGenerate(prompt, referenceBase64, aspectRatio, 100000)
   } catch (e: any) {
     if (e.message === 'TIMEOUT') {
       throw new Error('Image generation timed out. Gemini is under heavy load, please try again in a moment.')
     }
     throw e
   }
+}
+
+// Основная генерация (4x5 превью)
+export async function generateImage(prompt: string, referenceBase64?: string): Promise<string> {
+  return withRetry(prompt, referenceBase64, '4:5')
+}
+
+// Рекомпозиция готовой картинки под другой размер
+export async function recomposeImage(imageBase64: string, targetSize: string): Promise<string> {
+  const prompt = RECOMPOSE_PROMPTS[targetSize]
+  if (!prompt) throw new Error(`Unknown target size: ${targetSize}`)
+
+  const aspectRatio = ASPECT_RATIO_MAP[targetSize]
+  return withRetry(prompt, imageBase64, aspectRatio)
 }

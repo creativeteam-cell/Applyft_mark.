@@ -53,7 +53,7 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
         return
       }
 
-      // Ресайзим превью до точных пикселей 1200x1500 сразу
+      // Ресайзим превью до точных пикселей 1200x1500
       let finalImage = data.imageBase64
       try {
         const resizeRes = await fetch('/api/resize', {
@@ -81,31 +81,41 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
     setStage('generating-all')
 
     try {
-      // 4x5 уже ресайзнут — берём как есть
+      // 4x5 уже готово
       const results: Record<string, string> = { '4x5': previewImage }
 
-      // Генерим остальные 3 размера параллельно
-      await Promise.all(
-        ['1x1', '9x16', '1.91x1'].map(async (size) => {
-          const genRes = await fetch('/api/generate', {
+      // Рекомпозиция 4x5 → остальные 3 размера последовательно
+      // (параллельно не пускаем — Gemini и так под нагрузкой)
+      for (const size of ['1x1', '9x16', '1.91x1']) {
+        try {
+          const res = await fetch('/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ customPrompt: currentPrompt, appCode }),
+            body: JSON.stringify({
+              recomposeBase64: previewImage, // передаём готовую 4x5
+              targetSize: size,
+            }),
           })
-          const genData = await genRes.json()
+          const data = await res.json()
 
-          if (!genData.error && genData.imageBase64) {
+          if (!data.error && data.imageBase64) {
             // Ресайзим до точных пикселей
-            const resizeRes = await fetch('/api/resize', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ imageBase64: genData.imageBase64, size }),
-            })
-            const resizeData = await resizeRes.json()
-            results[size] = resizeData.imageBase64 || genData.imageBase64
+            try {
+              const resizeRes = await fetch('/api/resize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imageBase64: data.imageBase64, size }),
+              })
+              const resizeData = await resizeRes.json()
+              results[size] = resizeData.imageBase64 || data.imageBase64
+            } catch {
+              results[size] = data.imageBase64
+            }
           }
-        })
-      )
+        } catch (e) {
+          console.error(`Recompose failed for ${size}:`, e)
+        }
+      }
 
       setAllImages(results)
       setStage('done')
@@ -149,10 +159,12 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
           <div className="text-center py-12">
             <div className="text-4xl mb-4 animate-spin inline-block">⟳</div>
             <div className="text-lg font-semibold mb-2">
-              {stage === 'generating-all' ? 'Generating all sizes...' : 'Generating creative...'}
+              {stage === 'generating-all' ? 'Recomposing for all sizes...' : 'Generating creative...'}
             </div>
             <div className="text-sm text-gray-500">
-              {stage === 'generating-all' ? 'Creating 1×1, 9×16, 1.91×1' : 'Building prompt & creating 4×5 preview'}
+              {stage === 'generating-all'
+                ? 'Adapting layout for 1×1, 9×16, 1.91×1 — this takes a moment'
+                : 'Building prompt & creating 4×5 preview'}
             </div>
           </div>
         )}

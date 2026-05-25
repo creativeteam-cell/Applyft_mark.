@@ -2,10 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { generatePrompt } from '@/lib/openai'
-import { generateImage } from '@/lib/imagen'
+import { generateImage, recomposeImage } from '@/lib/imagen'
 import { getConfig } from '@/lib/appsStore'
 
-// Говорим Vercel ждать максимум 120 секунд (Pro план позволяет до 300)
 export const maxDuration = 210
 
 export async function POST(req: NextRequest) {
@@ -16,7 +15,24 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { appCode, selectedPain, selectedConceptId, userText, referenceBase64, fixNote, previousImageBase64, customPrompt } = body
+    const {
+      appCode,
+      selectedPain,
+      selectedConceptId,
+      userText,
+      referenceBase64,
+      fixNote,
+      previousImageBase64,
+      customPrompt,
+      recomposeBase64, // готовая 4x5 картинка для рекомпозиции
+      targetSize,      // '1x1' | '9x16' | '1.91x1'
+    } = body
+
+    // Режим рекомпозиции — берём готовую картинку и меняем формат
+    if (recomposeBase64 && targetSize) {
+      const imageBase64 = await recomposeImage(recomposeBase64, targetSize)
+      return NextResponse.json({ imageBase64 })
+    }
 
     let finalPrompt = customPrompt
 
@@ -37,14 +53,12 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // Получаем концепт
         const concepts = config.concepts?.[appCode] || []
         if (concepts.length > 0) {
           if (selectedConceptId && selectedConceptId !== 'none') {
             const found = concepts.find(c => c.id === selectedConceptId)
             if (found) selectedConceptText = found.concept
           } else {
-            // Рандомный
             const random = concepts[Math.floor(Math.random() * concepts.length)]
             selectedConceptText = random.concept
           }
