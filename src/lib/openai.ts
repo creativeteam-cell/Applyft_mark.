@@ -106,6 +106,9 @@ OUTPUT FORMAT RULES:
 - Professional social media ad quality
 ${hasConcept ? `- STYLE INSPIRATION: "${selectedConcept}" — use this as creative direction` : ''}
 
+${hasReference ? `CRITICAL — END YOUR PROMPT WITH THIS EXACT SENTENCE:
+"Use the attached reference image as the primary visual style guide — preserve its artistic style, human emotional elements, color treatment, lighting mood, and overall composition feel. Adapt these into the new concept without copying the content."` : ''}
+
 Return ONLY the Gemini image generation prompt (150-200 words). No explanations, no preamble.`
 
   const contentParts: any[] = []
