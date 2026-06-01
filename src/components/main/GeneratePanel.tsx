@@ -7,17 +7,21 @@ interface GeneratePanelProps {
   onPromptChange: (v: string) => void
   reference: string | null
   onReferenceChange: (v: string | null) => void
+  competitor: string | null
+  onCompetitorChange: (v: string | null) => void
   onGenerate: () => void
 }
 
 export function GeneratePanel({
   prompt, onPromptChange,
   reference, onReferenceChange,
+  competitor, onCompetitorChange,
   onGenerate,
 }: GeneratePanelProps) {
-  const fileRef = useRef<HTMLInputElement>(null)
+  const refFileRef = useRef<HTMLInputElement>(null)
+  const compFileRef = useRef<HTMLInputElement>(null)
 
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleRefFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     const reader = new FileReader()
@@ -25,27 +29,35 @@ export function GeneratePanel({
     reader.readAsDataURL(file)
   }
 
+  function handleCompFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => onCompetitorChange(reader.result as string)
+    reader.readAsDataURL(file)
+  }
+
   return (
     <div className="fixed left-0 right-0 z-39 border-b flex items-center gap-3 px-8 py-2.5"
       style={{ top: '104px', background: 'var(--bg)', borderColor: 'var(--border)' }}>
 
-      <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
+      <input ref={refFileRef} type="file" accept="image/*" onChange={handleRefFile} className="hidden" />
+      <input ref={compFileRef} type="file" accept="image/*" onChange={handleCompFile} className="hidden" />
 
+      {/* Reference image */}
       {reference ? (
-        <div className="relative flex-shrink-0">
+        <div className="relative flex-shrink-0" title="Style reference">
           <img src={reference} alt="ref" className="w-9 h-9 rounded-lg object-cover" />
-          <button
-            onClick={() => onReferenceChange(null)}
-            className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-xs flex items-center justify-center"
-          >×</button>
+          <button onClick={() => onReferenceChange(null)}
+            className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-xs flex items-center justify-center">
+            ×
+          </button>
         </div>
       ) : (
-        <button
-          onClick={() => fileRef.current?.click()}
+        <button onClick={() => refFileRef.current?.click()}
           className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center transition-all"
           style={{ background: 'var(--surface)', border: '1px dashed var(--border)' }}
-          title="Upload reference"
-        >
+          title="Upload style reference">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-500">
             <rect x="3" y="3" width="18" height="18" rx="2"/>
             <circle cx="8.5" cy="8.5" r="1.5"/>
@@ -54,26 +66,42 @@ export function GeneratePanel({
         </button>
       )}
 
+      {/* Competitor image */}
+      {competitor ? (
+        <div className="relative flex-shrink-0" title="Competitor ad">
+          <img src={competitor} alt="competitor" className="w-9 h-9 rounded-lg object-cover ring-2"
+            style={{ ringColor: 'var(--accent)', outline: '2px solid var(--accent)' }} />
+          <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-yellow-500 text-black text-xs flex items-center justify-center font-bold">
+            C
+          </div>
+          <button onClick={() => onCompetitorChange(null)}
+            className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-xs flex items-center justify-center">
+            ×
+          </button>
+        </div>
+      ) : (
+        <button onClick={() => compFileRef.current?.click()}
+          className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center transition-all"
+          style={{ background: 'var(--surface)', border: '1px dashed var(--border)' }}
+          title="Upload competitor ad">
+          <span className="text-xs font-bold text-gray-500">C</span>
+        </button>
+      )}
+
       <input
         value={prompt}
         onChange={e => onPromptChange(e.target.value)}
-        placeholder="Describe what to generate... or just upload a reference"
+        placeholder="Describe what to generate... or upload a reference / competitor ad"
         className="flex-1 px-4 py-2 rounded-xl text-sm outline-none transition-all"
-        style={{
-          background: 'var(--surface)',
-          border: '1px solid var(--border)',
-          color: 'var(--text)',
-        }}
+        style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
         onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'}
         onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'}
         onKeyDown={e => e.key === 'Enter' && onGenerate()}
       />
 
-      <button
-        onClick={onGenerate}
+      <button onClick={onGenerate}
         className="flex-shrink-0 flex items-center gap-2 px-6 py-2 rounded-xl font-semibold text-sm transition-all"
-        style={{ background: 'var(--accent)' }}
-      >
+        style={{ background: 'var(--accent)' }}>
         <span>✦</span>
         Generate
       </button>

@@ -13,9 +13,11 @@ interface AppInfo {
 interface GeneratePromptOptions {
   appInfo?: AppInfo
   selectedPain?: string
+  selectedHook?: string
   selectedConcept?: string
   userText?: string
   referenceBase64?: string
+  competitorBase64?: string
   fixNote?: string
   previousImageBase64?: string
 }
@@ -31,16 +33,18 @@ const CREATIVE_APPROACHES = `CREATIVE APPROACHES — pick ONE that best fits:
 - Minimalist impact: single powerful image + one killer sentence`
 
 export async function generatePrompt(options: GeneratePromptOptions): Promise<string> {
-  const { appInfo, selectedPain, selectedConcept, userText, referenceBase64, fixNote, previousImageBase64 } = options
+  const { appInfo, selectedPain, selectedHook, selectedConcept, userText, referenceBase64, competitorBase64, fixNote, previousImageBase64 } = options
 
   const hasApp = appInfo?.description || appInfo?.name
   const hasPain = selectedPain && selectedPain !== 'none'
+  const hasHook = selectedHook && selectedHook !== 'none'
   const hasUserText = userText?.trim()
   const hasReference = referenceBase64
+  const hasCompetitor = competitorBase64
   const hasFix = fixNote?.trim()
   const hasConcept = selectedConcept && selectedConcept !== 'none'
 
-  if (!hasApp && !hasPain && !hasUserText && !hasReference && !hasFix) {
+  if (!hasApp && !hasPain && !hasHook && !hasUserText && !hasReference && !hasCompetitor && !hasFix) {
     throw new Error('NOT_ENOUGH_DATA')
   }
 
@@ -60,16 +64,20 @@ RULES:
 - Bold readable typography matching the emotional tone
 - Look like a professional social media ad, not a stock photo
 - Write in English regardless of input language
-${hasPain ? '' : `- No pain point provided — focus on aspirational, benefit-driven, or curiosity-driven angle. Do NOT invent pain points.`}
-
+${hasHook ? `- HOOK TEXT RULE: The exact text "${selectedHook}" MUST appear verbatim as the main headline in the image. Do not paraphrase or modify it.` : ''}
+${!hasPain && !hasUserText && !hasReference && !hasCompetitor ? `- No pain point provided — focus on aspirational, benefit-driven, or curiosity-driven angle. Do NOT invent pain points.` : ''}
+${hasCompetitor ? `- COMPETITOR MODE: The reference image is a competitor ad. Create an ORIGINAL ad for the app that competes in the same space. Do NOT copy the competitor — create something different but equally compelling.` : ''}
 ${hasFix ? `SMALL FIX ONLY: Keep overall concept, style, composition. Apply only: "${fixNote}"` : ''}
 
 Return ONLY the image generation prompt (120-200 words). No explanations.`
 
   const contentParts: any[] = []
 
-  if (referenceBase64 && !hasFix) {
+  if (referenceBase64 && !hasFix && !hasCompetitor) {
     contentParts.push({ type: 'image_url', image_url: { url: referenceBase64 } })
+  }
+  if (competitorBase64 && !hasFix) {
+    contentParts.push({ type: 'image_url', image_url: { url: competitorBase64 } })
   }
   if (previousImageBase64 && hasFix) {
     contentParts.push({ type: 'image_url', image_url: { url: previousImageBase64 } })
@@ -80,11 +88,12 @@ Return ONLY the image generation prompt (120-200 words). No explanations.`
   if (appInfo?.name) userMessage += `APP: ${appInfo.name} (${appInfo.code})\n`
   if (appInfo?.description) userMessage += `DESCRIPTION: ${appInfo.description}\n\n`
   if (hasPain) userMessage += `PAIN POINT: "${selectedPain}"\n\n`
+  if (hasHook) userMessage += `HOOK TEXT (must appear verbatim in image): "${selectedHook}"\n\n`
   if (hasConcept) userMessage += `CONCEPT INSPIRATION (extract the idea, don't copy): "${selectedConcept}"\n\n`
   if (hasUserText) userMessage += `USER INSTRUCTIONS: ${userText}\n\n`
-  if (referenceBase64 && !hasFix) userMessage += `REFERENCE: Extract the creative approach. Create something original in that spirit.\n\n`
+  if (referenceBase64 && !hasFix && !hasCompetitor) userMessage += `REFERENCE: Extract the creative approach. Create something original in that spirit.\n\n`
+  if (hasCompetitor) userMessage += `COMPETITOR AD: Analyze the creative approach. Create an original competing ad for the app above.\n\n`
   if (hasFix && previousImageBase64) userMessage += `FIX: Apply ONLY this change: "${fixNote}"\n\n`
-  if (!hasPain && !hasUserText && !hasReference && !hasConcept) userMessage += `Create a compelling general ad poster for this app.\n\n`
 
   userMessage += `Choose the most impactful creative approach and write the prompt.`
   contentParts.push({ type: 'text', text: userMessage })
@@ -101,10 +110,10 @@ Return ONLY the image generation prompt (120-200 words). No explanations.`
   return response.choices[0].message.content || ''
 }
 
-// Анализатор концептов — только визуальный/композиционный подход, без боли
+// Анализатор концептов — только абстрактный визуальный подход, без боли
 export async function analyzeConcept(imageBase64: string): Promise<string> {
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: 'gpt-4o',
     messages: [
       {
         role: 'system',

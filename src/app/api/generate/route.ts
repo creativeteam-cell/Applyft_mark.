@@ -18,17 +18,19 @@ export async function POST(req: NextRequest) {
     const {
       appCode,
       selectedPain,
+      selectedHook,
       selectedConceptId,
       userText,
       referenceBase64,
+      competitorBase64,
       fixNote,
       previousImageBase64,
       customPrompt,
-      recomposeBase64, // готовая 4x5 картинка для рекомпозиции
-      targetSize,      // '1x1' | '9x16' | '1.91x1'
+      recomposeBase64,
+      targetSize,
     } = body
 
-    // Режим рекомпозиции — берём готовую картинку и меняем формат
+    // Режим рекомпозиции
     if (recomposeBase64 && targetSize) {
       const imageBase64 = await recomposeImage(recomposeBase64, targetSize)
       return NextResponse.json({ imageBase64 })
@@ -69,9 +71,11 @@ export async function POST(req: NextRequest) {
         finalPrompt = await generatePrompt({
           appInfo,
           selectedPain: selectedPain !== 'none' ? selectedPain : undefined,
+          selectedHook: selectedHook && selectedHook !== 'none' ? selectedHook : undefined,
           selectedConcept: selectedConceptText,
           userText,
           referenceBase64,
+          competitorBase64,
           fixNote,
           previousImageBase64,
         })

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 
-interface App { code: string; name: string; painPoints?: string[] }
+interface App { code: string; name: string; painPoints?: string[]; hooks?: string[] }
 interface Marketer { code: string; name: string }
 interface Concept { id: string; emoji: string; concept: string }
 
@@ -12,6 +12,8 @@ interface FilterBarProps {
   onAppChange: (code: string) => void
   selectedPain: string
   onPainChange: (pain: string) => void
+  selectedHook: string
+  onHookChange: (hook: string) => void
   selectedMarketer: string
   onMarketerChange: (code: string) => void
   marketers: Marketer[]
@@ -22,6 +24,7 @@ interface FilterBarProps {
 export function FilterBar({
   apps, selectedApp, onAppChange,
   selectedPain, onPainChange,
+  selectedHook, onHookChange,
   selectedMarketer, onMarketerChange, marketers,
   selectedConcept, onConceptChange,
 }: FilterBarProps) {
@@ -29,8 +32,8 @@ export function FilterBar({
 
   const currentApp = apps.find(a => a.code === selectedApp)
   const painPoints = currentApp?.painPoints || []
+  const hooks = currentApp?.hooks || []
 
-  // Загружаем концепты при смене апки
   useEffect(() => {
     if (!selectedApp) return
     fetch(`/api/concepts?app=${selectedApp}`)
@@ -43,6 +46,7 @@ export function FilterBar({
     localStorage.setItem('cs_selected_app', code)
     onAppChange(code)
     onPainChange('none')
+    onHookChange('none')
     onConceptChange('none')
   }
 
@@ -77,6 +81,21 @@ export function FilterBar({
             <option value="none">— None —</option>
             {painPoints.map((pain, i) => (
               <option key={i} value={pain}>{pain}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Hook */}
+      {hooks.length > 0 && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500 uppercase tracking-widest font-mono">Hook</span>
+          <select value={selectedHook || 'none'} onChange={e => onHookChange(e.target.value)}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium outline-none cursor-pointer max-w-xs"
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+            <option value="none">— None —</option>
+            {hooks.map((hook, i) => (
+              <option key={i} value={hook}>{hook}</option>
             ))}
           </select>
         </div>

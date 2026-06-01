@@ -6,7 +6,7 @@ import { CreativesGrid } from './CreativesGrid'
 import { GenerateModal } from './GenerateModal'
 import { FilterBar } from './FilterBar'
 
-interface App { code: string; name: string; active: boolean; painPoints?: string[] }
+interface App { code: string; name: string; active: boolean; painPoints?: string[]; hooks?: string[] }
 interface Marketer { code: string; name: string }
 
 export function MainPage() {
@@ -14,12 +14,14 @@ export function MainPage() {
   const [marketers, setMarketers] = useState<Marketer[]>([])
   const [selectedApp, setSelectedApp] = useState('')
   const [selectedPain, setSelectedPain] = useState('none')
+  const [selectedHook, setSelectedHook] = useState('none')
   const [selectedMarketer, setSelectedMarketer] = useState('')
   const [selectedConcept, setSelectedConcept] = useState('none')
   const [page, setPage] = useState(1)
   const [showModal, setShowModal] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [reference, setReference] = useState<string | null>(null)
+  const [competitor, setCompetitor] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/apps')
@@ -43,7 +45,6 @@ export function MainPage() {
   }, [])
 
   function handleGenerate() {
-    // Достаточно чтобы был выбран app — боль, промпт и референс опциональны
     if (!selectedApp) {
       alert('Please select an app first.')
       return
@@ -56,9 +57,17 @@ export function MainPage() {
       <FilterBar
         apps={apps}
         selectedApp={selectedApp}
-        onAppChange={(code) => { setSelectedApp(code); setPage(1); setSelectedPain('none'); setSelectedConcept('none') }}
+        onAppChange={(code) => {
+          setSelectedApp(code)
+          setPage(1)
+          setSelectedPain('none')
+          setSelectedHook('none')
+          setSelectedConcept('none')
+        }}
         selectedPain={selectedPain}
         onPainChange={setSelectedPain}
+        selectedHook={selectedHook}
+        onHookChange={setSelectedHook}
         selectedMarketer={selectedMarketer}
         onMarketerChange={setSelectedMarketer}
         marketers={marketers}
@@ -71,6 +80,8 @@ export function MainPage() {
         onPromptChange={setPrompt}
         reference={reference}
         onReferenceChange={setReference}
+        competitor={competitor}
+        onCompetitorChange={setCompetitor}
         onGenerate={handleGenerate}
       />
 
@@ -86,9 +97,11 @@ export function MainPage() {
         <GenerateModal
           appCode={selectedApp}
           selectedPain={selectedPain}
+          selectedHook={selectedHook}
           selectedConcept={selectedConcept}
           prompt={prompt}
           reference={reference}
+          competitor={competitor}
           onClose={() => setShowModal(false)}
         />
       )}
