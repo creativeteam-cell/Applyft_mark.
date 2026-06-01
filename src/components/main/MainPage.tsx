@@ -21,7 +21,6 @@ export function MainPage() {
   const [showModal, setShowModal] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [reference, setReference] = useState<string | null>(null)
-  const [competitor, setCompetitor] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/apps')
@@ -80,8 +79,6 @@ export function MainPage() {
         onPromptChange={setPrompt}
         reference={reference}
         onReferenceChange={setReference}
-        competitor={competitor}
-        onCompetitorChange={setCompetitor}
         onGenerate={handleGenerate}
       />
 
@@ -101,7 +98,7 @@ export function MainPage() {
           selectedConcept={selectedConcept}
           prompt={prompt}
           reference={reference}
-          competitor={competitor}
+          competitor={null}
           onClose={() => setShowModal(false)}
         />
       )}
