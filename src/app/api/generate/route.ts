@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
           selectedConcept: selectedConceptText,
           userText,
           referenceBase64,
-          competitorBase64,
+
           fixNote,
           previousImageBase64,
         })
