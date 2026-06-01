@@ -1,6 +1,5 @@
 import { google } from 'googleapis'
 
-// Список приложений в нужном порядке
 export const APPS = [
   { code: 'UN', name: 'Universal Locators' },
   { code: 'KD', name: 'Kidden' },
@@ -14,12 +13,14 @@ export const APPS = [
   { code: 'RL', name: 'Refinely' },
 ]
 
-// Размеры в нужном порядке
 export const SIZES = ['1x1', '4x5', '1.91x1', '9x16']
+
+// Кэш: appCode → { data, expiresAt }
+const cache = new Map<string, { data: Creative[]; expiresAt: number }>()
+const CACHE_TTL = 10 * 60 * 1000 // 10 минут
 
 function getAuthClient() {
   const serviceAccountKey = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY!)
-  
   return new google.auth.GoogleAuth({
     credentials: serviceAccountKey,
     scopes: ['https://www.googleapis.com/auth/drive'],
@@ -27,12 +28,10 @@ function getAuthClient() {
 }
 
 export function getDriveClient() {
-  const auth = getAuthClient()
-  return google.drive({ version: 'v3', auth })
+  return google.drive({ version: 'v3', auth: getAuthClient() })
 }
 
-// Получить список папок внутри папки
-export async function listFolders(folderId: string) {
+async function listFolders(folderId: string) {
   const drive = getDriveClient()
   const res = await drive.files.list({
     q: `'${folderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
@@ -42,8 +41,7 @@ export async function listFolders(folderId: string) {
   return res.data.files || []
 }
 
-// Получить список файлов внутри папки
-export async function listFiles(folderId: string) {
+async function listFiles(folderId: string) {
   const drive = getDriveClient()
   const res = await drive.files.list({
     q: `'${folderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
@@ -52,82 +50,95 @@ export async function listFiles(folderId: string) {
   return res.data.files || []
 }
 
-// Найти папку приложения по коду (UN, KD, etc.)
-export async function findAppFolder(code: string) {
+async function findAppFolder(code: string) {
   const drive = getDriveClient()
   const rootFolderId = process.env.GOOGLE_DRIVE_STATICS_FOLDER_ID!
-  
   const res = await drive.files.list({
     q: `'${rootFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and name contains '(${code})' and trashed = false`,
     fields: 'files(id, name)',
   })
-  
   return res.data.files?.[0] || null
 }
 
 export interface Creative {
-  id: string          // ST_S_051_b
-  appCode: string     // ST
-  variantFolder: string // ST_S_051_b
+  id: string
+  appCode: string
+  variantFolder: string
   images: {
-    size: string      // 1x1, 4x5, etc.
+    size: string
     fileId: string
     fileName: string
     url: string
   }[]
 }
 
-// Получить креативы для одного приложения
 export async function getCreativesForApp(appCode: string, limit = 20): Promise<Creative[]> {
+  // Проверяем кэш
+  const cached = cache.get(appCode)
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data
+  }
+
   const appFolder = await findAppFolder(appCode)
   if (!appFolder?.id) return []
 
-  // Папки с номерами (ST_S_052, ST_S_051, ...)
   const numberFolders = await listFolders(appFolder.id)
-  
-  const creatives: Creative[] = []
 
-  for (const numFolder of numberFolders.slice(0, limit)) {
-    if (!numFolder.id) continue
-    
-    // Папки с вариантами (ST_S_051_b, ST_S_051_a, ST_S_051)
-    const variantFolders = await listFolders(numFolder.id)
-    
-    for (const variantFolder of variantFolders) {
-      if (!variantFolder.id) continue
-      
-      // Папки с языками (EN, UA, SP, ...)
-      const langFolders = await listFolders(variantFolder.id)
-      
-      // Берём EN или первый попавшийся
-      const langFolder = langFolders.find(f => f.name === 'EN') || langFolders[0]
-      if (!langFolder?.id) continue
-      
-      // Файлы с картинками
-      const files = await listFiles(langFolder.id)
-      
-      // Сортируем по размерам
-      const images = SIZES.map(size => {
-        const file = files.find(f => f.name?.includes(`_${size}_`))
-        if (!file?.id) return null
-        return {
-          size,
-          fileId: file.id,
-          fileName: file.name || '',
-          url: `/api/image?id=${file.id}`,
-        }
-      }).filter(Boolean) as Creative['images']
+  // Параллельно обрабатываем все числовые папки
+  const creativesNested = await Promise.all(
+    numberFolders.slice(0, limit).map(async (numFolder) => {
+      if (!numFolder.id) return []
 
-      if (images.length > 0) {
-        creatives.push({
-          id: `${variantFolder.name}`,
-          appCode,
-          variantFolder: variantFolder.name || '',
-          images,
+      const variantFolders = await listFolders(numFolder.id)
+
+      // Параллельно обрабатываем все вариантные папки
+      const variants = await Promise.all(
+        variantFolders.map(async (variantFolder) => {
+          if (!variantFolder.id) return null
+
+          // Параллельно: lang folders + (потом) files
+          const langFolders = await listFolders(variantFolder.id)
+          const langFolder = langFolders.find(f => f.name === 'EN') || langFolders[0]
+          if (!langFolder?.id) return null
+
+          const files = await listFiles(langFolder.id)
+
+          const images = SIZES.map(size => {
+            const file = files.find(f => f.name?.includes(`_${size}_`))
+            if (!file?.id) return null
+            return {
+              size,
+              fileId: file.id,
+              fileName: file.name || '',
+              url: `/api/image?id=${file.id}`,
+            }
+          }).filter(Boolean) as Creative['images']
+
+          if (images.length === 0) return null
+
+          return {
+            id: variantFolder.name || '',
+            appCode,
+            variantFolder: variantFolder.name || '',
+            images,
+          } as Creative
         })
-      }
-    }
-  }
+      )
+
+      return variants.filter(Boolean) as Creative[]
+    })
+  )
+
+  const creatives = creativesNested.flat()
+
+  // Сохраняем в кэш
+  cache.set(appCode, { data: creatives, expiresAt: Date.now() + CACHE_TTL })
 
   return creatives
+}
+
+// Принудительно сбросить кэш для приложения (если нужно)
+export function invalidateCache(appCode?: string) {
+  if (appCode) cache.delete(appCode)
+  else cache.clear()
 }
