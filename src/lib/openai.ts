@@ -17,94 +17,148 @@ interface GeneratePromptOptions {
   selectedConcept?: string
   userText?: string
   referenceBase64?: string
-  competitorBase64?: string
   fixNote?: string
   previousImageBase64?: string
 }
 
-const CREATIVE_APPROACHES = `CREATIVE APPROACHES — pick ONE that best fits:
-- Shock & provoke: unexpected visual metaphor that stops the scroll
-- Text as hero: oversized bold typography IS the main visual, minimal imagery
-- Body language: extreme close-up of body part representing the pain
-- Before/after tension: split or contrast composition showing transformation
-- Social scene: relatable everyday moment of vulnerability or triumph
-- Symbolic metaphor: objects representing pain (chains, scales, clocks, mirrors)
-- Humor & irony: playful twist on a serious problem
-- Minimalist impact: single powerful image + one killer sentence`
-
 export async function generatePrompt(options: GeneratePromptOptions): Promise<string> {
-  const { appInfo, selectedPain, selectedHook, selectedConcept, userText, referenceBase64, competitorBase64, fixNote, previousImageBase64 } = options
+  const {
+    appInfo,
+    selectedPain,
+    selectedHook,
+    selectedConcept,
+    userText,
+    referenceBase64,
+    fixNote,
+    previousImageBase64,
+  } = options
 
-  const hasApp = appInfo?.description || appInfo?.name
   const hasPain = selectedPain && selectedPain !== 'none'
   const hasHook = selectedHook && selectedHook !== 'none'
   const hasUserText = userText?.trim()
-  const hasReference = referenceBase64
-  const hasCompetitor = competitorBase64
-  const hasFix = fixNote?.trim()
+  const hasReference = !!referenceBase64
+  const hasFix = !!fixNote?.trim()
   const hasConcept = selectedConcept && selectedConcept !== 'none'
 
-  if (!hasApp && !hasPain && !hasHook && !hasUserText && !hasReference && !hasCompetitor && !hasFix) {
-    throw new Error('NOT_ENOUGH_DATA')
+  // FIX режим — отдельный простой промпт
+  if (hasFix && previousImageBase64) {
+    const fixPrompt = `You are an advertising creative director.
+The user wants a SMALL FIX to an existing ad image.
+Keep everything identical — composition, style, colors, text, layout.
+Apply ONLY this one change: "${fixNote}"
+Return ONLY the image generation prompt. No explanations.`
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: fixPrompt },
+        {
+          role: 'user', content: [
+            { type: 'image_url', image_url: { url: previousImageBase64 } },
+            { type: 'text', text: `Apply this fix: "${fixNote}"` },
+          ],
+        },
+      ],
+      max_tokens: 400,
+    })
+    return response.choices[0].message.content || ''
   }
 
-  const systemPrompt = `You are an expert advertising creative director for social media.
+  // Основной режим генерации
+  const systemPrompt = `You are an expert advertising creative director for mobile apps.
 
-Write a Gemini image generation prompt for a scroll-stopping ad banner.
+Your job: write a Gemini image generation prompt for a scroll-stopping social media ad banner.
 
-${CREATIVE_APPROACHES}
+STRICT PRIORITY ORDER — follow exactly:
 
-RULES:
+PRIORITY 1 — PRODUCT (always included):
+Use the app name and description as the foundation. The ad must clearly serve this product.
+
+PRIORITY 2 — REFERENCE IMAGE + USER PROMPT (work as a pair):
+${hasReference && hasUserText
+  ? `Both a reference image AND user instructions are provided. Analyze the reference for its visual style, composition, color mood, and layout approach. Then apply the user's instructions ON TOP of that style. The user prompt refines the reference — they work together.`
+  : hasReference
+  ? `A reference image is provided. Analyze it for visual style, composition, color palette, typography approach, and emotional feel. Adapt this creative approach for the product — same energy and style but original content.`
+  : hasUserText
+  ? `Follow the user's creative instructions as the main visual direction.`
+  : `Choose the most compelling creative approach for this product.`}
+
+PRIORITY 3 — PAIN POINT (sets emotional tone):
+${hasPain ? `The ad must address this pain: "${selectedPain}". This drives the emotional message and visual mood.` : `No pain point selected — use an aspirational or benefit-driven angle.`}
+
+PRIORITY 4 — HOOK TEXT (ABSOLUTE RULE — non-negotiable):
+${hasHook
+  ? `THE HOOK TEXT IS: "${selectedHook}"
+THIS TEXT MUST APPEAR IN THE IMAGE EXACTLY AS WRITTEN.
+- Word for word. Zero changes. No synonyms. No paraphrasing.
+- Must be the dominant headline text rendered visibly on the image.
+- Write it in the Gemini prompt as: Display the text "${selectedHook}" as the main bold headline.`
+  : `No hook specified — create a compelling headline that fits the concept.`}
+
+OUTPUT FORMAT RULES:
 - Vertical 4:5 format
-- Keep all text and elements away from edges (safe zones)
-- Include text IN the image: bold headline, optional subheadline, CTA button
-- Do NOT include logos, brand marks, or watermarks
-- Do NOT mention pixel dimensions or technical specs in the prompt
-- Do NOT add annotation labels, arrows, or explanatory text around the image
-- Bold readable typography matching the emotional tone
-- Look like a professional social media ad, not a stock photo
-- Write in English regardless of input language
-${hasHook ? `- HOOK TEXT RULE: The exact text "${selectedHook}" MUST appear verbatim as the main headline in the image. Do not paraphrase or modify it.` : ''}
-${!hasPain && !hasUserText && !hasReference && !hasCompetitor ? `- No pain point provided — focus on aspirational, benefit-driven, or curiosity-driven angle. Do NOT invent pain points.` : ''}
-${hasCompetitor ? `- COMPETITOR MODE: The reference image is a competitor ad. Create an ORIGINAL ad for the app that competes in the same space. Do NOT copy the competitor — create something different but equally compelling.` : ''}
-${hasFix ? `SMALL FIX ONLY: Keep overall concept, style, composition. Apply only: "${fixNote}"` : ''}
+- Safe zones: keep all elements away from edges
+- Include text ON the image: headline${hasHook ? ` (MUST be exactly: "${selectedHook}")` : ''}, optional subheadline, CTA button
+- NO logos, brand marks, watermarks
+- NEVER repeat the same text or app name more than once in the image
+- NO pixel dimensions or technical specs
+- Bold readable typography
+- Professional social media ad quality
+${hasConcept ? `- STYLE INSPIRATION: "${selectedConcept}" — use this as creative direction` : ''}
 
-Return ONLY the image generation prompt (120-200 words). No explanations.`
+Return ONLY the Gemini image generation prompt (150-200 words). No explanations, no preamble.`
 
   const contentParts: any[] = []
 
-  if (referenceBase64 && !hasFix && !hasCompetitor) {
+  // Референс добавляем первым если есть
+  if (referenceBase64) {
     contentParts.push({ type: 'image_url', image_url: { url: referenceBase64 } })
   }
-  if (competitorBase64 && !hasFix) {
-    contentParts.push({ type: 'image_url', image_url: { url: competitorBase64 } })
-  }
-  if (previousImageBase64 && hasFix) {
-    contentParts.push({ type: 'image_url', image_url: { url: previousImageBase64 } })
-  }
 
+  // Формируем пользовательское сообщение
   let userMessage = 'Create an ad banner prompt.\n\n'
+  userMessage += '=== PRODUCT ===\n'
+  if (appInfo?.name) userMessage += `App: ${appInfo.name} (${appInfo.code})\n`
+  if (appInfo?.description) userMessage += `Description: ${appInfo.description}\n`
 
-  if (appInfo?.name) userMessage += `APP: ${appInfo.name} (${appInfo.code})\n`
-  if (appInfo?.description) userMessage += `DESCRIPTION: ${appInfo.description}\n\n`
-  if (hasPain) userMessage += `PAIN POINT: "${selectedPain}"\n\n`
-  if (hasHook) userMessage += `HOOK TEXT (must appear verbatim in image): "${selectedHook}"\n\n`
-  if (hasConcept) userMessage += `CONCEPT INSPIRATION (extract the idea, don't copy): "${selectedConcept}"\n\n`
-  if (hasUserText) userMessage += `USER INSTRUCTIONS: ${userText}\n\n`
-  if (referenceBase64 && !hasFix && !hasCompetitor) userMessage += `REFERENCE: Extract the creative approach. Create something original in that spirit.\n\n`
-  if (hasCompetitor) userMessage += `COMPETITOR AD: Analyze the creative approach. Create an original competing ad for the app above.\n\n`
-  if (hasFix && previousImageBase64) userMessage += `FIX: Apply ONLY this change: "${fixNote}"\n\n`
+  if (hasReference) {
+    userMessage += '\n=== REFERENCE IMAGE ===\n'
+    userMessage += hasUserText
+      ? `Analyze the reference style above. Then apply user instructions on top of it.\n`
+      : `Analyze and adapt this creative approach for the product above.\n`
+  }
 
-  userMessage += `Choose the most impactful creative approach and write the prompt.`
+  if (hasUserText) {
+    userMessage += '\n=== USER INSTRUCTIONS ===\n'
+    userMessage += `${userText}\n`
+  }
+
+  if (hasPain) {
+    userMessage += '\n=== PAIN POINT ===\n'
+    userMessage += `${selectedPain}\n`
+  }
+
+  if (hasHook) {
+    userMessage += '\n=== HOOK TEXT (VERBATIM — DO NOT CHANGE) ===\n'
+    userMessage += `"${selectedHook}"\n`
+    userMessage += `This exact text must appear as the headline in the image. No modifications.\n`
+  }
+
+  if (hasConcept) {
+    userMessage += '\n=== CONCEPT STYLE ===\n'
+    userMessage += `${selectedConcept}\n`
+  }
+
+  userMessage += '\nNow write the Gemini image generation prompt.'
   contentParts.push({ type: 'text', text: userMessage })
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: 'gpt-4o',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: contentParts },
     ],
-    max_tokens: 500,
+    max_tokens: 600,
   })
 
   return response.choices[0].message.content || ''
