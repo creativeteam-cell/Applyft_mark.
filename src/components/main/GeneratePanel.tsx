@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 
 interface GeneratePanelProps {
   prompt: string
@@ -20,6 +20,9 @@ export function GeneratePanel({
 }: GeneratePanelProps) {
   const refFileRef = useRef<HTMLInputElement>(null)
   const compFileRef = useRef<HTMLInputElement>(null)
+  const [urlInput, setUrlInput] = useState('')
+  const [urlLoading, setUrlLoading] = useState(false)
+  const [urlError, setUrlError] = useState('')
 
   function handleRefFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -37,74 +40,146 @@ export function GeneratePanel({
     reader.readAsDataURL(file)
   }
 
+  async function handleUrlFetch() {
+    if (!urlInput.trim()) return
+    setUrlLoading(true)
+    setUrlError('')
+    try {
+      const res = await fetch('/api/fetch-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: urlInput.trim() }),
+      })
+      const data = await res.json()
+      if (data.error) {
+        setUrlError(data.error)
+      } else {
+        onReferenceChange(data.imageBase64)
+        setUrlInput('')
+      }
+    } catch {
+      setUrlError('Failed to fetch image')
+    } finally {
+      setUrlLoading(false)
+    }
+  }
+
   return (
-    <div className="fixed left-0 right-0 z-39 border-b flex items-center gap-3 px-8 py-2.5"
+    <div className="fixed left-0 right-0 z-39 border-b px-8 py-4"
       style={{ top: '104px', background: 'var(--bg)', borderColor: 'var(--border)' }}>
 
       <input ref={refFileRef} type="file" accept="image/*" onChange={handleRefFile} className="hidden" />
       <input ref={compFileRef} type="file" accept="image/*" onChange={handleCompFile} className="hidden" />
 
-      {/* Reference image */}
-      {reference ? (
-        <div className="relative flex-shrink-0" title="Style reference">
-          <img src={reference} alt="ref" className="w-9 h-9 rounded-lg object-cover" />
-          <button onClick={() => onReferenceChange(null)}
-            className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-xs flex items-center justify-center">
-            ×
-          </button>
-        </div>
-      ) : (
-        <button onClick={() => refFileRef.current?.click()}
-          className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center transition-all"
-          style={{ background: 'var(--surface)', border: '1px dashed var(--border)' }}
-          title="Upload style reference">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-500">
-            <rect x="3" y="3" width="18" height="18" rx="2"/>
-            <circle cx="8.5" cy="8.5" r="1.5"/>
-            <polyline points="21 15 16 10 5 21"/>
-          </svg>
-        </button>
-      )}
+      <div className="flex gap-4">
 
-      {/* Competitor image */}
-      {competitor ? (
-        <div className="relative flex-shrink-0" title="Competitor ad">
-          <img src={competitor} alt="competitor" className="w-9 h-9 rounded-lg object-cover ring-2"
-            style={{ outline: '2px solid var(--accent)' }} />
-          <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-yellow-500 text-black text-xs flex items-center justify-center font-bold">
-            C
+        {/* Левая колонка — изображения */}
+        <div className="flex flex-col gap-2 flex-shrink-0">
+
+          {/* Reference */}
+          <div>
+            <div className="text-xs text-gray-500 mb-1 font-mono uppercase tracking-widest">Reference</div>
+            {reference ? (
+              <div className="relative w-20 h-20">
+                <img src={reference} alt="ref"
+                  className="w-20 h-20 rounded-xl object-cover cursor-pointer"
+                  onClick={() => refFileRef.current?.click()} />
+                <button onClick={() => onReferenceChange(null)}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center shadow-lg">
+                  ×
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => refFileRef.current?.click()}
+                className="w-20 h-20 rounded-xl flex flex-col items-center justify-center gap-1 transition-all"
+                style={{ background: 'var(--surface)', border: '1.5px dashed var(--border)' }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-gray-500">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/>
+                  <circle cx="8.5" cy="8.5" r="1.5"/>
+                  <polyline points="21 15 16 10 5 21"/>
+                </svg>
+                <span className="text-xs text-gray-600">Upload</span>
+              </button>
+            )}
           </div>
-          <button onClick={() => onCompetitorChange(null)}
-            className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-xs flex items-center justify-center">
-            ×
-          </button>
+
+          {/* Competitor */}
+          <div>
+            <div className="text-xs text-gray-500 mb-1 font-mono uppercase tracking-widest">Competitor</div>
+            {competitor ? (
+              <div className="relative w-20 h-20">
+                <img src={competitor} alt="competitor"
+                  className="w-20 h-20 rounded-xl object-cover cursor-pointer"
+                  style={{ outline: '2px solid var(--accent)' }}
+                  onClick={() => compFileRef.current?.click()} />
+                <button onClick={() => onCompetitorChange(null)}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center shadow-lg">
+                  ×
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => compFileRef.current?.click()}
+                className="w-20 h-20 rounded-xl flex flex-col items-center justify-center gap-1 transition-all"
+                style={{ background: 'var(--surface)', border: '1.5px dashed var(--border)' }}>
+                <span className="text-lg font-bold text-gray-500">C</span>
+                <span className="text-xs text-gray-600">Upload</span>
+              </button>
+            )}
+          </div>
         </div>
-      ) : (
-        <button onClick={() => compFileRef.current?.click()}
-          className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center transition-all"
-          style={{ background: 'var(--surface)', border: '1px dashed var(--border)' }}
-          title="Upload competitor ad">
-          <span className="text-xs font-bold text-gray-500">C</span>
-        </button>
-      )}
 
-      <input
-        value={prompt}
-        onChange={e => onPromptChange(e.target.value)}
-        placeholder="Describe what to generate... or upload a reference / competitor ad"
-        className="flex-1 px-4 py-2 rounded-xl text-sm outline-none transition-all"
-        style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
-        onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'}
-        onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'}
-        onKeyDown={e => e.key === 'Enter' && onGenerate()}
-      />
+        {/* Правая колонка — промпт + URL + кнопка */}
+        <div className="flex-1 flex flex-col gap-2">
 
-      <button onClick={onGenerate}
-        className="flex-shrink-0 flex items-center gap-2 px-6 py-2 rounded-xl font-semibold text-sm transition-all"
-        style={{ background: 'var(--accent)' }}>
-        <span>✦</span>
-        Generate
-      </button>
+          {/* Prompt textarea */}
+          <textarea
+            value={prompt}
+            onChange={e => onPromptChange(e.target.value)}
+            placeholder="Describe what to generate... (optional)"
+            rows={4}
+            className="w-full px-4 py-3 rounded-xl text-sm outline-none resize-none leading-relaxed"
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
+            onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'}
+            onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'}
+            onKeyDown={e => e.key === 'Enter' && e.metaKey && onGenerate()}
+          />
+
+          {/* URL input */}
+          <div className="flex gap-2">
+            <div className="flex-1 relative">
+              <input
+                value={urlInput}
+                onChange={e => { setUrlInput(e.target.value); setUrlError('') }}
+                placeholder="Paste app.foreplay.co link..."
+                className="w-full px-4 py-2 rounded-xl text-sm outline-none"
+                style={{ background: 'var(--surface)', border: `1px solid ${urlError ? 'rgba(248,113,113,0.5)' : 'var(--border)'}`, color: 'var(--text)' }}
+                onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'}
+                onBlur={e => e.currentTarget.style.borderColor = urlError ? 'rgba(248,113,113,0.5)' : 'var(--border)'}
+                onKeyDown={e => e.key === 'Enter' && handleUrlFetch()}
+              />
+              {urlError && (
+                <div className="absolute left-0 -bottom-5 text-xs text-red-400">{urlError}</div>
+              )}
+            </div>
+            <button
+              onClick={handleUrlFetch}
+              disabled={!urlInput.trim() || urlLoading}
+              className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-40 flex-shrink-0"
+              style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+              {urlLoading ? '⟳' : '↓ Fetch'}
+            </button>
+
+            {/* Generate button */}
+            <button onClick={onGenerate}
+              className="flex-shrink-0 flex items-center gap-2 px-6 py-2 rounded-xl font-semibold text-sm"
+              style={{ background: 'var(--accent)' }}>
+              <span>✦</span>
+              Generate
+            </button>
+          </div>
+
+        </div>
+      </div>
     </div>
   )
 }
