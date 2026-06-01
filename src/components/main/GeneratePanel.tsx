@@ -70,7 +70,7 @@ export function GeneratePanel({
       {competitor ? (
         <div className="relative flex-shrink-0" title="Competitor ad">
           <img src={competitor} alt="competitor" className="w-9 h-9 rounded-lg object-cover ring-2"
-            style={{ ringColor: 'var(--accent)', outline: '2px solid var(--accent)' }} />
+            style={{ outline: '2px solid var(--accent)' }} />
           <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-yellow-500 text-black text-xs flex items-center justify-center font-bold">
             C
           </div>
