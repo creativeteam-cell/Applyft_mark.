@@ -40,18 +40,13 @@ export async function generatePrompt(options: GeneratePromptOptions): Promise<st
   const hasFix = !!fixNote?.trim()
   const hasConcept = selectedConcept && selectedConcept !== 'none'
 
-  // FIX режим
+  // FIX режим — отдельный простой промпт
   if (hasFix && previousImageBase64) {
     const fixPrompt = `You are an advertising creative director.
-Analyze the provided ad image in detail — describe its composition, visual style, color palette, typography, text content, layout, and all visual elements.
-Then write a NEW Gemini image generation prompt that recreates this exact ad but with ONE change applied: "${fixNote}"
-If the fix instruction is not in English, translate it first.
-
-RULES:
-- Keep EVERYTHING the same except the requested change
-- Be very specific about colors, typography style, composition, text placement
-- Include all text that appears in the original image verbatim
-- Return ONLY the Gemini image generation prompt (150-200 words). No explanations.`
+The user wants a SMALL FIX to an existing ad image.
+Keep everything identical — composition, style, colors, text, layout.
+Apply ONLY this one change: "${fixNote}"
+Return ONLY the image generation prompt. No explanations.`
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -60,11 +55,11 @@ RULES:
         {
           role: 'user', content: [
             { type: 'image_url', image_url: { url: previousImageBase64 } },
-            { type: 'text', text: `Recreate this ad with this fix: "${fixNote}"` },
+            { type: 'text', text: `Apply this fix: "${fixNote}"` },
           ],
         },
       ],
-      max_tokens: 500,
+      max_tokens: 400,
     })
     return response.choices[0].message.content || ''
   }
@@ -77,12 +72,11 @@ Your job: write a Gemini image generation prompt for a scroll-stopping social me
 STRICT PRIORITY ORDER — follow exactly:
 
 PRIORITY 1 — PRODUCT (always included):
-Use the app description as the creative foundation. The ad must serve this product.
-IMPORTANT: Do NOT include the app name as text in the image unless the user explicitly asks for it.
+Use the app name and description as the foundation. The ad must clearly serve this product.
 
 PRIORITY 2 — REFERENCE IMAGE + USER PROMPT (work as a pair):
 ${hasReference && hasUserText
-  ? `Both a reference image AND user instructions are provided. Analyze the reference for its visual style, composition, color mood, and layout approach. Then apply the user's instructions ON TOP of that style. They work together.`
+  ? `Both a reference image AND user instructions are provided. Analyze the reference for its visual style, composition, color mood, and layout approach. Then apply the user's instructions ON TOP of that style. The user prompt refines the reference — they work together.`
   : hasReference
   ? `A reference image is provided. Analyze it for visual style, composition, color palette, typography approach, and emotional feel. Adapt this creative approach for the product — same energy and style but original content.`
   : hasUserText
@@ -106,8 +100,7 @@ OUTPUT FORMAT RULES:
 - Safe zones: keep all elements away from edges
 - Include text ON the image: headline${hasHook ? ` (MUST be exactly: "${selectedHook}")` : ''}, optional subheadline, CTA button
 - NO logos, brand marks, watermarks
-- DO NOT include the app name as text in the image unless explicitly requested
-- NEVER repeat the same text more than once
+- NEVER repeat the same text or app name more than once in the image
 - NO pixel dimensions or technical specs
 - Bold readable typography
 - Professional social media ad quality
@@ -120,10 +113,12 @@ Return ONLY the Gemini image generation prompt (150-200 words). No explanations,
 
   const contentParts: any[] = []
 
+  // Референс добавляем первым если есть
   if (referenceBase64) {
     contentParts.push({ type: 'image_url', image_url: { url: referenceBase64 } })
   }
 
+  // Формируем пользовательское сообщение
   let userMessage = 'Create an ad banner prompt.\n\n'
   userMessage += '=== PRODUCT ===\n'
   if (appInfo?.name) userMessage += `App: ${appInfo.name} (${appInfo.code})\n`
@@ -137,7 +132,7 @@ Return ONLY the Gemini image generation prompt (150-200 words). No explanations,
   }
 
   if (hasUserText) {
-    userMessage += '\n=== USER INSTRUCTIONS (translate to English if needed) ===\n'
+    userMessage += '\n=== USER INSTRUCTIONS ===\n'
     userMessage += `${userText}\n`
   }
 
@@ -172,6 +167,7 @@ Return ONLY the Gemini image generation prompt (150-200 words). No explanations,
   return response.choices[0].message.content || ''
 }
 
+// Анализатор концептов — только абстрактный визуальный подход, без боли
 export async function analyzeConcept(imageBase64: string): Promise<string> {
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
@@ -185,11 +181,12 @@ Return exactly these 5 points:
 2. Color palette mood: emotional tone of colors (e.g. "warm and cinematic with golden tones", "cold and clinical", "vibrant high-contrast")
 3. Typography style: font weight, role, and accent usage (e.g. "oversized bold headline dominates with one accent-color word", "clean minimal hierarchy")
 4. Text placement: layout zones in abstract terms (e.g. "top-right headline + bottom-left supporting details", "centered single statement")
-5. Key visual element and emotional hook: describe the COMPOSITIONAL PRINCIPLE, not specific objects
+5. Key visual element and emotional hook: describe the COMPOSITIONAL PRINCIPLE, not specific objects (e.g. "split composition contrasting two opposing states", "extreme close-up creating intimacy", "lone figure in vast space suggesting isolation")
 
 CRITICAL RULES:
 - Do NOT name specific objects, people, products, or brands from the image
 - Do NOT mention pain points, problems, or product features
+- Do NOT describe what the ad is selling or who it targets
 - Focus ONLY on HOW it's made visually — approach, composition, color, type
 - The output must be reusable as inspiration for a completely different product`,
       },
