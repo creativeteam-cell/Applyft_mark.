@@ -5,14 +5,14 @@ import { useState, useEffect } from 'react'
 interface GenerateModalProps {
   appCode: string
   selectedPain: string
+  selectedHook: string
   selectedConcept: string
   prompt: string
   reference: string | null
+  competitor: string | null
   onClose: () => void
 }
 
-
-// Сжимаем картинку перед отправкой чтобы не превысить лимит тела запроса
 async function compressImage(base64: string, maxWidth = 800): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image()
@@ -33,7 +33,7 @@ type Stage = 'generating' | 'preview' | 'fixing' | 'generating-all' | 'done'
 
 const SIZES = ['4x5', '1x1', '9x16', '1.91x1']
 
-export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, reference, onClose }: GenerateModalProps) {
+export function GenerateModal({ appCode, selectedPain, selectedHook, selectedConcept, prompt, reference, competitor, onClose }: GenerateModalProps) {
   const [stage, setStage] = useState<Stage>('generating')
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const [allImages, setAllImages] = useState<Record<string, string>>({})
@@ -56,6 +56,7 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
         body: JSON.stringify({
           appCode,
           selectedPain,
+          selectedHook: selectedHook !== 'none' ? selectedHook : undefined,
           userText: prompt,
           referenceBase64: reference,
           fixNote: fix,
@@ -71,7 +72,6 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
         return
       }
 
-      // Ресайзим превью до точных пикселей 1200x1500
       let finalImage = data.imageBase64
       try {
         const resizeRes = await fetch('/api/resize', {
@@ -81,9 +81,7 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
         })
         const resizeData = await resizeRes.json()
         if (resizeData.imageBase64) finalImage = resizeData.imageBase64
-      } catch {
-        // если ресайз упал — показываем оригинал
-      }
+      } catch { }
 
       setPreviewImage(finalImage)
       setCurrentPrompt(data.prompt)
@@ -99,25 +97,18 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
     setStage('generating-all')
 
     try {
-      // 4x5 уже готово
       const results: Record<string, string> = { '4x5': previewImage }
 
-      // Рекомпозиция 4x5 → остальные 3 размера последовательно
-      // (параллельно не пускаем — Gemini и так под нагрузкой)
       for (const size of ['1x1', '9x16', '1.91x1']) {
         try {
           const res = await fetch('/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              recomposeBase64: previewImage, // передаём готовую 4x5
-              targetSize: size,
-            }),
+            body: JSON.stringify({ recomposeBase64: previewImage, targetSize: size }),
           })
           const data = await res.json()
 
           if (!data.error && data.imageBase64) {
-            // Ресайзим до точных пикселей
             try {
               const resizeRes = await fetch('/api/resize', {
                 method: 'POST',
@@ -144,7 +135,6 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
   }
 
   async function handleSubmitFix() {
-    // Сжимаем перед отправкой чтобы не получить 413
     const compressed = previewImage ? await compressImage(previewImage) : undefined
     await generateFirst(fixNote, compressed)
     setFixNote('')
@@ -167,14 +157,12 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
       <div className="relative w-full max-w-2xl mx-4 rounded-2xl p-8"
         style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
 
-        {/* Close */}
         {stage !== 'generating' && stage !== 'generating-all' && (
           <button onClick={onClose}
             className="absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center text-gray-500 hover:text-white"
             style={{ background: 'var(--border)' }}>×</button>
         )}
 
-        {/* Generating */}
         {(stage === 'generating' || stage === 'generating-all') && (
           <div className="text-center py-12">
             <div className="text-4xl mb-4 animate-spin inline-block">⟳</div>
@@ -189,7 +177,6 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
           </div>
         )}
 
-        {/* Preview */}
         {stage === 'preview' && (
           <div>
             <h3 className="text-lg font-bold mb-4">Preview — 4×5</h3>
@@ -210,28 +197,21 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
                 <div className="flex gap-3 justify-center mb-3">
                   <button onClick={handleApprove}
                     className="px-8 py-3 rounded-xl font-semibold"
-                    style={{ background: 'var(--accent)' }}>
-                    ✓ Approve
-                  </button>
+                    style={{ background: 'var(--accent)' }}>✓ Approve</button>
                   <button onClick={() => setStage('fixing')}
                     className="px-8 py-3 rounded-xl font-semibold"
-                    style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-                    ✎ Fix
-                  </button>
+                    style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>✎ Fix</button>
                   <button onClick={onClose}
                     className="px-8 py-3 rounded-xl font-semibold text-red-400"
-                    style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-                    ✕ Cancel
-                  </button>
+                    style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>✕ Cancel</button>
                 </div>
                 <div className="flex justify-center">
-                  <button
-                    onClick={() => {
-                      const link = document.createElement('a')
-                      link.href = previewImage!
-                      link.download = `${appCode}_preview_4x5.png`
-                      link.click()
-                    }}
+                  <button onClick={() => {
+                    const link = document.createElement('a')
+                    link.href = previewImage!
+                    link.download = `${appCode}_preview_4x5.png`
+                    link.click()
+                  }}
                     className="text-xs text-gray-500 hover:text-gray-300 transition-all flex items-center gap-1.5 px-4 py-2 rounded-lg"
                     style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
                     ⬇ Download preview
@@ -248,7 +228,6 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
           </div>
         )}
 
-        {/* Fix */}
         {stage === 'fixing' && (
           <div>
             <h3 className="text-lg font-bold mb-2">What to fix?</h3>
@@ -281,7 +260,6 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
           </div>
         )}
 
-        {/* Done */}
         {stage === 'done' && (
           <div>
             <h3 className="text-lg font-bold mb-6">All sizes ready! 🎉</h3>
@@ -303,9 +281,7 @@ export function GenerateModal({ appCode, selectedPain, selectedConcept, prompt, 
             <div className="flex gap-3">
               <button onClick={downloadAll}
                 className="flex-1 py-3 rounded-xl font-semibold"
-                style={{ background: 'var(--accent)' }}>
-                ⬇ Download all 4
-              </button>
+                style={{ background: 'var(--accent)' }}>⬇ Download all 4</button>
               <button onClick={onClose} className="px-6 py-3 rounded-xl"
                 style={{ background: 'var(--border)' }}>Close</button>
             </div>
