@@ -135,8 +135,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
   }
 
   async function handleSubmitFix() {
-    const compressed = previewImage ? await compressImage(previewImage) : undefined
-    await generateFirst(fixNote, compressed)
+    await generateFirst(fixNote, previewImage || undefined)
     setFixNote('')
   }
 
