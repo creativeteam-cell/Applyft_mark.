@@ -43,11 +43,15 @@ export async function generatePrompt(options: GeneratePromptOptions): Promise<st
   // FIX режим
   if (hasFix && previousImageBase64) {
     const fixPrompt = `You are an advertising creative director.
-The user wants a SMALL FIX to an existing ad image.
-Keep everything identical — composition, style, colors, text, layout.
-Apply ONLY this one change: "${fixNote}"
-If the fix instruction is not in English, translate it first then apply it.
-Return ONLY the image generation prompt. No explanations.`
+Analyze the provided ad image in detail — describe its composition, visual style, color palette, typography, text content, layout, and all visual elements.
+Then write a NEW Gemini image generation prompt that recreates this exact ad but with ONE change applied: "${fixNote}"
+If the fix instruction is not in English, translate it first.
+
+RULES:
+- Keep EVERYTHING the same except the requested change
+- Be very specific about colors, typography style, composition, text placement
+- Include all text that appears in the original image verbatim
+- Return ONLY the Gemini image generation prompt (150-200 words). No explanations.`
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -56,11 +60,11 @@ Return ONLY the image generation prompt. No explanations.`
         {
           role: 'user', content: [
             { type: 'image_url', image_url: { url: previousImageBase64 } },
-            { type: 'text', text: `Apply this fix: "${fixNote}"` },
+            { type: 'text', text: `Recreate this ad with this fix: "${fixNote}"` },
           ],
         },
       ],
-      max_tokens: 400,
+      max_tokens: 500,
     })
     return response.choices[0].message.content || ''
   }

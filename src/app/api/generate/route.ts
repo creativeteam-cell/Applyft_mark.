@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
 
     const imageBase64 = await generateImage(
       finalPrompt,
-      fixNote && previousImageBase64 ? previousImageBase64 : referenceBase64 || undefined
+      referenceBase64 || undefined
     )
 
     return NextResponse.json({ prompt: finalPrompt, imageBase64 })
