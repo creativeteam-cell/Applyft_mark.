@@ -23,7 +23,7 @@ async function compressImage(base64: string, maxWidth = 800): Promise<string> {
       canvas.height = img.height * scale
       const ctx = canvas.getContext('2d')!
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-      resolve(canvas.toDataURL('image/jpeg', 0.8))
+      resolve(canvas.toDataURL('image/jpeg', 0.85))
     }
     img.src = base64
   })
@@ -32,14 +32,17 @@ async function compressImage(base64: string, maxWidth = 800): Promise<string> {
 type Stage = 'generating' | 'preview' | 'fixing' | 'generating-all' | 'done'
 
 const SIZES = ['4x5', '1x1', '9x16', '1.91x1']
+const MAX_HISTORY = 10
 
 export function GenerateModal({ appCode, selectedPain, selectedHook, selectedConcept, prompt, reference, competitor, onClose }: GenerateModalProps) {
   const [stage, setStage] = useState<Stage>('generating')
-  const [previewImage, setPreviewImage] = useState<string | null>(null)
+  const [fixHistory, setFixHistory] = useState<string[]>([])
+  const [currentFixIndex, setCurrentFixIndex] = useState(0)
   const [allImages, setAllImages] = useState<Record<string, string>>({})
   const [fixNote, setFixNote] = useState('')
-  const [currentPrompt, setCurrentPrompt] = useState('')
   const [error, setError] = useState<string | null>(null)
+
+  const previewImage = fixHistory[currentFixIndex] || null
 
   useEffect(() => {
     generateFirst()
@@ -83,8 +86,20 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
         if (resizeData.imageBase64) finalImage = resizeData.imageBase64
       } catch { }
 
-      setPreviewImage(finalImage)
-      setCurrentPrompt(data.prompt)
+      // Добавляем в историю
+      if (!fix) {
+        // Первая генерация — сбрасываем историю
+        setFixHistory([finalImage])
+        setCurrentFixIndex(0)
+      } else {
+        // Fix — добавляем после текущего индекса
+        setFixHistory(prev => {
+          const newHistory = [...prev.slice(0, currentFixIndex + 1), finalImage].slice(-MAX_HISTORY)
+          setCurrentFixIndex(newHistory.length - 1)
+          return newHistory
+        })
+      }
+
       setStage('preview')
     } catch (e: any) {
       setError(e.message)
@@ -127,6 +142,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
       }
 
       setAllImages(results)
+      setFixHistory([]) // Чистим историю после апрува
       setStage('done')
     } catch (e: any) {
       setError(e.message)
@@ -135,7 +151,8 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
   }
 
   async function handleSubmitFix() {
-    const compressed = previewImage ? await compressImage(previewImage) : undefined
+    const baseImage = fixHistory[currentFixIndex]
+    const compressed = baseImage ? await compressImage(baseImage) : undefined
     await generateFirst(fixNote, compressed)
     setFixNote('')
   }
@@ -163,6 +180,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
             style={{ background: 'var(--border)' }}>×</button>
         )}
 
+        {/* Generating */}
         {(stage === 'generating' || stage === 'generating-all') && (
           <div className="text-center py-12">
             <div className="text-4xl mb-4 animate-spin inline-block">⟳</div>
@@ -171,27 +189,84 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
             </div>
             <div className="text-sm text-gray-500">
               {stage === 'generating-all'
-                ? 'Adapting layout for 1×1, 9×16, 1.91×1 — this takes a moment'
+                ? 'Adapting layout for 1×1, 9×16, 1.91×1'
                 : 'Building prompt & creating 4×5 preview'}
             </div>
           </div>
         )}
 
+        {/* Preview */}
         {stage === 'preview' && (
           <div>
-            <h3 className="text-lg font-bold mb-4">Preview — 4×5</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold">Preview — 4×5</h3>
+              {fixHistory.length > 1 && (
+                <span className="text-xs text-gray-500 font-mono">
+                  {currentFixIndex + 1} / {fixHistory.length}
+                </span>
+              )}
+            </div>
+
             {error && (
               <div className="mb-4 px-4 py-3 rounded-xl text-sm text-red-400"
                 style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)' }}>
                 {error}
               </div>
             )}
-            {previewImage && (
-              <div className="flex justify-center mb-6">
-                <img src={previewImage} alt="preview" className="rounded-xl object-cover"
-                  style={{ maxHeight: 420, aspectRatio: '4/5' }} />
+
+            {/* Карусель */}
+            {fixHistory.length > 0 && (
+              <div className="relative mb-6" style={{ height: 420, overflow: 'hidden' }}>
+                {fixHistory.map((img, i) => {
+                  const offset = i - currentFixIndex
+                  const isActive = offset === 0
+                  const isVisible = Math.abs(offset) <= 1
+                  return (
+                    <div
+                      key={i}
+                      onClick={() => !isActive && setCurrentFixIndex(i)}
+                      className="absolute top-0 transition-all duration-300"
+                      style={{
+                        left: '50%',
+                        transform: `translateX(calc(-50% + ${offset * 220}px)) scale(${isActive ? 1 : 0.78})`,
+                        opacity: isVisible ? (isActive ? 1 : 0.35) : 0,
+                        zIndex: isActive ? 2 : 1,
+                        cursor: isActive ? 'default' : 'pointer',
+                        height: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}>
+                      <img src={img} alt={`v${i + 1}`}
+                        className="rounded-xl object-cover shadow-2xl"
+                        style={{ height: isActive ? 400 : 310, aspectRatio: '4/5' }} />
+                      {!isActive && isVisible && (
+                        <div className="absolute inset-0 rounded-xl"
+                          style={{ background: 'rgba(0,0,0,0.3)' }} />
+                      )}
+                    </div>
+                  )
+                })}
+
+                {/* Стрелки */}
+                {currentFixIndex > 0 && (
+                  <button
+                    onClick={() => setCurrentFixIndex(i => i - 1)}
+                    className="absolute left-2 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full flex items-center justify-center"
+                    style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                    ←
+                  </button>
+                )}
+                {currentFixIndex < fixHistory.length - 1 && (
+                  <button
+                    onClick={() => setCurrentFixIndex(i => i + 1)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full flex items-center justify-center"
+                    style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                    →
+                  </button>
+                )}
               </div>
             )}
+
             {!error && previewImage && (
               <div>
                 <div className="flex gap-3 justify-center mb-3">
@@ -228,10 +303,13 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
           </div>
         )}
 
+        {/* Fix */}
         {stage === 'fixing' && (
           <div>
             <h3 className="text-lg font-bold mb-2">What to fix?</h3>
-            <p className="text-xs text-gray-500 mb-4">Describe the change — the rest will stay the same</p>
+            <p className="text-xs text-gray-500 mb-4">
+              Fixing version {currentFixIndex + 1} — the rest will stay the same
+            </p>
             {previewImage && (
               <div className="flex justify-center mb-4">
                 <img src={previewImage} alt="preview" className="rounded-xl object-cover opacity-70"
@@ -260,6 +338,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
           </div>
         )}
 
+        {/* Done */}
         {stage === 'done' && (
           <div>
             <h3 className="text-lg font-bold mb-6">All sizes ready! 🎉</h3>

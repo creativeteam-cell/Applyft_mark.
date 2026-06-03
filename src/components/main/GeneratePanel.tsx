@@ -7,13 +7,24 @@ interface GeneratePanelProps {
   onPromptChange: (v: string) => void
   reference: string | null
   onReferenceChange: (v: string | null) => void
+  mode: 'new' | 'var'
+  onModeChange: (mode: 'new' | 'var') => void
+  varNumber: string
+  onVarNumberChange: (v: string) => void
+  varLetters: [string, string, string]
+  onVarLettersChange: (letters: [string, string, string]) => void
   onGenerate: () => void
+  appCode: string
 }
 
 export function GeneratePanel({
   prompt, onPromptChange,
   reference, onReferenceChange,
+  mode, onModeChange,
+  varNumber, onVarNumberChange,
+  varLetters, onVarLettersChange,
   onGenerate,
+  appCode,
 }: GeneratePanelProps) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [urlInput, setUrlInput] = useState('')
@@ -52,6 +63,18 @@ export function GeneratePanel({
     }
   }
 
+  function handleLetterChange(index: number, value: string) {
+    const letter = value.replace(/[^a-z]/g, '').slice(-1)
+    const newLetters = [...varLetters] as [string, string, string]
+    newLetters[index] = letter
+    onVarLettersChange(newLetters)
+  }
+
+  function handleNumberChange(value: string) {
+    const num = value.replace(/\D/g, '').slice(0, 3)
+    onVarNumberChange(num)
+  }
+
   return (
     <div className="fixed left-0 right-0 z-39 border-b px-8 py-4"
       style={{ top: '104px', background: 'var(--bg)', borderColor: 'var(--border)' }}>
@@ -62,7 +85,6 @@ export function GeneratePanel({
 
         {/* Левая колонка — референс */}
         <div className="flex flex-col gap-2" style={{ width: 160 }}>
-
           {reference ? (
             <div className="relative">
               <img src={reference} alt="reference"
@@ -87,7 +109,6 @@ export function GeneratePanel({
             </button>
           )}
 
-          {/* URL + кнопка Fetch */}
           <div className="flex gap-1.5">
             <div className="flex-1 relative">
               <input
@@ -108,18 +129,15 @@ export function GeneratePanel({
                 <div className="absolute left-0 -bottom-4 text-xs text-red-400 whitespace-nowrap">{urlError}</div>
               )}
             </div>
-            <button
-              onClick={handleUrlFetch}
-              disabled={!urlInput.trim() || urlLoading}
+            <button onClick={handleUrlFetch} disabled={!urlInput.trim() || urlLoading}
               className="px-2 py-2 rounded-xl text-xs font-medium disabled:opacity-40 flex-shrink-0"
               style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
               {urlLoading ? '⟳' : '↓'}
             </button>
           </div>
-
         </div>
 
-        {/* Правая колонка — промпт + генерация */}
+        {/* Правая колонка */}
         <div className="flex-1 flex flex-col gap-2">
           <textarea
             value={prompt}
@@ -132,16 +150,87 @@ export function GeneratePanel({
             onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'}
             onKeyDown={e => e.key === 'Enter' && e.metaKey && onGenerate()}
           />
-          <div className="flex justify-end">
-            <button onClick={onGenerate}
-              className="flex items-center gap-2 px-6 py-2 rounded-xl font-semibold text-sm"
-              style={{ background: 'var(--accent)' }}>
-              <span>✦</span>
-              Generate
-            </button>
+
+          {/* New / Var toggle */}
+          <div className="flex items-center gap-3">
+            <div className="flex rounded-xl overflow-hidden text-sm font-semibold"
+              style={{ border: '1px solid var(--accent)' }}>
+              <button
+                onClick={() => onModeChange('new')}
+                className="px-5 py-2 transition-all"
+                style={{
+                  background: mode === 'new' ? 'var(--accent)' : 'transparent',
+                  color: mode === 'new' ? '#fff' : 'var(--accent)',
+                }}>
+                New
+              </button>
+              <button
+                onClick={() => onModeChange('var')}
+                className="px-5 py-2 transition-all"
+                style={{
+                  background: mode === 'var' ? 'var(--accent)' : 'transparent',
+                  color: mode === 'var' ? '#fff' : 'var(--accent)',
+                }}>
+                Var
+              </button>
+            </div>
+
+            {/* Var поля */}
+            {mode === 'var' && (
+              <div className="flex items-center gap-2">
+                {/* NUMBER */}
+                <div className="flex flex-col">
+                  <span className="text-xs text-gray-500 mb-1 uppercase tracking-widest font-mono">Number</span>
+                  <input
+                    value={varNumber}
+                    onChange={e => handleNumberChange(e.target.value)}
+                    placeholder="001"
+                    maxLength={3}
+                    className="w-16 px-3 py-2 rounded-xl text-sm outline-none text-center font-mono"
+                    style={{ background: 'var(--surface)', border: `1px solid ${!varNumber ? 'rgba(248,113,113,0.6)' : 'var(--border)'}`, color: 'var(--text)' }}
+                  />
+                </div>
+
+                {/* Letter boxes */}
+                <div className="flex flex-col">
+                  <span className="text-xs text-gray-500 mb-1 uppercase tracking-widest font-mono">Variant</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-gray-600 text-sm">_</span>
+                    {([0, 1, 2] as const).map(i => (
+                      <input
+                        key={i}
+                        value={varLetters[i]}
+                        onChange={e => handleLetterChange(i, e.target.value.toLowerCase())}
+                        placeholder="a"
+                        maxLength={1}
+                        className="w-9 px-2 py-2 rounded-xl text-sm outline-none text-center font-mono"
+                        style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Preview названия */}
+                <div className="flex flex-col justify-end pb-1">
+                  <span className="text-xs text-gray-600 font-mono">
+                    {varNumber
+                      ? `${appCode}_${varNumber.padStart(3, '0')}${varLetters.filter(Boolean).map(l => `_${l}`).join('')}`
+                      : <span className="text-red-400">enter number</span>}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="flex-1 flex justify-end">
+              <button onClick={onGenerate}
+                className="flex items-center gap-2 px-6 py-2 rounded-xl font-semibold text-sm"
+                style={{ background: 'var(--accent)' }}>
+                <span>✦</span>
+                Generate
+              </button>
+            </div>
           </div>
         </div>
-
       </div>
     </div>
   )

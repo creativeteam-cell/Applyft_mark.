@@ -22,6 +22,11 @@ export function MainPage() {
   const [prompt, setPrompt] = useState('')
   const [reference, setReference] = useState<string | null>(null)
 
+  // New / Var
+  const [mode, setMode] = useState<'new' | 'var'>('new')
+  const [varNumber, setVarNumber] = useState('')
+  const [varLetters, setVarLetters] = useState<[string, string, string]>(['', '', ''])
+
   useEffect(() => {
     fetch('/api/apps')
       .then(r => r.json())
@@ -46,6 +51,10 @@ export function MainPage() {
   function handleGenerate() {
     if (!selectedApp) {
       alert('Please select an app first.')
+      return
+    }
+    if (mode === 'var' && !varNumber.trim()) {
+      alert('Please enter a variant number before generating.')
       return
     }
     setShowModal(true)
@@ -79,10 +88,17 @@ export function MainPage() {
         onPromptChange={setPrompt}
         reference={reference}
         onReferenceChange={setReference}
+        mode={mode}
+        onModeChange={setMode}
+        varNumber={varNumber}
+        onVarNumberChange={setVarNumber}
+        varLetters={varLetters}
+        onVarLettersChange={setVarLetters}
         onGenerate={handleGenerate}
+        appCode={selectedApp}
       />
 
-      <div className="px-8 pb-8" style={{ marginTop: '340px' }}>
+      <div className="px-8 pb-8" style={{ marginTop: mode === 'var' ? '390px' : '340px' }}>
         <CreativesGrid
           appCode={selectedApp}
           page={page}
