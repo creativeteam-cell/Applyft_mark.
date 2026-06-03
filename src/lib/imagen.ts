@@ -67,22 +67,25 @@ async function tryGenerate(prompt: string, referenceBase64?: string, timeoutMs =
   }
 }
 
-async function withRetry(prompt: string, referenceBase64?: string): Promise<string> {
-  try {
-    return await tryGenerate(prompt, referenceBase64, 100000)
-  } catch (e: any) {
-    if (e.message !== 'TIMEOUT') throw e
-    console.log('Gemini timeout on attempt 1, retrying...')
+async function withRetry(prompt: string, referenceBase64?: string, maxAttempts = 3): Promise<string> {
+  const retryableErrors = ['TIMEOUT', 'No image in response']
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await tryGenerate(prompt, referenceBase64, 100000)
+    } catch (e: any) {
+      const isRetryable = retryableErrors.includes(e.message)
+      if (!isRetryable || attempt === maxAttempts) {
+        if (e.message === 'TIMEOUT') {
+          throw new Error('Image generation timed out. Gemini is under heavy load, please try again in a moment.')
+        }
+        throw e
+      }
+      console.log(`Gemini attempt ${attempt} failed (${e.message}), retrying...`)
+    }
   }
 
-  try {
-    return await tryGenerate(prompt, referenceBase64, 100000)
-  } catch (e: any) {
-    if (e.message === 'TIMEOUT') {
-      throw new Error('Image generation timed out. Gemini is under heavy load, please try again in a moment.')
-    }
-    throw e
-  }
+  throw new Error('Image generation failed after all retries.')
 }
 
 export async function generateImage(prompt: string, referenceBase64?: string): Promise<string> {

@@ -90,9 +90,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // При fix-режиме передаём предыдущее изображение в Gemini как референс
+    const imageReference = previousImageBase64 || referenceBase64 || undefined
+
     const imageBase64 = await generateImage(
       finalPrompt,
-      referenceBase64 || undefined
+      imageReference
     )
 
     return NextResponse.json({ prompt: finalPrompt, imageBase64 })
