@@ -86,10 +86,10 @@ export function FilterBar({
         </div>
       )}
 
-      {/* Hook */}
+      {/* Headliner */}
       {hooks.length > 0 && (
         <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500 uppercase tracking-widest font-mono">Hook</span>
+          <span className="text-xs text-gray-500 uppercase tracking-widest font-mono">Headliner</span>
           <select value={selectedHook || 'none'} onChange={e => onHookChange(e.target.value)}
             className="px-3 py-1.5 rounded-lg text-sm font-medium outline-none cursor-pointer max-w-xs"
             style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}>

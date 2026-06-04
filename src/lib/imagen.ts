@@ -1,21 +1,44 @@
 // Генерация изображений через Gemini 3.1 Flash Image Preview
 
 const RECOMPOSE_PROMPTS: Record<string, string> = {
-  '1x1': `Take this exact image and recompose it for a square 1:1 format. 
-Keep all visual elements, typography, colors and overall style completely identical. 
-Center the main subject and most important text. 
-Redistribute and rescale elements so the composition feels natural and balanced for a square format. 
-All text must be fully visible, readable and within safe zones.`,
+  '1x1': `Recompose this exact ad creative for a square 1:1 aspect ratio.
 
-  '9x16': `Take this exact image and recompose it for a tall vertical 9:16 format. 
-Keep all visual elements, typography, colors and overall style completely identical. 
-Stack elements vertically: headline at top, main visual in the center, supporting details and CTA button near the bottom. 
-All text must be fully visible, readable and within safe zones.`,
+STRICT RULES — DO NOT BREAK:
+- Do NOT add any new visual elements, text, objects, or decorations
+- Do NOT remove any existing elements from the original image
+- Do NOT change colors, typography style, or visual identity in any way
+- Do NOT alter the meaning, text content, or any wording
 
-  '1.91x1': `Take this exact image and recompose it for a wide horizontal 16:9 landscape format. 
-Keep all visual elements, typography, colors and overall style completely identical. 
-Spread elements horizontally: place the main visual on one side and text hierarchy on the other, or arrange in a balanced wide panoramic layout. 
-All text must be fully visible, readable and within safe zones.`,
+ONLY reposition and rescale existing elements to fit naturally in a square format:
+- Center the main subject and headline text horizontally and vertically
+- Ensure all text is fully visible and within safe zones (at least 10% padding from all edges)
+- Maintain the same overall mood, style, and composition hierarchy`,
+
+  '9x16': `Recompose this exact ad creative for a tall vertical 9:16 aspect ratio.
+
+STRICT RULES — DO NOT BREAK:
+- Do NOT add any new visual elements, text, objects, or decorations
+- Do NOT remove any existing elements from the original image
+- Do NOT change colors, typography style, or visual identity in any way
+- Do NOT alter the meaning, text content, or any wording
+
+ONLY reposition and rescale existing elements to fit naturally in a tall vertical format:
+- Stack elements vertically: main visual in upper portion, headline in the middle, CTA button near the bottom
+- Ensure all text is fully visible and within safe zones (at least 10% padding from all edges)
+- Maintain the same overall mood, style, and composition hierarchy`,
+
+  '1.91x1': `Recompose this exact ad creative for a wide horizontal 1.91:1 aspect ratio.
+
+STRICT RULES — DO NOT BREAK:
+- Do NOT add any new visual elements, text, objects, or decorations
+- Do NOT remove any existing elements from the original image
+- Do NOT change colors, typography style, or visual identity in any way
+- Do NOT alter the meaning, text content, or any wording
+
+ONLY reposition and rescale existing elements to fit naturally in a wide horizontal format:
+- Place main visual on one side, text hierarchy (headline + subheadline + CTA) on the other side
+- Ensure all text is fully visible and within safe zones (at least 10% padding from all edges)
+- Maintain the same overall mood, style, and composition hierarchy`,
 }
 
 async function tryGenerate(prompt: string, referenceBase64?: string, timeoutMs = 100000): Promise<string> {

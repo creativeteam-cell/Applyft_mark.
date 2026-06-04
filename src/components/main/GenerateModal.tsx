@@ -92,9 +92,9 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
         setFixHistory([finalImage])
         setCurrentFixIndex(0)
       } else {
-        // Fix — добавляем после текущего индекса
+        // Fix — всегда добавляем в конец, сохраняя все версии
         setFixHistory(prev => {
-          const newHistory = [...prev.slice(0, currentFixIndex + 1), finalImage].slice(-MAX_HISTORY)
+          const newHistory = [...prev, finalImage].slice(-MAX_HISTORY)
           setCurrentFixIndex(newHistory.length - 1)
           return newHistory
         })
@@ -114,7 +114,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
     try {
       const results: Record<string, string> = { '4x5': previewImage }
 
-      for (const size of ['1x1', '9x16', '1.91x1']) {
+      async function recomposeSize(size: string): Promise<void> {
         try {
           const res = await fetch('/api/generate', {
             method: 'POST',
@@ -122,7 +122,6 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
             body: JSON.stringify({ recomposeBase64: previewImage, targetSize: size }),
           })
           const data = await res.json()
-
           if (!data.error && data.imageBase64) {
             try {
               const resizeRes = await fetch('/api/resize', {
@@ -141,8 +140,10 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
         }
       }
 
+      await Promise.all(['1x1', '9x16', '1.91x1'].map(recomposeSize))
+
       setAllImages(results)
-      setFixHistory([]) // Чистим историю после апрува
+      setFixHistory([])
       setStage('done')
     } catch (e: any) {
       setError(e.message)

@@ -53,6 +53,7 @@ CRITICAL RULES:
 - Do NOT use words like "keep", "maintain", "same as", "modify", "edit", or "identical to"
 - Just describe the final desired image in detail
 - Vertical 4:5 format, professional social media ad quality
+- SAFE ZONES — ABSOLUTE RULE: ALL text and UI elements MUST be placed strictly within the center 80% of the image. No text, button, or element may touch or cross within 10% of any edge. Headline centered horizontally, never near edges. CTA button centered, minimum 15% from bottom edge.
 - Include all text elements that should appear on the image
 - 150-200 words
 
@@ -79,36 +80,31 @@ Return ONLY the image generation prompt. No explanations or preamble.`
 
 Your job: write a Gemini image generation prompt for a scroll-stopping social media ad banner.
 
-STRICT PRIORITY ORDER — follow exactly:
+STRICT PRIORITY ORDER — follow exactly, higher priority overrides lower:
 
-PRIORITY 1 — PRODUCT (always included):
-Use the app name and description as the foundation. The ad must clearly serve this product.
+PRIORITY 1 — USER PROMPT (highest, overrides everything):
+${hasUserText
+  ? `The user has provided specific creative instructions. These are the primary creative direction — follow them precisely. They override all other inputs in case of conflict.`
+  : `No user prompt provided — proceed with lower priorities.`}
 
-PRIORITY 2 — REFERENCE IMAGE + USER PROMPT (work as a pair):
-${hasReference && hasUserText
-  ? `Both a reference image AND user instructions are provided. Analyze the reference for its visual style, composition, color mood, and layout approach. Then apply the user's instructions ON TOP of that style. The user prompt refines the reference — they work together.`
-  : hasReference
-  ? `A reference image is provided. Analyze it for visual style, composition, color palette, typography approach, and emotional feel. Adapt this creative approach for the product — same energy and style but original content.`
-  : hasUserText
-  ? `Follow the user's creative instructions as the main visual direction.`
-  : `Choose the most compelling creative approach for this product.`}
+PRIORITY 2 — REFERENCE IMAGE:
+${hasReference
+  ? `A reference image is provided. Analyze it for visual style, composition, color palette, typography approach, and emotional feel. Use this as the visual style foundation — unless it conflicts with the user prompt above.`
+  : `No reference image.`}
 
-PRIORITY 3 — PAIN POINT (sets emotional tone):
-${hasPain ? `The ad must address this pain: "${selectedPain}". This drives the emotional message and visual mood.` : `No pain point selected — use an aspirational or benefit-driven angle.`}
-
-PRIORITY 4 — HOOK TEXT (ABSOLUTE RULE — non-negotiable):
+PRIORITY 3 — PAIN POINT + HEADLINER:
+${hasPain ? `Pain point (sets emotional tone): "${selectedPain}"` : `No pain point.`}
 ${hasHook
-  ? `THE HOOK TEXT IS: "${selectedHook}"
-THIS TEXT MUST APPEAR IN THE IMAGE EXACTLY AS WRITTEN.
-- Word for word. Zero changes. No synonyms. No paraphrasing.
-- Must be the dominant headline text rendered visibly on the image.
-- Write it in the Gemini prompt as: Display the text "${selectedHook}" as the main bold headline.`
-  : `No hook specified — create a compelling headline that fits the concept.`}
+  ? `Headliner text: "${selectedHook}" — this text MUST appear verbatim on the image as the main bold headline, unless the user prompt explicitly specifies a different headline.`
+  : `No headliner — create a compelling headline that fits the concept.`}
+
+PRIORITY 4 — PRODUCT (always included as context):
+Use the app name and description to ensure the ad serves this product.
 
 OUTPUT FORMAT RULES:
 - Vertical 4:5 format
-- Safe zones: keep all elements away from edges
-- Include text ON the image: headline${hasHook ? ` (MUST be exactly: "${selectedHook}")` : ''}, optional subheadline, CTA button
+- SAFE ZONES — ABSOLUTE RULE: ALL text and UI elements MUST be placed strictly within the center 80% of the image. No text, button, or element may touch or cross within 10% of any edge. Headline centered horizontally, never near edges. CTA button centered, minimum 15% from bottom edge.
+- Include text ON the image: headline${hasHook ? ` (MUST be exactly: "${selectedHook}" unless overridden by user prompt)` : ''}, optional subheadline, CTA button
 - NO logos, brand marks, watermarks
 - NEVER repeat the same text or app name more than once in the image
 - NO pixel dimensions or technical specs
@@ -128,34 +124,30 @@ Return ONLY the Gemini image generation prompt (150-200 words). No explanations,
     contentParts.push({ type: 'image_url', image_url: { url: referenceBase64 } })
   }
 
-  // Формируем пользовательское сообщение
+  // Формируем пользовательское сообщение — приоритет сверху вниз
   let userMessage = 'Create an ad banner prompt.\n\n'
-  userMessage += '=== PRODUCT ===\n'
-  if (appInfo?.name) userMessage += `App: ${appInfo.name} (${appInfo.code})\n`
-  if (appInfo?.description) userMessage += `Description: ${appInfo.description}\n`
+
+  if (hasUserText) {
+    userMessage += '=== USER PROMPT (HIGHEST PRIORITY) ===\n'
+    userMessage += `${userText}\n`
+  }
 
   if (hasReference) {
     userMessage += '\n=== REFERENCE IMAGE ===\n'
     userMessage += hasUserText
-      ? `Analyze the reference style above. Then apply user instructions on top of it.\n`
-      : `Analyze and adapt this creative approach for the product above.\n`
+      ? `Visual style reference above — use for style, apply user prompt as primary direction.\n`
+      : `Analyze and adapt this creative approach for the product below.\n`
   }
 
-  if (hasUserText) {
-    userMessage += '\n=== USER INSTRUCTIONS ===\n'
-    userMessage += `${userText}\n`
+  if (hasPain || hasHook) {
+    userMessage += '\n=== HEADLINER & PAIN POINT ===\n'
+    if (hasPain) userMessage += `Pain point: ${selectedPain}\n`
+    if (hasHook) userMessage += `Headliner (verbatim on image): "${selectedHook}"\n`
   }
 
-  if (hasPain) {
-    userMessage += '\n=== PAIN POINT ===\n'
-    userMessage += `${selectedPain}\n`
-  }
-
-  if (hasHook) {
-    userMessage += '\n=== HOOK TEXT (VERBATIM — DO NOT CHANGE) ===\n'
-    userMessage += `"${selectedHook}"\n`
-    userMessage += `This exact text must appear as the headline in the image. No modifications.\n`
-  }
+  userMessage += '\n=== PRODUCT (context) ===\n'
+  if (appInfo?.name) userMessage += `App: ${appInfo.name} (${appInfo.code})\n`
+  if (appInfo?.description) userMessage += `Description: ${appInfo.description}\n`
 
   if (hasConcept) {
     userMessage += '\n=== CONCEPT STYLE ===\n'

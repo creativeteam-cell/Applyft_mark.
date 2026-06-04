@@ -6,7 +6,7 @@ import sharp from 'sharp'
 // Точные размеры для каждого формата
 const FORMAT_SIZES: Record<string, { width: number; height: number }> = {
   '4x5':    { width: 1200, height: 1500 },
-  '1x1':    { width: 1080, height: 1080 },
+  '1x1':    { width: 1200, height: 1200 },
   '9x16':   { width: 1080, height: 1920 },
   '1.91x1': { width: 1200, height: 628  },
 }
