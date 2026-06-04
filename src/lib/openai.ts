@@ -40,26 +40,36 @@ export async function generatePrompt(options: GeneratePromptOptions): Promise<st
   const hasFix = !!fixNote?.trim()
   const hasConcept = selectedConcept && selectedConcept !== 'none'
 
-  // FIX режим — отдельный простой промпт
+  // FIX режим — GPT анализирует предыдущее изображение и генерирует полный новый промпт
   if (hasFix && previousImageBase64) {
-    const fixPrompt = `You are an advertising creative director.
-The user wants a SMALL FIX to an existing ad image.
-Keep everything identical — composition, style, colors, text, layout.
-Apply ONLY this one change: "${fixNote}"
-Return ONLY the image generation prompt. No explanations.`
+    const fixSystemPrompt = `You are an advertising creative director writing image generation prompts for Gemini.
+
+Study the reference ad image carefully. Then write a COMPLETE Gemini image generation prompt for a NEW ad that:
+1. Fully replicates the reference — same composition, color palette, typography style, mood, layout, and visual elements
+2. Incorporates this specific change: "${fixNote}"
+
+CRITICAL RULES:
+- Write a full scene description from scratch, as if creating a brand new image
+- Do NOT use words like "keep", "maintain", "same as", "modify", "edit", or "identical to"
+- Just describe the final desired image in detail
+- Vertical 4:5 format, professional social media ad quality
+- Include all text elements that should appear on the image
+- 150-200 words
+
+Return ONLY the image generation prompt. No explanations or preamble.`
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [
-        { role: 'system', content: fixPrompt },
+        { role: 'system', content: fixSystemPrompt },
         {
           role: 'user', content: [
             { type: 'image_url', image_url: { url: previousImageBase64 } },
-            { type: 'text', text: `Apply this fix: "${fixNote}"` },
+            { type: 'text', text: `Write the full generation prompt with this change applied: "${fixNote}"` },
           ],
         },
       ],
-      max_tokens: 400,
+      max_tokens: 500,
     })
     return response.choices[0].message.content || ''
   }
