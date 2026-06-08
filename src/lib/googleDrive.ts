@@ -19,7 +19,7 @@ export const SIZES = ['1x1', '4x5', '1.91x1', '9x16']
 const cache = new Map<string, { data: Creative[]; expiresAt: number }>()
 const CACHE_TTL = 10 * 60 * 1000 // 10 минут
 
-function getAuthClient() {
+export function getAuthClient() {
   const serviceAccountKey = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY!)
   return new google.auth.GoogleAuth({
     credentials: serviceAccountKey,
