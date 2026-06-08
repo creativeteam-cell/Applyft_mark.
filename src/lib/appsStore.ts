@@ -5,7 +5,7 @@ export interface App {
   name: string
   description: string
   painPoints: string[]
-  hooks: string[]
+  hooks?: string[]
   active: boolean
   logoBase64?: string  // legacy, kept for backward compat
   logos?: string[]     // multiple logos (base64 array)
