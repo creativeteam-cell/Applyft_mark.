@@ -41,13 +41,19 @@ ONLY reposition and rescale existing elements to fit naturally in a wide horizon
 - Maintain the same overall mood, style, and composition hierarchy`,
 }
 
-async function tryGenerate(prompt: string, referenceBase64?: string, timeoutMs = 100000): Promise<string> {
+async function tryGenerate(prompt: string, referenceBase64?: string, logoBase64?: string, timeoutMs = 100000): Promise<string> {
   const apiKey = process.env.GOOGLE_AI_API_KEY!
   const parts: any[] = []
 
   if (referenceBase64) {
     const base64Data = referenceBase64.replace(/^data:image\/\w+;base64,/, '')
     const mimeType = referenceBase64.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg'
+    parts.push({ inlineData: { mimeType, data: base64Data } })
+  }
+
+  if (logoBase64) {
+    const base64Data = logoBase64.replace(/^data:image\/\w+;base64,/, '')
+    const mimeType = logoBase64.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/png'
     parts.push({ inlineData: { mimeType, data: base64Data } })
   }
 
@@ -90,12 +96,12 @@ async function tryGenerate(prompt: string, referenceBase64?: string, timeoutMs =
   }
 }
 
-async function withRetry(prompt: string, referenceBase64?: string, maxAttempts = 3): Promise<string> {
+async function withRetry(prompt: string, referenceBase64?: string, logoBase64?: string, maxAttempts = 3): Promise<string> {
   const retryableErrors = ['TIMEOUT', 'No image in response']
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      return await tryGenerate(prompt, referenceBase64, 100000)
+      return await tryGenerate(prompt, referenceBase64, logoBase64, 100000)
     } catch (e: any) {
       const isRetryable = retryableErrors.includes(e.message)
       if (!isRetryable || attempt === maxAttempts) {
@@ -111,8 +117,8 @@ async function withRetry(prompt: string, referenceBase64?: string, maxAttempts =
   throw new Error('Image generation failed after all retries.')
 }
 
-export async function generateImage(prompt: string, referenceBase64?: string): Promise<string> {
-  return withRetry(prompt, referenceBase64)
+export async function generateImage(prompt: string, referenceBase64?: string, logoBase64?: string): Promise<string> {
+  return withRetry(prompt, referenceBase64, logoBase64)
 }
 
 export async function recomposeImage(imageBase64: string, targetSize: string): Promise<string> {

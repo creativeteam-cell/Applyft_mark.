@@ -37,18 +37,20 @@ const MAX_HISTORY = 10
 export function GenerateModal({ appCode, selectedPain, selectedHook, selectedConcept, prompt, reference, competitor, onClose }: GenerateModalProps) {
   const [stage, setStage] = useState<Stage>('generating')
   const [fixHistory, setFixHistory] = useState<string[]>([])
+  const [promptHistory, setPromptHistory] = useState<string[]>([])
   const [currentFixIndex, setCurrentFixIndex] = useState(0)
   const [allImages, setAllImages] = useState<Record<string, string>>({})
   const [fixNote, setFixNote] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const previewImage = fixHistory[currentFixIndex] || null
+  const currentPrompt = promptHistory[currentFixIndex] || null
 
   useEffect(() => {
     generateFirst()
   }, [])
 
-  async function generateFirst(fix?: string, prevImage?: string) {
+  async function generateFirst(fix?: string, prevImage?: string, customPrompt?: string) {
     setStage('generating')
     setError(null)
 
@@ -64,6 +66,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
           referenceBase64: reference,
           fixNote: fix,
           previousImageBase64: prevImage,
+          customPrompt: customPrompt,
         }),
       })
 
@@ -86,18 +89,22 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
         if (resizeData.imageBase64) finalImage = resizeData.imageBase64
       } catch { }
 
+      const savedPrompt = data.prompt || customPrompt || ''
+
       // Добавляем в историю
-      if (!fix) {
+      if (!fix && !customPrompt) {
         // Первая генерация — сбрасываем историю
         setFixHistory([finalImage])
+        setPromptHistory([savedPrompt])
         setCurrentFixIndex(0)
       } else {
-        // Fix — всегда добавляем в конец, сохраняя все версии
+        // Fix или Recreate — добавляем в конец, сохраняя все версии
         setFixHistory(prev => {
           const newHistory = [...prev, finalImage].slice(-MAX_HISTORY)
           setCurrentFixIndex(newHistory.length - 1)
           return newHistory
         })
+        setPromptHistory(prev => [...prev, savedPrompt].slice(-MAX_HISTORY))
       }
 
       setStage('preview')
@@ -105,6 +112,10 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
       setError(e.message)
       setStage('preview')
     }
+  }
+
+  async function handleRecreate() {
+    await generateFirst(undefined, undefined, currentPrompt || undefined)
   }
 
   async function handleApprove() {
@@ -277,9 +288,9 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                   <button onClick={() => setStage('fixing')}
                     className="px-8 py-3 rounded-xl font-semibold"
                     style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>✎ Fix</button>
-                  <button onClick={onClose}
-                    className="px-8 py-3 rounded-xl font-semibold text-red-400"
-                    style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>✕ Cancel</button>
+                  <button onClick={handleRecreate}
+                    className="px-8 py-3 rounded-xl font-semibold"
+                    style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>↺ Recreate</button>
                 </div>
                 <div className="flex justify-center">
                   <button onClick={() => {
