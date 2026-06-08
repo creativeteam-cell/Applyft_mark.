@@ -215,12 +215,25 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
     }
   }
 
+  function getFileName(size: string): string {
+    // Если уже сохранили на Drive — используем точное имя
+    if (savedFolder) return `${savedFolder}_${size}_${marketerCode}_EN.png`
+    // Для Var — знаем имя заранее
+    if (mode === 'var' && varNumber) {
+      const letters = varLetters.filter(Boolean)
+      const variantName = `${appCode}_S_${varNumber}_${letters.join('_')}`
+      return `${variantName}_${size}_${marketerCode}_EN.png`
+    }
+    // Для New без сохранения — дженерик
+    return `${appCode}_${size}_${marketerCode}_EN.png`
+  }
+
   function downloadAll() {
     Object.entries(allImages).forEach(([size, base64], i) => {
       setTimeout(() => {
         const link = document.createElement('a')
         link.href = base64
-        link.download = `${appCode}_${size.replace('/', 'x')}.png`
+        link.download = getFileName(size)
         link.click()
       }, i * 200)
     })

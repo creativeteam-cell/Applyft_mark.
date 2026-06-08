@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { getDriveClient, invalidateCache } from '@/lib/googleDrive'
-import { Readable } from 'stream'
+import { PassThrough } from 'stream'
 
 async function createFolder(drive: any, name: string, parentId: string): Promise<string> {
   const res = await drive.files.create({
@@ -13,19 +13,21 @@ async function createFolder(drive: any, name: string, parentId: string): Promise
       parents: [parentId],
     },
     fields: 'id',
-  })
+  } as any)
   return res.data.id!
 }
 
 async function uploadImage(drive: any, name: string, base64: string, parentId: string) {
   const base64Data = base64.replace(/^data:image\/\w+;base64,/, '')
   const buffer = Buffer.from(base64Data, 'base64')
+  const stream = new PassThrough()
+  stream.end(buffer)
   await drive.files.create({
     supportsAllDrives: true,
-    requestBody: { name, parents: [parentId], mimeType: 'image/png' },
-    media: { mimeType: 'image/png', body: Readable.from(buffer) },
+    requestBody: { name, parents: [parentId] },
+    media: { mimeType: 'image/png', body: stream },
     fields: 'id',
-  })
+  } as any)
 }
 
 export async function POST(req: NextRequest) {
