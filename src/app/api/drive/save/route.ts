@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { getDriveClient, getAuthClient, invalidateCache } from '@/lib/googleDrive'
+import { getDriveClient, invalidateCache } from '@/lib/googleDrive'
 async function createFolder(drive: any, name: string, parentId: string): Promise<string> {
   const res = await drive.files.create({
     supportsAllDrives: true,
@@ -15,14 +15,9 @@ async function createFolder(drive: any, name: string, parentId: string): Promise
   return res.data.id!
 }
 
-// Загрузка через прямой HTTP запрос — googleapis клиент не передаёт supportsAllDrives при media upload
-async function uploadImage(auth: any, name: string, base64: string, parentId: string) {
+async function uploadImage(token: string, name: string, base64: string, parentId: string) {
   const base64Data = base64.replace(/^data:image\/\w+;base64,/, '')
   const imageBuffer = Buffer.from(base64Data, 'base64')
-
-  const client = await auth.getClient()
-  const tokenRes = await client.getAccessToken()
-  const token = tokenRes.token
 
   const boundary = 'applyft_boundary_314159'
   const metadata = JSON.stringify({ name, parents: [parentId] })
@@ -61,9 +56,10 @@ export async function POST(req: NextRequest) {
   // images: Record<size, base64> — { '4x5': '...', '1x1': '...', '9x16': '...', '1.91x1': '...' }
 
   try {
-    const auth = getAuthClient()
     const drive = getDriveClient()
     const rootFolderId = process.env.GOOGLE_DRIVE_STATICS_FOLDER_ID!
+    const userToken = (session as any).accessToken as string
+    if (!userToken) throw new Error('No access token in session. Please sign out and sign in again.')
 
     // Находим папку приложения
     const appFolderRes = await drive.files.list({
@@ -139,7 +135,7 @@ export async function POST(req: NextRequest) {
         if (!base64) return
         const sizeName = sizeMap[size] || size
         const fileName = `${variantFolderName}_${sizeName}_${marketerCode}_EN.jpg`
-        await uploadImage(auth, fileName, base64 as string, enParentId)
+        await uploadImage(userToken, fileName, base64 as string, enParentId)
       })
     )
 

@@ -12,6 +12,9 @@ export const authOptions: NextAuthOptions = {
       authorization: {
         params: {
           hd: 'applyft.co',
+          scope: 'openid email profile https://www.googleapis.com/auth/drive',
+          access_type: 'offline',
+          prompt: 'consent',
         },
       },
     }),
@@ -26,16 +29,14 @@ export const authOptions: NextAuthOptions = {
       }
       return true
     },
-    async jwt({ token, user }) {
-      if (user) {
-        token.id = user.id
-      }
+    async jwt({ token, user, account }) {
+      if (user) token.id = user.id
+      if (account?.access_token) token.accessToken = account.access_token
       return token
     },
     async session({ session, token }) {
-      if (session.user) {
-        session.user.id = token.id as string
-      }
+      if (session.user) session.user.id = token.id as string
+      session.accessToken = token.accessToken as string | undefined
       return session
     },
   },
