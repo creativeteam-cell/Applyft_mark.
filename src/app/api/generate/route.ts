@@ -28,6 +28,7 @@ export async function POST(req: NextRequest) {
       customPrompt,
       recomposeBase64,
       targetSize,
+      logoBase64,
     } = body
 
     // Режим рекомпозиции
@@ -93,22 +94,16 @@ export async function POST(req: NextRequest) {
     // При fix-режиме передаём предыдущее изображение в Gemini как референс
     const imageReference = previousImageBase64 || referenceBase64 || undefined
 
-    // Логотип приложения — передаём Gemini если есть
-    let logoBase64: string | undefined
+    // Логотип — передаём Gemini если юзер выбрал
     let finalPromptWithLogo = finalPrompt
-    if (appCode) {
-      const config = await getConfig()
-      const app = config.apps.find(a => a.code === appCode)
-      if (app?.logoBase64) {
-        logoBase64 = app.logoBase64
-        finalPromptWithLogo = finalPrompt + `\n\nLOGO: The last image provided is the app logo. Place it in the top-left corner of the ad. Size: approximately 15% of the image width. Preserve the logo exactly — do not alter its colors, shape, or proportions. Ensure it is fully visible and does not overlap with any text or CTA button.`
-      }
+    if (logoBase64) {
+      finalPromptWithLogo = finalPrompt + `\n\nLOGO: The last image provided is the app logo. Place it in the top-left corner of the ad. Size: approximately 15% of the image width. Preserve the logo exactly — do not alter its colors, shape, or proportions. Ensure it is fully visible and does not overlap with any text or CTA button.`
     }
 
     const imageBase64 = await generateImage(
       finalPromptWithLogo,
       imageReference,
-      logoBase64
+      logoBase64 || undefined
     )
 
     return NextResponse.json({ prompt: finalPrompt, imageBase64 })

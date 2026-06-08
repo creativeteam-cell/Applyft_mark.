@@ -10,6 +10,7 @@ interface App {
   hooks: string[]
   active: boolean
   logoBase64?: string
+  logos?: string[]
 }
 
 interface AppCardProps {
@@ -26,6 +27,7 @@ export function AppCard({ app, expanded, onExpand, onSave, onDelete }: AppCardPr
     painPoints: Array.isArray(app.painPoints) ? app.painPoints : [],
     hooks: Array.isArray(app.hooks) ? app.hooks : [],
     logoBase64: app.logoBase64 || '',
+    logos: Array.isArray(app.logos) ? app.logos : (app.logoBase64 ? [app.logoBase64] : []),
   })
   const [newPain, setNewPain] = useState('')
   const [newHook, setNewHook] = useState('')
@@ -57,8 +59,16 @@ export function AppCard({ app, expanded, onExpand, onSave, onDelete }: AppCardPr
     const file = e.target.files?.[0]
     if (!file) return
     const reader = new FileReader()
-    reader.onload = () => setForm({ ...form, logoBase64: reader.result as string })
+    reader.onload = () => {
+      const base64 = reader.result as string
+      setForm(prev => ({ ...prev, logos: [...prev.logos, base64] }))
+    }
     reader.readAsDataURL(file)
+    e.target.value = ''
+  }
+
+  function handleRemoveLogo(i: number) {
+    setForm(prev => ({ ...prev, logos: prev.logos.filter((_, idx) => idx !== i) }))
   }
 
   async function handleSave() {
@@ -77,8 +87,8 @@ export function AppCard({ app, expanded, onExpand, onSave, onDelete }: AppCardPr
       <div className="flex items-center gap-4 px-6 py-4 cursor-pointer" onClick={onExpand}>
         <div className="flex-shrink-0 w-12 h-12 rounded-xl overflow-hidden flex items-center justify-center font-bold text-sm"
           style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--accent)' }}>
-          {form.logoBase64
-            ? <img src={form.logoBase64} alt="logo" className="w-full h-full object-contain p-1" />
+          {form.logos[0]
+            ? <img src={form.logos[0]} alt="logo" className="w-full h-full object-contain p-1" />
             : app.code}
         </div>
         <div className="flex-1">
@@ -89,7 +99,7 @@ export function AppCard({ app, expanded, onExpand, onSave, onDelete }: AppCardPr
         </div>
         <div className="flex items-center gap-3 text-xs text-gray-600 font-mono">
           <span>{form.painPoints.length} pains</span>
-          <span>{form.hooks.length} hooks</span>
+          <span>{form.hooks.length} headlines</span>
         </div>
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none"
           className={`transition-transform text-gray-500 ${expanded ? 'rotate-180' : ''}`}>
@@ -154,15 +164,15 @@ export function AppCard({ app, expanded, onExpand, onSave, onDelete }: AppCardPr
             </div>
           </div>
 
-          {/* 3 · Hooks */}
+          {/* 3 · Headlines */}
           <div>
             <label className="block text-xs text-gray-400 mb-2 uppercase tracking-widest font-mono">
-              3 · Hooks
+              3 · Headlines
             </label>
             <p className="text-xs text-gray-600 mb-3">Text that will appear verbatim in the generated image</p>
             <div className="space-y-2 mb-3">
               {form.hooks.length === 0 && (
-                <div className="text-xs text-gray-600 py-2">No hooks yet</div>
+                <div className="text-xs text-gray-600 py-2">No headlines yet</div>
               )}
               {form.hooks.map((hook, i) => (
                 <div key={i} className="flex items-center gap-3 px-4 py-2.5 rounded-xl"
@@ -190,42 +200,35 @@ export function AppCard({ app, expanded, onExpand, onSave, onDelete }: AppCardPr
             </div>
           </div>
 
-          {/* 4 · Logo */}
+          {/* 4 · Logos */}
           <div>
             <label className="block text-xs text-gray-400 mb-2 uppercase tracking-widest font-mono">
-              4 · Logo (PNG)
+              4 · Logos
             </label>
-            <input ref={logoRef} type="file" accept="image/png,image/svg+xml,image/jpeg" onChange={handleLogo} className="hidden" />
-            <div className="flex items-center gap-4">
-              {form.logoBase64 ? (
-                <div className="w-16 h-16 rounded-xl overflow-hidden flex items-center justify-center"
-                  style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
-                  <img src={form.logoBase64} alt="logo" className="w-full h-full object-contain p-2" />
-                </div>
-              ) : (
-                <div className="w-16 h-16 rounded-xl flex items-center justify-center text-gray-600"
-                  style={{ background: 'var(--bg)', border: '1px dashed var(--border)' }}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <rect x="3" y="3" width="18" height="18" rx="2"/>
-                    <circle cx="8.5" cy="8.5" r="1.5"/>
-                    <polyline points="21 15 16 10 5 21"/>
-                  </svg>
-                </div>
-              )}
-              <div className="flex gap-2">
-                <button onClick={() => logoRef.current?.click()}
-                  className="px-4 py-2 rounded-xl text-sm"
-                  style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-                  {form.logoBase64 ? 'Change logo' : 'Upload logo'}
-                </button>
-                {form.logoBase64 && (
-                  <button onClick={() => setForm({ ...form, logoBase64: '' })}
-                    className="px-4 py-2 rounded-xl text-sm text-red-400"
-                    style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)' }}>
-                    Remove
+            <p className="text-xs text-gray-600 mb-3">Upload multiple logos — users can pick one when generating</p>
+            <input ref={logoRef} type="file" accept="image/png,image/svg+xml,image/jpeg,image/webp" onChange={handleLogo} className="hidden" />
+            <div className="flex flex-wrap gap-3 mb-3">
+              {form.logos.map((logo, i) => (
+                <div key={i} className="relative group">
+                  <div className="w-16 h-16 rounded-xl overflow-hidden flex items-center justify-center"
+                    style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                    <img src={logo} alt={`logo ${i + 1}`} className="w-full h-full object-contain p-2" />
+                  </div>
+                  <button
+                    onClick={() => handleRemoveLogo(i)}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-xs items-center justify-center hidden group-hover:flex shadow-lg">
+                    ×
                   </button>
-                )}
-              </div>
+                </div>
+              ))}
+              <button onClick={() => logoRef.current?.click()}
+                className="w-16 h-16 rounded-xl flex flex-col items-center justify-center gap-1 text-gray-500 hover:text-gray-300 transition-all"
+                style={{ background: 'var(--bg)', border: '1.5px dashed var(--border)' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                <span className="text-xs">Add</span>
+              </button>
             </div>
           </div>
 

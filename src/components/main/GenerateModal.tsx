@@ -10,6 +10,7 @@ interface GenerateModalProps {
   prompt: string
   reference: string | null
   competitor: string | null
+  logoBase64: string | null
   onClose: () => void
 }
 
@@ -34,7 +35,7 @@ type Stage = 'generating' | 'preview' | 'fixing' | 'generating-all' | 'done'
 const SIZES = ['4x5', '1x1', '9x16', '1.91x1']
 const MAX_HISTORY = 10
 
-export function GenerateModal({ appCode, selectedPain, selectedHook, selectedConcept, prompt, reference, competitor, onClose }: GenerateModalProps) {
+export function GenerateModal({ appCode, selectedPain, selectedHook, selectedConcept, prompt, reference, competitor, logoBase64, onClose }: GenerateModalProps) {
   const [stage, setStage] = useState<Stage>('generating')
   const [fixHistory, setFixHistory] = useState<string[]>([])
   const [promptHistory, setPromptHistory] = useState<string[]>([])
@@ -67,6 +68,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
           fixNote: fix,
           previousImageBase64: prevImage,
           customPrompt: customPrompt,
+          logoBase64: logoBase64 || undefined,
         }),
       })
 

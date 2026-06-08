@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
+import sharp from 'sharp'
+
+// Сжимаем до max 1200px и JPEG quality 85 чтобы не превысить лимит Vercel (4.5MB)
+async function compressBuffer(buffer: ArrayBuffer): Promise<string> {
+  const compressed = await sharp(Buffer.from(buffer))
+    .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 85 })
+    .toBuffer()
+  return `data:image/jpeg;base64,${compressed.toString('base64')}`
+}
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -17,9 +27,8 @@ export async function POST(req: NextRequest) {
       const res = await fetch(url)
       if (!res.ok) throw new Error('Failed to fetch image')
       const buffer = await res.arrayBuffer()
-      const mimeType = res.headers.get('content-type') || 'image/jpeg'
-      const base64 = Buffer.from(buffer).toString('base64')
-      return NextResponse.json({ imageBase64: `data:${mimeType};base64,${base64}` })
+      const imageBase64 = await compressBuffer(buffer)
+      return NextResponse.json({ imageBase64 })
     }
 
     // Иначе — парсим страницу и ищем og:image
@@ -49,10 +58,9 @@ export async function POST(req: NextRequest) {
     if (!imgRes.ok) throw new Error('Failed to download image')
 
     const buffer = await imgRes.arrayBuffer()
-    const mimeType = imgRes.headers.get('content-type') || 'image/jpeg'
-    const base64 = Buffer.from(buffer).toString('base64')
+    const imageBase64 = await compressBuffer(buffer)
 
-    return NextResponse.json({ imageBase64: `data:${mimeType};base64,${base64}` })
+    return NextResponse.json({ imageBase64 })
 
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Failed to fetch image' }, { status: 500 })

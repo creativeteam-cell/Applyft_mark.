@@ -15,6 +15,9 @@ interface GeneratePanelProps {
   onVarLettersChange: (letters: [string, string, string]) => void
   onGenerate: () => void
   appCode: string
+  availableLogos: string[]
+  selectedLogo: string | null
+  onLogoChange: (logo: string | null) => void
 }
 
 export function GeneratePanel({
@@ -25,7 +28,11 @@ export function GeneratePanel({
   varLetters, onVarLettersChange,
   onGenerate,
   appCode,
+  availableLogos,
+  selectedLogo,
+  onLogoChange,
 }: GeneratePanelProps) {
+  const [logoOpen, setLogoOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const [urlInput, setUrlInput] = useState('')
   const [urlLoading, setUrlLoading] = useState(false)
@@ -221,7 +228,54 @@ export function GeneratePanel({
               </div>
             )}
 
-            <div className="flex-1 flex justify-end">
+            <div className="flex-1 flex items-center justify-end gap-3">
+
+              {/* Logo switcher */}
+              {availableLogos.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      if (logoOpen) { setLogoOpen(false) }
+                      else { setLogoOpen(true) }
+                    }}
+                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all"
+                    style={{
+                      background: selectedLogo ? 'rgba(99,102,241,0.15)' : 'var(--surface)',
+                      border: `1px solid ${selectedLogo ? 'var(--accent)' : 'var(--border)'}`,
+                    }}>
+                    {selectedLogo
+                      ? <img src={selectedLogo} alt="logo" className="w-5 h-5 object-contain" />
+                      : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                    }
+                    <span className="text-xs font-medium">{selectedLogo ? 'Logo on' : 'Logo'}</span>
+                  </button>
+
+                  {logoOpen && (
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl"
+                      style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                      <button
+                        onClick={() => { onLogoChange(null); setLogoOpen(false) }}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-xs text-gray-500 hover:text-red-400 transition-all"
+                        style={{ background: selectedLogo === null ? 'var(--border)' : 'transparent' }}
+                        title="No logo">
+                        ✕
+                      </button>
+                      {availableLogos.map((logo, i) => (
+                        <button key={i}
+                          onClick={() => { onLogoChange(logo); setLogoOpen(false) }}
+                          className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center transition-all"
+                          style={{
+                            background: 'var(--bg)',
+                            border: `2px solid ${selectedLogo === logo ? 'var(--accent)' : 'transparent'}`,
+                          }}>
+                          <img src={logo} alt={`logo ${i + 1}`} className="w-full h-full object-contain p-0.5" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <button onClick={onGenerate}
                 className="flex items-center gap-2 px-6 py-2 rounded-xl font-semibold text-sm"
                 style={{ background: 'var(--accent)' }}>

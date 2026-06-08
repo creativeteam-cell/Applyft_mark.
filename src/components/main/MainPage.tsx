@@ -6,7 +6,7 @@ import { CreativesGrid } from './CreativesGrid'
 import { GenerateModal } from './GenerateModal'
 import { FilterBar } from './FilterBar'
 
-interface App { code: string; name: string; active: boolean; painPoints?: string[]; hooks?: string[] }
+interface App { code: string; name: string; active: boolean; painPoints?: string[]; hooks?: string[]; logos?: string[] }
 interface Marketer { code: string; name: string }
 
 export function MainPage() {
@@ -21,6 +21,7 @@ export function MainPage() {
   const [showModal, setShowModal] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [reference, setReference] = useState<string | null>(null)
+  const [selectedLogo, setSelectedLogo] = useState<string | null>(null)
 
   // New / Var
   const [mode, setMode] = useState<'new' | 'var'>('new')
@@ -96,6 +97,9 @@ export function MainPage() {
         onVarLettersChange={setVarLetters}
         onGenerate={handleGenerate}
         appCode={selectedApp}
+        availableLogos={apps.find(a => a.code === selectedApp)?.logos || []}
+        selectedLogo={selectedLogo}
+        onLogoChange={setSelectedLogo}
       />
 
       <div className="px-8 pb-8" style={{ marginTop: mode === 'var' ? '390px' : '340px' }}>
@@ -115,6 +119,7 @@ export function MainPage() {
           prompt={prompt}
           reference={reference}
           competitor={null}
+          logoBase64={selectedLogo}
           onClose={() => setShowModal(false)}
         />
       )}
