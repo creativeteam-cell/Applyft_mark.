@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
     if (!appFolder?.id) return NextResponse.json({ exists: false })
 
     // Находим числовую папку UN_S_{varNumber}
-    const numberFolderName = `${appCode}_S_${varNumber}`
+    const numberFolderName = `${appCode}_S_${String(varNumber).padStart(3, '0')}`
     const numberFolderRes = await drive.files.list({
       supportsAllDrives: true,
       includeItemsFromAllDrives: true,

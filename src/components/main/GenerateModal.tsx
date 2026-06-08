@@ -221,7 +221,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
     // Для Var — знаем имя заранее
     if (mode === 'var' && varNumber) {
       const letters = varLetters.filter(Boolean)
-      const variantName = `${appCode}_S_${varNumber}_${letters.join('_')}`
+      const variantName = `${appCode}_S_${String(varNumber).padStart(3, '0')}_${letters.join('_')}`
       return `${variantName}_${size}_${marketerCode}_EN.png`
     }
     // Для New без сохранения — дженерик

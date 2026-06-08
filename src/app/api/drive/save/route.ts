@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
       }
 
       const nextNum = maxNum + 1
-      variantFolderName = `${appCode}_S_${nextNum}`
+      variantFolderName = `${appCode}_S_${String(nextNum).padStart(3, '0')}`
 
       // Создаём: numberFolder → variantFolder (то же имя) → EN
       const numberFolderId = await createFolder(drive, variantFolderName, appFolder.id)
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
 
     } else {
       // Var mode — ищем существующую числовую папку
-      const numberFolderName = `${appCode}_S_${varNumber}`
+      const numberFolderName = `${appCode}_S_${String(varNumber).padStart(3, '0')}`
       const numberFolderRes = await drive.files.list({
         supportsAllDrives: true,
         includeItemsFromAllDrives: true,
