@@ -11,6 +11,10 @@ interface GenerateModalProps {
   reference: string | null
   competitor: string | null
   logoBase64: string | null
+  marketerCode: string
+  mode: 'new' | 'var'
+  varNumber: string
+  varLetters: [string, string, string]
   onClose: () => void
 }
 
@@ -35,7 +39,7 @@ type Stage = 'generating' | 'preview' | 'fixing' | 'generating-all' | 'done'
 const SIZES = ['4x5', '1x1', '9x16', '1.91x1']
 const MAX_HISTORY = 10
 
-export function GenerateModal({ appCode, selectedPain, selectedHook, selectedConcept, prompt, reference, competitor, logoBase64, onClose }: GenerateModalProps) {
+export function GenerateModal({ appCode, selectedPain, selectedHook, selectedConcept, prompt, reference, competitor, logoBase64, marketerCode, mode, varNumber, varLetters, onClose }: GenerateModalProps) {
   const [stage, setStage] = useState<Stage>('generating')
   const [fixHistory, setFixHistory] = useState<string[]>([])
   const [promptHistory, setPromptHistory] = useState<string[]>([])
@@ -43,6 +47,9 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
   const [allImages, setAllImages] = useState<Record<string, string>>({})
   const [fixNote, setFixNote] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [savedFolder, setSavedFolder] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const previewImage = fixHistory[currentFixIndex] || null
   const currentPrompt = promptHistory[currentFixIndex] || null
@@ -169,6 +176,32 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
     const compressed = baseImage ? await compressImage(baseImage) : undefined
     await generateFirst(fixNote, compressed)
     setFixNote('')
+  }
+
+  async function handleSaveToDrive() {
+    setSaving(true)
+    setSaveError(null)
+    try {
+      const res = await fetch('/api/drive/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appCode,
+          marketerCode,
+          images: allImages,
+          mode,
+          varNumber: mode === 'var' ? varNumber : undefined,
+          varLetters: mode === 'var' ? varLetters : undefined,
+        }),
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setSavedFolder(data.folderName)
+    } catch (e: any) {
+      setSaveError(e.message)
+    } finally {
+      setSaving(false)
+    }
   }
 
   function downloadAll() {
@@ -371,13 +404,23 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                 </div>
               ))}
             </div>
-            <div className="flex gap-3">
+            <div className="flex gap-3 mb-3">
               <button onClick={downloadAll}
                 className="flex-1 py-3 rounded-xl font-semibold"
                 style={{ background: 'var(--accent)' }}>⬇ Download all 4</button>
+              <button
+                onClick={handleSaveToDrive}
+                disabled={saving || !!savedFolder}
+                className="flex-1 py-3 rounded-xl font-semibold disabled:opacity-60"
+                style={{ background: savedFolder ? '#16a34a' : 'var(--surface)', border: '1px solid var(--border)' }}>
+                {saving ? '⟳ Saving...' : savedFolder ? `✓ Saved: ${savedFolder}` : '☁ Save to Drive'}
+              </button>
               <button onClick={onClose} className="px-6 py-3 rounded-xl"
                 style={{ background: 'var(--border)' }}>Close</button>
             </div>
+            {saveError && (
+              <div className="text-red-400 text-xs text-center">{saveError}</div>
+            )}
           </div>
         )}
       </div>

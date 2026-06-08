@@ -49,7 +49,7 @@ export function MainPage() {
       })
   }, [])
 
-  function handleGenerate() {
+  async function handleGenerate() {
     if (!selectedApp) {
       alert('Please select an app first.')
       return
@@ -58,6 +58,30 @@ export function MainPage() {
       alert('Please enter a variant number before generating.')
       return
     }
+
+    // Для вариации — проверяем что такая папка ещё не существует
+    if (mode === 'var') {
+      const letters = varLetters.filter(Boolean)
+      if (letters.length === 0) {
+        alert('Please enter at least one variant letter.')
+        return
+      }
+      try {
+        const res = await fetch('/api/drive/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ appCode: selectedApp, varNumber, varLetters }),
+        })
+        const data = await res.json()
+        if (data.exists) {
+          alert(`Variation ${data.variantFolderName} already exists on Google Drive. Choose different letters.`)
+          return
+        }
+      } catch {
+        // Если не смогли проверить — позволяем продолжить
+      }
+    }
+
     setShowModal(true)
   }
 
@@ -120,6 +144,10 @@ export function MainPage() {
           reference={reference}
           competitor={null}
           logoBase64={selectedLogo}
+          marketerCode={selectedMarketer}
+          mode={mode}
+          varNumber={varNumber}
+          varLetters={varLetters}
           onClose={() => setShowModal(false)}
         />
       )}

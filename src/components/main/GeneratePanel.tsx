@@ -37,6 +37,7 @@ export function GeneratePanel({
   const [urlInput, setUrlInput] = useState('')
   const [urlLoading, setUrlLoading] = useState(false)
   const [urlError, setUrlError] = useState('')
+  const urlDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -46,15 +47,15 @@ export function GeneratePanel({
     reader.readAsDataURL(file)
   }
 
-  async function handleUrlFetch() {
-    if (!urlInput.trim()) return
+  async function handleUrlFetch(url: string) {
+    if (!url.trim()) return
     setUrlLoading(true)
     setUrlError('')
     try {
       const res = await fetch('/api/fetch-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: urlInput.trim() }),
+        body: JSON.stringify({ url: url.trim() }),
       })
       const data = await res.json()
       if (data.error) {
@@ -116,31 +117,41 @@ export function GeneratePanel({
             </button>
           )}
 
-          <div className="flex gap-1.5">
-            <div className="flex-1 relative">
-              <input
-                value={urlInput}
-                onChange={e => { setUrlInput(e.target.value); setUrlError('') }}
-                placeholder="Paste a link..."
-                className="w-full px-3 py-2 rounded-xl text-xs outline-none"
-                style={{
-                  background: 'var(--surface)',
-                  border: `1px solid ${urlError ? 'rgba(248,113,113,0.5)' : 'var(--border)'}`,
-                  color: 'var(--text)',
-                }}
-                onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'}
-                onBlur={e => e.currentTarget.style.borderColor = urlError ? 'rgba(248,113,113,0.5)' : 'var(--border)'}
-                onKeyDown={e => e.key === 'Enter' && handleUrlFetch()}
-              />
-              {urlError && (
-                <div className="absolute left-0 -bottom-4 text-xs text-red-400 whitespace-nowrap">{urlError}</div>
-              )}
-            </div>
-            <button onClick={handleUrlFetch} disabled={!urlInput.trim() || urlLoading}
-              className="px-2 py-2 rounded-xl text-xs font-medium disabled:opacity-40 flex-shrink-0"
-              style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-              {urlLoading ? '⟳' : '↓'}
-            </button>
+          <div className="relative">
+            <input
+              value={urlInput}
+              onChange={e => {
+                const val = e.target.value
+                setUrlInput(val)
+                setUrlError('')
+                if (urlDebounceRef.current) clearTimeout(urlDebounceRef.current)
+                if (val.trim()) {
+                  urlDebounceRef.current = setTimeout(() => handleUrlFetch(val), 600)
+                }
+              }}
+              onPaste={e => {
+                const val = e.clipboardData.getData('text')
+                if (val.trim()) {
+                  if (urlDebounceRef.current) clearTimeout(urlDebounceRef.current)
+                  urlDebounceRef.current = setTimeout(() => handleUrlFetch(val), 100)
+                }
+              }}
+              placeholder="Paste a link..."
+              className="w-full px-3 py-2 rounded-xl text-xs outline-none pr-7"
+              style={{
+                background: 'var(--surface)',
+                border: `1px solid ${urlError ? 'rgba(248,113,113,0.5)' : 'var(--border)'}`,
+                color: 'var(--text)',
+              }}
+              onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'}
+              onBlur={e => e.currentTarget.style.borderColor = urlError ? 'rgba(248,113,113,0.5)' : 'var(--border)'}
+            />
+            {urlLoading && (
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-500 animate-spin">⟳</span>
+            )}
+            {urlError && (
+              <div className="absolute left-0 -bottom-4 text-xs text-red-400 whitespace-nowrap">{urlError}</div>
+            )}
           </div>
         </div>
 
