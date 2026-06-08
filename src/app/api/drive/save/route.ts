@@ -6,6 +6,7 @@ import { Readable } from 'stream'
 
 async function createFolder(drive: any, name: string, parentId: string): Promise<string> {
   const res = await drive.files.create({
+    supportsAllDrives: true,
     requestBody: {
       name,
       mimeType: 'application/vnd.google-apps.folder',
@@ -20,6 +21,7 @@ async function uploadImage(drive: any, name: string, base64: string, parentId: s
   const base64Data = base64.replace(/^data:image\/\w+;base64,/, '')
   const buffer = Buffer.from(base64Data, 'base64')
   await drive.files.create({
+    supportsAllDrives: true,
     requestBody: { name, parents: [parentId], mimeType: 'image/png' },
     media: { mimeType: 'image/png', body: Readable.from(buffer) },
     fields: 'id',
@@ -39,6 +41,8 @@ export async function POST(req: NextRequest) {
 
     // Находим папку приложения
     const appFolderRes = await drive.files.list({
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
       q: `'${rootFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and name contains '(${appCode})' and trashed = false`,
       fields: 'files(id, name)',
     })
@@ -51,6 +55,8 @@ export async function POST(req: NextRequest) {
     if (mode === 'new') {
       // Находим все числовые папки, берём максимальный номер
       const numberFoldersRes = await drive.files.list({
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
         q: `'${appFolder.id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
         fields: 'files(id, name)',
         orderBy: 'name desc',
@@ -79,6 +85,8 @@ export async function POST(req: NextRequest) {
       // Var mode — ищем существующую числовую папку
       const numberFolderName = `${appCode}_S_${varNumber}`
       const numberFolderRes = await drive.files.list({
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
         q: `'${appFolder.id}' in parents and mimeType = 'application/vnd.google-apps.folder' and name = '${numberFolderName}' and trashed = false`,
         fields: 'files(id)',
       })
