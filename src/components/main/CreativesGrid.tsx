@@ -13,6 +13,7 @@ interface Creative {
   id: string
   appCode: string
   variantFolder: string
+  variantFolderId: string
   images: CreativeImage[]
 }
 
@@ -90,7 +91,13 @@ export function CreativesGrid({ appCode, page, onPageChange }: CreativesGridProp
       <div className="space-y-4">
         {creatives.map(creative => (
           <div key={creative.id}>
-            <div className="text-xs text-gray-600 mb-2 font-mono">{creative.variantFolder}</div>
+            <a
+              href={`https://drive.google.com/drive/folders/${creative.variantFolderId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-gray-600 mb-2 font-mono hover:text-blue-400 transition-colors inline-block">
+              {creative.variantFolder}
+            </a>
             <div className="grid grid-cols-4 gap-4">
               {SIZES.map(size => {
                 const img = creative.images.find(i => i.size === size)

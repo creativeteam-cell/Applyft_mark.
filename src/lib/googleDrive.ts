@@ -64,6 +64,7 @@ export interface Creative {
   id: string
   appCode: string
   variantFolder: string
+  variantFolderId: string
   images: {
     size: string
     fileId: string
@@ -120,6 +121,7 @@ export async function getCreativesForApp(appCode: string, limit = 20): Promise<C
             id: variantFolder.name || '',
             appCode,
             variantFolder: variantFolder.name || '',
+            variantFolderId: variantFolder.id || '',
             images,
           } as Creative
         })

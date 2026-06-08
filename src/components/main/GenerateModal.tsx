@@ -134,12 +134,15 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
     try {
       const results: Record<string, string> = { '4x5': previewImage }
 
+      // Сжимаем preview перед отправкой на recompose (чтобы не превысить лимит Vercel 4.5MB)
+      const compressedPreview = await compressImage(previewImage, 1200)
+
       async function recomposeSize(size: string): Promise<void> {
         try {
           const res = await fetch('/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ recomposeBase64: previewImage, targetSize: size }),
+            body: JSON.stringify({ recomposeBase64: compressedPreview, targetSize: size }),
           })
           const data = await res.json()
           if (!data.error && data.imageBase64) {
@@ -182,13 +185,21 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
     setSaving(true)
     setSaveError(null)
     try {
+      // Сжимаем каждое изображение перед отправкой (лимит Vercel 4.5MB)
+      const compressedImages: Record<string, string> = {}
+      await Promise.all(
+        Object.entries(allImages).map(async ([size, base64]) => {
+          compressedImages[size] = await compressImage(base64, 1200)
+        })
+      )
+
       const res = await fetch('/api/drive/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           appCode,
           marketerCode,
-          images: allImages,
+          images: compressedImages,
           mode,
           varNumber: mode === 'var' ? varNumber : undefined,
           varLetters: mode === 'var' ? varLetters : undefined,
