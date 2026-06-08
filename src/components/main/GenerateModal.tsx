@@ -50,6 +50,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
   const [saving, setSaving] = useState(false)
   const [savedFolder, setSavedFolder] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [nextFolderName, setNextFolderName] = useState<string | null>(null)
 
   const previewImage = fixHistory[currentFixIndex] || null
   const currentPrompt = promptHistory[currentFixIndex] || null
@@ -168,6 +169,14 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
       setAllImages(results)
       setFixHistory([])
       setStage('done')
+
+      // Подтягиваем следующий номер папки для корректных имён файлов
+      if (mode === 'new') {
+        fetch(`/api/drive/next-number?app=${appCode}`)
+          .then(r => r.json())
+          .then(d => { if (d.nextName) setNextFolderName(d.nextName) })
+          .catch(() => {})
+      }
     } catch (e: any) {
       setError(e.message)
       setStage('preview')
@@ -216,16 +225,17 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
   }
 
   function getFileName(size: string): string {
-    // Если уже сохранили на Drive — используем точное имя
-    if (savedFolder) return `${savedFolder}_${size}_${marketerCode}_EN.png`
+    // После Drive save — точное имя
+    if (savedFolder) return `${savedFolder}_${size}_${marketerCode}_EN.jpg`
     // Для Var — знаем имя заранее
     if (mode === 'var' && varNumber) {
       const letters = varLetters.filter(Boolean)
       const variantName = `${appCode}_S_${String(varNumber).padStart(3, '0')}_${letters.join('_')}`
-      return `${variantName}_${size}_${marketerCode}_EN.png`
+      return `${variantName}_${size}_${marketerCode}_EN.jpg`
     }
-    // Для New без сохранения — дженерик
-    return `${appCode}_${size}_${marketerCode}_EN.png`
+    // Для New — используем следующий номер с Drive (если уже подгрузился)
+    const folder = nextFolderName || `${appCode}_S_???`
+    return `${folder}_${size}_${marketerCode}_EN.jpg`
   }
 
   function downloadAll() {

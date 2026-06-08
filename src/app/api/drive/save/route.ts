@@ -20,7 +20,8 @@ async function uploadImage(auth: any, name: string, base64: string, parentId: st
   const base64Data = base64.replace(/^data:image\/\w+;base64,/, '')
   const imageBuffer = Buffer.from(base64Data, 'base64')
 
-  const tokenRes = await auth.getAccessToken()
+  const client = await auth.getClient()
+  const tokenRes = await client.getAccessToken()
   const token = tokenRes.token
 
   const boundary = 'applyft_boundary_314159'
@@ -28,7 +29,7 @@ async function uploadImage(auth: any, name: string, base64: string, parentId: st
 
   const body = Buffer.concat([
     Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n`),
-    Buffer.from(`--${boundary}\r\nContent-Type: image/png\r\n\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Type: image/jpeg\r\n\r\n`),
     imageBuffer,
     Buffer.from(`\r\n--${boundary}--`),
   ])
@@ -137,7 +138,7 @@ export async function POST(req: NextRequest) {
       Object.entries(images).map(async ([size, base64]) => {
         if (!base64) return
         const sizeName = sizeMap[size] || size
-        const fileName = `${variantFolderName}_${sizeName}_${marketerCode}_EN.png`
+        const fileName = `${variantFolderName}_${sizeName}_${marketerCode}_EN.jpg`
         await uploadImage(auth, fileName, base64 as string, enParentId)
       })
     )

@@ -31,11 +31,11 @@ export async function POST(req: NextRequest) {
         fit: 'cover',
         position: 'center',
       })
-      .png()
+      .jpeg({ quality: 92 })
       .toBuffer()
 
     return NextResponse.json({
-      imageBase64: `data:image/png;base64,${resizedBuffer.toString('base64')}`,
+      imageBase64: `data:image/jpeg;base64,${resizedBuffer.toString('base64')}`,
       width: dimensions.width,
       height: dimensions.height,
     })
