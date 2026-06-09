@@ -23,9 +23,10 @@ interface CreativesGridProps {
   appCode: string
   page: number
   onPageChange: (page: number) => void
+  refreshKey?: number
 }
 
-export function CreativesGrid({ appCode, page, onPageChange }: CreativesGridProps) {
+export function CreativesGrid({ appCode, page, onPageChange, refreshKey }: CreativesGridProps) {
   const [creatives, setCreatives] = useState<Creative[]>([])
   const [hasMore, setHasMore] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -33,8 +34,7 @@ export function CreativesGrid({ appCode, page, onPageChange }: CreativesGridProp
 
   useEffect(() => {
     if (!appCode) return
-    
-    // Сбрасываем при смене апки
+
     setCreatives([])
     setLoading(true)
     setError(null)
@@ -55,7 +55,7 @@ export function CreativesGrid({ appCode, page, onPageChange }: CreativesGridProp
 
     // Отменяем загрузку если апка сменилась
     return () => controller.abort()
-  }, [appCode, page])
+  }, [appCode, page, refreshKey])
 
   if (loading) return (
     <div className="flex items-center justify-center py-32">

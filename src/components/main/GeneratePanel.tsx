@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 
 interface GeneratePanelProps {
   prompt: string
@@ -11,8 +11,7 @@ interface GeneratePanelProps {
   onModeChange: (mode: 'new' | 'var') => void
   varNumber: string
   onVarNumberChange: (v: string) => void
-  varLetters: [string, string, string]
-  onVarLettersChange: (letters: [string, string, string]) => void
+  onVarLettersChange: (letters: string[]) => void
   onGenerate: () => void
   appCode: string
   availableLogos: string[]
@@ -25,7 +24,7 @@ export function GeneratePanel({
   reference, onReferenceChange,
   mode, onModeChange,
   varNumber, onVarNumberChange,
-  varLetters, onVarLettersChange,
+  onVarLettersChange,
   onGenerate,
   appCode,
   availableLogos,
@@ -38,6 +37,50 @@ export function GeneratePanel({
   const [urlLoading, setUrlLoading] = useState(false)
   const [urlError, setUrlError] = useState('')
   const urlDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Auto-computed next variant
+  const [nextVarName, setNextVarName] = useState('')
+  const [lettersLoading, setLettersLoading] = useState(false)
+  const [lettersError, setLettersError] = useState('')
+  const lettersDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Fetch next letters whenever mode/varNumber/appCode changes
+  useEffect(() => {
+    if (mode !== 'var' || !varNumber.trim() || !appCode) {
+      setNextVarName('')
+      setLettersError('')
+      onVarLettersChange([])
+      return
+    }
+
+    if (lettersDebounceRef.current) clearTimeout(lettersDebounceRef.current)
+
+    lettersDebounceRef.current = setTimeout(async () => {
+      setLettersLoading(true)
+      setLettersError('')
+      try {
+        const res = await fetch(`/api/drive/next-letters?app=${appCode}&varNumber=${varNumber}`)
+        const data = await res.json()
+        if (data.error) {
+          setLettersError('error')
+          setNextVarName('')
+        } else {
+          setNextVarName(data.variantFolderName)
+          onVarLettersChange(data.letters)
+        }
+      } catch {
+        setLettersError('error')
+        setNextVarName('')
+      } finally {
+        setLettersLoading(false)
+      }
+    }, 400)
+
+    return () => {
+      if (lettersDebounceRef.current) clearTimeout(lettersDebounceRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, varNumber, appCode])
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -71,17 +114,12 @@ export function GeneratePanel({
     }
   }
 
-  function handleLetterChange(index: number, value: string) {
-    const letter = value.replace(/[^a-z]/g, '').slice(-1)
-    const newLetters = [...varLetters] as [string, string, string]
-    newLetters[index] = letter
-    onVarLettersChange(newLetters)
-  }
-
   function handleNumberChange(value: string) {
     const num = value.replace(/\D/g, '').slice(0, 3)
     onVarNumberChange(num)
   }
+
+  const generateDisabled = mode === 'var' && (!varNumber.trim() || lettersLoading || !!lettersError)
 
   return (
     <div className="fixed left-0 right-0 z-39 border-b px-8 py-4"
@@ -195,7 +233,7 @@ export function GeneratePanel({
 
             {/* Var поля */}
             {mode === 'var' && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 {/* NUMBER */}
                 <div className="flex flex-col">
                   <span className="text-xs text-gray-500 mb-1 uppercase tracking-widest font-mono">Number</span>
@@ -205,35 +243,26 @@ export function GeneratePanel({
                     placeholder="001"
                     maxLength={3}
                     className="w-16 px-3 py-2 rounded-xl text-sm outline-none text-center font-mono"
-                    style={{ background: 'var(--surface)', border: `1px solid ${!varNumber ? 'rgba(248,113,113,0.6)' : 'var(--border)'}`, color: 'var(--text)' }}
+                    style={{
+                      background: 'var(--surface)',
+                      border: `1px solid ${!varNumber ? 'rgba(248,113,113,0.6)' : 'var(--border)'}`,
+                      color: 'var(--text)',
+                    }}
                   />
                 </div>
 
-                {/* Letter boxes */}
-                <div className="flex flex-col">
-                  <span className="text-xs text-gray-500 mb-1 uppercase tracking-widest font-mono">Variant</span>
-                  <div className="flex items-center gap-1">
-                    <span className="text-gray-600 text-sm">_</span>
-                    {([0, 1, 2] as const).map(i => (
-                      <input
-                        key={i}
-                        value={varLetters[i]}
-                        onChange={e => handleLetterChange(i, e.target.value.toLowerCase())}
-                        placeholder="a"
-                        maxLength={1}
-                        className="w-9 px-2 py-2 rounded-xl text-sm outline-none text-center font-mono"
-                        style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                {/* Preview названия */}
-                <div className="flex flex-col justify-end pb-1">
-                  <span className="text-xs text-gray-600 font-mono">
-                    {varNumber
-                      ? `${appCode}_${varNumber.padStart(3, '0')}${varLetters.filter(Boolean).map(l => `_${l}`).join('')}`
-                      : <span className="text-red-400">enter number</span>}
+                {/* Auto-computed variant name preview */}
+                <div className="flex flex-col justify-end pb-0.5">
+                  <span className="text-xs text-gray-500 mb-1 uppercase tracking-widest font-mono">Next variant</span>
+                  <span className="text-sm font-mono" style={{ height: 36, display: 'flex', alignItems: 'center' }}>
+                    {!varNumber
+                      ? <span className="text-red-400 text-xs">enter number</span>
+                      : lettersLoading
+                        ? <span className="text-gray-500 text-xs animate-pulse">computing…</span>
+                        : lettersError
+                          ? <span className="text-red-400 text-xs">error</span>
+                          : <span style={{ color: 'var(--accent)' }}>{nextVarName}</span>
+                    }
                   </span>
                 </div>
               </div>
@@ -245,10 +274,7 @@ export function GeneratePanel({
               {availableLogos.length > 0 && (
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => {
-                      if (logoOpen) { setLogoOpen(false) }
-                      else { setLogoOpen(true) }
-                    }}
+                    onClick={() => setLogoOpen(v => !v)}
                     className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all"
                     style={{
                       background: selectedLogo ? 'rgba(99,102,241,0.15)' : 'var(--surface)',
@@ -287,8 +313,10 @@ export function GeneratePanel({
                 </div>
               )}
 
-              <button onClick={onGenerate}
-                className="flex items-center gap-2 px-6 py-2 rounded-xl font-semibold text-sm"
+              <button
+                onClick={onGenerate}
+                disabled={generateDisabled}
+                className="flex items-center gap-2 px-6 py-2 rounded-xl font-semibold text-sm transition-opacity disabled:opacity-40"
                 style={{ background: 'var(--accent)' }}>
                 <span>✦</span>
                 Generate

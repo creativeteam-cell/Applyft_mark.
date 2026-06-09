@@ -16,6 +16,7 @@ interface GenerateModalProps {
   varNumber: string
   varLetters: [string, string, string]
   onClose: () => void
+  onSaved?: () => void
 }
 
 async function compressImage(base64: string, maxWidth = 800): Promise<string> {
@@ -39,7 +40,7 @@ type Stage = 'generating' | 'preview' | 'fixing' | 'generating-all' | 'done'
 const SIZES = ['4x5', '1x1', '9x16', '1.91x1']
 const MAX_HISTORY = 10
 
-export function GenerateModal({ appCode, selectedPain, selectedHook, selectedConcept, prompt, reference, competitor, logoBase64, marketerCode, mode, varNumber, varLetters, onClose }: GenerateModalProps) {
+export function GenerateModal({ appCode, selectedPain, selectedHook, selectedConcept, prompt, reference, competitor, logoBase64, marketerCode, mode, varNumber, varLetters, onClose, onSaved }: GenerateModalProps) {
   const [stage, setStage] = useState<Stage>('generating')
   const [fixHistory, setFixHistory] = useState<string[]>([])
   const [promptHistory, setPromptHistory] = useState<string[]>([])
@@ -217,6 +218,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
       const data = await res.json()
       if (data.error) throw new Error(data.error)
       setSavedFolder(data.folderName)
+      onSaved?.()
     } catch (e: any) {
       setSaveError(e.message)
     } finally {

@@ -22,11 +22,12 @@ export function MainPage() {
   const [prompt, setPrompt] = useState('')
   const [reference, setReference] = useState<string | null>(null)
   const [selectedLogo, setSelectedLogo] = useState<string | null>(null)
+  const [gridRefreshKey, setGridRefreshKey] = useState(0)
 
   // New / Var
   const [mode, setMode] = useState<'new' | 'var'>('new')
   const [varNumber, setVarNumber] = useState('')
-  const [varLetters, setVarLetters] = useState<[string, string, string]>(['', '', ''])
+  const [varLetters, setVarLetters] = useState<string[]>([])
 
   useEffect(() => {
     fetch('/api/apps')
@@ -49,7 +50,7 @@ export function MainPage() {
       })
   }, [])
 
-  async function handleGenerate() {
+  function handleGenerate() {
     if (!selectedApp) {
       alert('Please select an app first.')
       return
@@ -58,30 +59,6 @@ export function MainPage() {
       alert('Please enter a variant number before generating.')
       return
     }
-
-    // Для вариации — проверяем что такая папка ещё не существует
-    if (mode === 'var') {
-      const letters = varLetters.filter(Boolean)
-      if (letters.length === 0) {
-        alert('Please enter at least one variant letter.')
-        return
-      }
-      try {
-        const res = await fetch('/api/drive/check', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ appCode: selectedApp, varNumber, varLetters }),
-        })
-        const data = await res.json()
-        if (data.exists) {
-          alert(`Variation ${data.variantFolderName} already exists on Google Drive. Choose different letters.`)
-          return
-        }
-      } catch {
-        // Если не смогли проверить — позволяем продолжить
-      }
-    }
-
     setShowModal(true)
   }
 
@@ -117,7 +94,6 @@ export function MainPage() {
         onModeChange={setMode}
         varNumber={varNumber}
         onVarNumberChange={setVarNumber}
-        varLetters={varLetters}
         onVarLettersChange={setVarLetters}
         onGenerate={handleGenerate}
         appCode={selectedApp}
@@ -131,6 +107,7 @@ export function MainPage() {
           appCode={selectedApp}
           page={page}
           onPageChange={setPage}
+          refreshKey={gridRefreshKey}
         />
       </div>
 
@@ -149,6 +126,7 @@ export function MainPage() {
           varNumber={varNumber}
           varLetters={varLetters}
           onClose={() => setShowModal(false)}
+          onSaved={() => setGridRefreshKey(k => k + 1)}
         />
       )}
     </div>
