@@ -34,9 +34,11 @@ export function getDriveClient() {
 async function listFolders(folderId: string) {
   const drive = getDriveClient()
   const res = await drive.files.list({
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
     q: `'${folderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
     fields: 'files(id, name)',
-    orderBy: 'name desc',
+    orderBy: 'createdTime desc',
   })
   return res.data.files || []
 }
