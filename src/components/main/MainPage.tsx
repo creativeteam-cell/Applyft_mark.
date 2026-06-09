@@ -6,8 +6,18 @@ import { CreativesGrid } from './CreativesGrid'
 import { GenerateModal } from './GenerateModal'
 import { FilterBar } from './FilterBar'
 
-interface App { code: string; name: string; active: boolean; painPoints?: string[]; hooks?: string[]; logos?: string[] }
+interface App { code: string; name: string; active: boolean; painPoints?: string[]; hooks?: string[]; logos?: string[]; logoBase64?: string }
 interface Marketer { code: string; name: string }
+
+// Module-level store — survives navigation to Settings and back
+const panelStore = {
+  prompt: '',
+  reference: null as string | null,
+  selectedLogo: null as string | null,
+  mode: 'new' as 'new' | 'var',
+  varNumber: '',
+  varLetters: [] as string[],
+}
 
 export function MainPage() {
   const [apps, setApps] = useState<App[]>([])
@@ -19,15 +29,15 @@ export function MainPage() {
   const [selectedConcept, setSelectedConcept] = useState('none')
   const [page, setPage] = useState(1)
   const [showModal, setShowModal] = useState(false)
-  const [prompt, setPrompt] = useState('')
-  const [reference, setReference] = useState<string | null>(null)
-  const [selectedLogo, setSelectedLogo] = useState<string | null>(null)
+  const [prompt, setPrompt] = useState(panelStore.prompt)
+  const [reference, setReference] = useState<string | null>(panelStore.reference)
+  const [selectedLogo, setSelectedLogo] = useState<string | null>(panelStore.selectedLogo)
   const [gridRefreshKey, setGridRefreshKey] = useState(0)
 
   // New / Var
-  const [mode, setMode] = useState<'new' | 'var'>('new')
-  const [varNumber, setVarNumber] = useState('')
-  const [varLetters, setVarLetters] = useState<string[]>([])
+  const [mode, setMode] = useState<'new' | 'var'>(panelStore.mode)
+  const [varNumber, setVarNumber] = useState(panelStore.varNumber)
+  const [varLetters, setVarLetters] = useState<string[]>(panelStore.varLetters)
 
   useEffect(() => {
     fetch('/api/apps')
@@ -87,19 +97,25 @@ export function MainPage() {
 
       <GeneratePanel
         prompt={prompt}
-        onPromptChange={setPrompt}
+        onPromptChange={v => { setPrompt(v); panelStore.prompt = v }}
         reference={reference}
-        onReferenceChange={setReference}
+        onReferenceChange={v => { setReference(v); panelStore.reference = v }}
         mode={mode}
-        onModeChange={setMode}
+        onModeChange={v => { setMode(v); panelStore.mode = v }}
         varNumber={varNumber}
-        onVarNumberChange={setVarNumber}
-        onVarLettersChange={setVarLetters}
+        onVarNumberChange={v => { setVarNumber(v); panelStore.varNumber = v }}
+        onVarLettersChange={v => { setVarLetters(v); panelStore.varLetters = v }}
         onGenerate={handleGenerate}
         appCode={selectedApp}
-        availableLogos={apps.find(a => a.code === selectedApp)?.logos || []}
+        availableLogos={(() => {
+          const app = apps.find(a => a.code === selectedApp)
+          if (!app) return []
+          if (app.logos?.length) return app.logos
+          if (app.logoBase64) return [app.logoBase64]
+          return []
+        })()}
         selectedLogo={selectedLogo}
-        onLogoChange={setSelectedLogo}
+        onLogoChange={v => { setSelectedLogo(v); panelStore.selectedLogo = v }}
       />
 
       <div className="px-8 pb-8" style={{ marginTop: mode === 'var' ? '390px' : '340px' }}>
