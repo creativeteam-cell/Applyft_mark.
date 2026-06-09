@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   const limit = 10
 
   try {
-    const creatives = await getCreativesForApp(appCode, page * limit)
+    const creatives = await getCreativesForApp(appCode)
     const paginated = creatives.slice((page - 1) * limit, page * limit)
     
     return NextResponse.json({

@@ -74,7 +74,7 @@ export interface Creative {
   }[]
 }
 
-export async function getCreativesForApp(appCode: string, limit = 20): Promise<Creative[]> {
+export async function getCreativesForApp(appCode: string): Promise<Creative[]> {
   // Проверяем кэш
   const cached = cache.get(appCode)
   if (cached && cached.expiresAt > Date.now()) {
@@ -88,7 +88,7 @@ export async function getCreativesForApp(appCode: string, limit = 20): Promise<C
 
   // Параллельно обрабатываем все числовые папки
   const creativesNested = await Promise.all(
-    numberFolders.slice(0, limit).map(async (numFolder) => {
+    numberFolders.map(async (numFolder) => {
       if (!numFolder.id) return []
 
       const variantFolders = await listFolders(numFolder.id)
