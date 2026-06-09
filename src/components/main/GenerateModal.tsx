@@ -45,7 +45,16 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
   const [fixHistory, setFixHistory] = useState<string[]>([])
   const [promptHistory, setPromptHistory] = useState<string[]>([])
   const [currentFixIndex, setCurrentFixIndex] = useState(0)
+
+  // allImages: base set from handleApprove (kept for fallback)
   const [allImages, setAllImages] = useState<Record<string, string>>({})
+  // sizeHistories: each fix run appends a new version per size
+  const [sizeHistories, setSizeHistories] = useState<Record<string, string[]>>({})
+  // sizeIndexes: currently selected version index per size
+  const [sizeIndexes, setSizeIndexes] = useState<Record<string, number>>({})
+  // hover zoom
+  const [hoveredSize, setHoveredSize] = useState<string | null>(null)
+
   const [fixNote, setFixNote] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -64,6 +73,22 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
   useEffect(() => {
     generateFirst()
   }, [])
+
+  // Returns the currently selected image for a size (from history, fallback to allImages)
+  function getSizeImage(size: string): string {
+    const hist = sizeHistories[size]
+    if (hist && hist.length > 0) return hist[sizeIndexes[size] ?? hist.length - 1] || ''
+    return allImages[size] || ''
+  }
+
+  // Effective images for save/download — respects navigation through history
+  function getEffectiveImages(): Record<string, string> {
+    const result: Record<string, string> = {}
+    for (const size of SIZES) {
+      result[size] = getSizeImage(size)
+    }
+    return result
+  }
 
   async function generateFirst(fix?: string, prevImage?: string, customPrompt?: string) {
     setStage('generating')
@@ -107,14 +132,11 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
 
       const savedPrompt = data.prompt || customPrompt || ''
 
-      // Добавляем в историю
       if (!fix && !customPrompt) {
-        // Первая генерация — сбрасываем историю
         setFixHistory([finalImage])
         setPromptHistory([savedPrompt])
         setCurrentFixIndex(0)
       } else {
-        // Fix или Recreate — добавляем в конец, сохраняя все версии
         setFixHistory(prev => {
           const newHistory = [...prev, finalImage].slice(-MAX_HISTORY)
           setCurrentFixIndex(newHistory.length - 1)
@@ -140,8 +162,6 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
 
     try {
       const results: Record<string, string> = { '4x5': previewImage }
-
-      // Сжимаем preview перед отправкой на recompose (чтобы не превысить лимит Vercel 4.5MB)
       const compressedPreview = await compressImage(previewImage, 1200)
 
       async function recomposeSize(size: string): Promise<void> {
@@ -173,10 +193,20 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
       await Promise.all(['1x1', '9x16', '1.91x1'].map(recomposeSize))
 
       setAllImages(results)
+
+      // Initialize per-size histories
+      const histories: Record<string, string[]> = {}
+      const indexes: Record<string, number> = {}
+      for (const [size, img] of Object.entries(results)) {
+        histories[size] = [img]
+        indexes[size] = 0
+      }
+      setSizeHistories(histories)
+      setSizeIndexes(indexes)
+
       setFixHistory([])
       setStage('done')
 
-      // Подтягиваем следующий номер папки для корректных имён файлов
       if (mode === 'new') {
         fetch(`/api/drive/next-number?app=${appCode}`)
           .then(r => r.json())
@@ -200,11 +230,11 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
     setSaving(true)
     setSaveError(null)
     try {
-      // Сжимаем каждое изображение перед отправкой (лимит Vercel 4.5MB)
+      const effectiveImages = getEffectiveImages()
       const compressedImages: Record<string, string> = {}
       await Promise.all(
-        Object.entries(allImages).map(async ([size, base64]) => {
-          compressedImages[size] = await compressImage(base64, 1200)
+        Object.entries(effectiveImages).map(async ([size, base64]) => {
+          if (base64) compressedImages[size] = await compressImage(base64, 1200)
         })
       )
 
@@ -237,7 +267,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
     setFixingSize(null)
 
     try {
-      const currentImage = allImages[size]
+      const currentImage = getSizeImage(size)
       const compressed = await compressImage(currentImage, 1200)
 
       const res = await fetch('/api/generate', {
@@ -257,7 +287,6 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
       const data = await res.json()
       if (data.error) throw new Error(data.error)
 
-      // Resize to correct dimensions for this size
       let finalImage = data.imageBase64
       try {
         const resizeRes = await fetch('/api/resize', {
@@ -269,7 +298,13 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
         if (resizeData.imageBase64) finalImage = resizeData.imageBase64
       } catch {}
 
-      setAllImages(prev => ({ ...prev, [size]: finalImage }))
+      // Append to size history, select latest
+      setSizeHistories(prev => {
+        const newHist = [...(prev[size] || []), finalImage]
+        setSizeIndexes(idx => ({ ...idx, [size]: newHist.length - 1 }))
+        return { ...prev, [size]: newHist }
+      })
+
       setSizeFixNote('')
     } catch (e: any) {
       console.error(`Size fix failed for ${size}:`, e.message)
@@ -278,22 +313,29 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
     }
   }
 
+  function navigateSizeHistory(size: string, dir: -1 | 1) {
+    setSizeIndexes(prev => {
+      const hist = sizeHistories[size] || []
+      const current = prev[size] ?? 0
+      return { ...prev, [size]: Math.max(0, Math.min(hist.length - 1, current + dir)) }
+    })
+  }
+
   function getFileName(size: string): string {
-    // После Drive save — точное имя
     if (savedFolder) return `${savedFolder}_${size}_${marketerCode}_EN.jpg`
-    // Для Var — знаем имя заранее
     if (mode === 'var' && varNumber) {
       const letters = varLetters.filter(Boolean)
       const variantName = `${appCode}_S_${String(varNumber).padStart(3, '0')}_${letters.join('_')}`
       return `${variantName}_${size}_${marketerCode}_EN.jpg`
     }
-    // Для New — используем следующий номер с Drive (если уже подгрузился)
     const folder = nextFolderName || `${appCode}_S_???`
     return `${folder}_${size}_${marketerCode}_EN.jpg`
   }
 
   function downloadAll() {
-    Object.entries(allImages).forEach(([size, base64], i) => {
+    const effective = getEffectiveImages()
+    Object.entries(effective).forEach(([size, base64], i) => {
+      if (!base64) return
       setTimeout(() => {
         const link = document.createElement('a')
         link.href = base64
@@ -349,7 +391,6 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
               </div>
             )}
 
-            {/* Карусель */}
             {fixHistory.length > 0 && (
               <div className="relative mb-6" style={{ height: 420, overflow: 'hidden' }}>
                 {fixHistory.map((img, i) => {
@@ -382,7 +423,6 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                   )
                 })}
 
-                {/* Стрелки */}
                 {currentFixIndex > 0 && (
                   <button
                     onClick={() => setCurrentFixIndex(i => i - 1)}
@@ -477,44 +517,103 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
         {stage === 'done' && (
           <div>
             <h3 className="text-lg font-bold mb-6">All sizes ready! 🎉</h3>
-            <div className="grid grid-cols-4 gap-3 mb-3">
-              {SIZES.map(size => (
-                <div key={size}>
-                  <div className="flex items-center justify-center gap-1.5 mb-2">
-                    <span className="text-xs font-mono text-gray-500">{size}</span>
-                    <button
-                      onClick={() => { setFixingSize(fixingSize === size ? null : size); setSizeFixNote('') }}
-                      title={`Fix ${size}`}
-                      className="w-4 h-4 rounded flex items-center justify-center transition-colors"
+
+            {/* Size grid — overflow visible so hover zoom isn't clipped */}
+            <div className="grid grid-cols-4 gap-3 mb-3" style={{ overflow: 'visible' }}>
+              {SIZES.map(size => {
+                const img = getSizeImage(size)
+                const hist = sizeHistories[size] || []
+                const currentIdx = sizeIndexes[size] ?? 0
+                const hasHistory = hist.length > 1
+                return (
+                  <div key={size} className="relative" style={{ overflow: 'visible' }}>
+                    {/* Label row */}
+                    <div className="flex items-center justify-center gap-1.5 mb-2">
+                      <span className="text-xs font-mono text-gray-500">{size}</span>
+                      <button
+                        onClick={() => { setFixingSize(fixingSize === size ? null : size); setSizeFixNote('') }}
+                        title={`Fix ${size}`}
+                        className="w-4 h-4 rounded flex items-center justify-center transition-colors"
+                        style={{
+                          color: fixingSize === size ? 'var(--accent)' : 'var(--text-muted, #6b7280)',
+                          fontSize: 11,
+                          opacity: sizeFixLoading ? 0.4 : 1,
+                        }}
+                        disabled={!!sizeFixLoading}>
+                        ✎
+                      </button>
+                    </div>
+
+                    {/* Card */}
+                    <div
+                      className="rounded-lg overflow-hidden cursor-default"
                       style={{
-                        color: fixingSize === size ? 'var(--accent)' : 'var(--text-muted, #6b7280)',
-                        fontSize: 11,
-                        opacity: sizeFixLoading ? 0.4 : 1,
+                        border: `1px solid ${fixingSize === size ? 'var(--accent)' : 'var(--border)'}`,
+                        aspectRatio: sizeToRatio(size),
+                        transition: 'border-color 0.2s',
+                        position: 'relative',
                       }}
-                      disabled={!!sizeFixLoading}>
-                      ✎
-                    </button>
-                  </div>
-                  <div className="rounded-lg overflow-hidden"
-                    style={{
-                      border: `1px solid ${fixingSize === size ? 'var(--accent)' : 'var(--border)'}`,
-                      aspectRatio: sizeToRatio(size),
-                      transition: 'border-color 0.2s',
-                    }}>
-                    {sizeFixLoading === size ? (
-                      <div className="w-full h-full flex items-center justify-center bg-gray-900">
-                        <span className="animate-spin text-xl">⟳</span>
-                      </div>
-                    ) : allImages[size] ? (
-                      <img src={allImages[size]} alt={size} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center bg-gray-900">
-                        <span className="text-gray-600 text-xs">—</span>
+                      onMouseEnter={() => img && setHoveredSize(size)}
+                      onMouseLeave={() => setHoveredSize(null)}>
+
+                      {sizeFixLoading === size ? (
+                        <div className="w-full h-full flex items-center justify-center bg-gray-900">
+                          <span className="animate-spin text-xl">⟳</span>
+                        </div>
+                      ) : img ? (
+                        <img src={img} alt={size} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-gray-900">
+                          <span className="text-gray-600 text-xs">—</span>
+                        </div>
+                      )}
+
+                      {/* Hover zoom tooltip */}
+                      {hoveredSize === size && img && (
+                        <div
+                          className="pointer-events-none"
+                          style={{
+                            position: 'absolute',
+                            bottom: 'calc(100% + 8px)',
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            width: 200,
+                            borderRadius: 12,
+                            overflow: 'hidden',
+                            boxShadow: '0 12px 40px rgba(0,0,0,0.8)',
+                            border: '1px solid var(--border)',
+                            zIndex: 100,
+                          }}>
+                          <img src={img} alt={`${size} zoom`} className="w-full block" />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* History navigation */}
+                    {hasHistory && (
+                      <div className="flex items-center justify-center gap-1.5 mt-1.5">
+                        <button
+                          onClick={() => navigateSizeHistory(size, -1)}
+                          disabled={currentIdx === 0}
+                          className="w-5 h-5 rounded text-xs flex items-center justify-center disabled:opacity-30 transition-opacity"
+                          style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                          ←
+                        </button>
+                        <span className="text-xs font-mono" style={{ color: 'var(--accent)', minWidth: 28, textAlign: 'center' }}>
+                          {currentIdx + 1}/{hist.length}
+                        </span>
+                        <button
+                          onClick={() => navigateSizeHistory(size, 1)}
+                          disabled={currentIdx === hist.length - 1}
+                          className="w-5 h-5 rounded text-xs flex items-center justify-center disabled:opacity-30 transition-opacity"
+                          style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                          →
+                        </button>
                       </div>
                     )}
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
 
             {/* Per-size fix input */}
@@ -550,6 +649,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                 </div>
               </div>
             )}
+
             <div className="flex gap-3 mb-3">
               <button onClick={downloadAll}
                 className="flex-1 py-3 rounded-xl font-semibold"

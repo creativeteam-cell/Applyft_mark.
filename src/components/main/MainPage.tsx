@@ -33,6 +33,7 @@ export function MainPage() {
   const [reference, setReference] = useState<string | null>(panelStore.reference)
   const [selectedLogo, setSelectedLogo] = useState<string | null>(panelStore.selectedLogo)
   const [gridRefreshKey, setGridRefreshKey] = useState(0)
+  const [panelLettersKey, setPanelLettersKey] = useState(0)
 
   // New / Var
   const [mode, setMode] = useState<'new' | 'var'>(panelStore.mode)
@@ -56,7 +57,12 @@ export function MainPage() {
           setSelectedApp(activeApps[0].code)
         }
 
-        if (savedMarketer) setSelectedMarketer(savedMarketer)
+        if (savedMarketer) {
+          setSelectedMarketer(savedMarketer)
+        } else if (data.marketers?.length > 0) {
+          setSelectedMarketer(data.marketers[0].code)
+          localStorage.setItem('cs_selected_marketer', data.marketers[0].code)
+        }
       })
   }, [])
 
@@ -105,6 +111,7 @@ export function MainPage() {
         varNumber={varNumber}
         onVarNumberChange={v => { setVarNumber(v); panelStore.varNumber = v }}
         onVarLettersChange={v => { setVarLetters(v); panelStore.varLetters = v }}
+        lettersFetchKey={panelLettersKey}
         onGenerate={handleGenerate}
         appCode={selectedApp}
         availableLogos={(() => {
@@ -142,7 +149,7 @@ export function MainPage() {
           varNumber={varNumber}
           varLetters={varLetters}
           onClose={() => setShowModal(false)}
-          onSaved={() => setGridRefreshKey(k => k + 1)}
+          onSaved={() => { setGridRefreshKey(k => k + 1); setPanelLettersKey(k => k + 1) }}
         />
       )}
     </div>

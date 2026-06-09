@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { getDriveClient, invalidateCache } from '@/lib/googleDrive'
+import { getNextLettersFromFolderNames } from '@/lib/letterSequence'
 async function createFolder(drive: any, name: string, parentId: string): Promise<string> {
   const res = await drive.files.create({
     supportsAllDrives: true,
@@ -115,8 +116,25 @@ export async function POST(req: NextRequest) {
       const numberFolder = numberFolderRes.data.files?.[0]
       if (!numberFolder?.id) throw new Error(`Folder ${numberFolderName} not found on Drive`)
 
-      const letters = (varLetters as string[]).filter(Boolean)
-      variantFolderName = `${numberFolderName}_${letters.join('_')}`
+      // List existing variant folders to detect conflicts and ensure we use the freshest next name
+      const existingVarFoldersRes = await drive.files.list({
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+        q: `'${numberFolder.id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+        fields: 'files(name)',
+      })
+      const existingVarNames = (existingVarFoldersRes.data.files || []).map((f: any) => f.name as string)
+
+      // Compute the actual next-available name (handles conflict if another user saved simultaneously)
+      const proposedLetters = (varLetters as string[]).filter(Boolean)
+      const proposedName = `${numberFolderName}_${proposedLetters.join('_')}`
+      if (existingVarNames.includes(proposedName)) {
+        // Conflict — recalculate
+        const fresh = getNextLettersFromFolderNames(numberFolderName, existingVarNames)
+        variantFolderName = fresh.variantFolderName
+      } else {
+        variantFolderName = proposedName
+      }
 
       const variantFolderId = await createFolder(drive, variantFolderName, numberFolder.id)
       enParentId = await createFolder(drive, 'EN', variantFolderId)

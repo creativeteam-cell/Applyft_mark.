@@ -12,6 +12,7 @@ interface GeneratePanelProps {
   varNumber: string
   onVarNumberChange: (v: string) => void
   onVarLettersChange: (letters: string[]) => void
+  lettersFetchKey?: number
   onGenerate: () => void
   appCode: string
   availableLogos: string[]
@@ -25,6 +26,7 @@ export function GeneratePanel({
   mode, onModeChange,
   varNumber, onVarNumberChange,
   onVarLettersChange,
+  lettersFetchKey,
   onGenerate,
   appCode,
   availableLogos,
@@ -80,7 +82,7 @@ export function GeneratePanel({
       if (lettersDebounceRef.current) clearTimeout(lettersDebounceRef.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, varNumber, appCode])
+  }, [mode, varNumber, appCode, lettersFetchKey])
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]

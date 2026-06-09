@@ -22,6 +22,26 @@ export async function POST(req: NextRequest) {
   if (!url) return NextResponse.json({ error: 'No URL provided' }, { status: 400 })
 
   try {
+    // Google Drive share link: https://drive.google.com/file/d/{fileId}/view
+    const driveMatch = url.match(/drive\.google\.com\/(?:file\/d\/|open\?id=)([a-zA-Z0-9_-]+)/)
+    if (driveMatch) {
+      const fileId = driveMatch[1]
+      const token = (session as any).accessToken as string
+      if (!token) throw new Error('No access token. Please sign out and sign in again.')
+
+      const driveRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (!driveRes.ok) {
+        const err = await driveRes.text()
+        throw new Error(`Drive download failed (${driveRes.status}): ${err}`)
+      }
+      const buffer = await driveRes.arrayBuffer()
+      const imageBase64 = await compressBuffer(buffer)
+      return NextResponse.json({ imageBase64 })
+    }
+
     // Если это прямая ссылка на картинку — качаем напрямую
     if (/\.(jpg|jpeg|png|webp|gif)(\?.*)?$/i.test(url)) {
       const res = await fetch(url)
