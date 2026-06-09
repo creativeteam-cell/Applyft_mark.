@@ -526,7 +526,33 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                 const currentIdx = sizeIndexes[size] ?? 0
                 const hasHistory = hist.length > 1
                 return (
-                  <div key={size} className="relative" style={{ overflow: 'visible' }}>
+                  <div
+                    key={size}
+                    className="relative"
+                    style={{ overflow: 'visible' }}
+                    onMouseEnter={() => img && setHoveredSize(size)}
+                    onMouseLeave={() => setHoveredSize(null)}>
+
+                    {/* Hover zoom — outside overflow-hidden card so it's not clipped */}
+                    {hoveredSize === size && img && (
+                      <div
+                        className="pointer-events-none"
+                        style={{
+                          position: 'absolute',
+                          bottom: 'calc(100% + 8px)',
+                          left: '50%',
+                          transform: 'translateX(-50%)',
+                          width: 200,
+                          borderRadius: 12,
+                          overflow: 'hidden',
+                          boxShadow: '0 12px 40px rgba(0,0,0,0.8)',
+                          border: '1px solid var(--border)',
+                          zIndex: 100,
+                        }}>
+                        <img src={img} alt={`${size} zoom`} className="w-full block" />
+                      </div>
+                    )}
+
                     {/* Label row */}
                     <div className="flex items-center justify-center gap-1.5 mb-2">
                       <span className="text-xs font-mono text-gray-500">{size}</span>
@@ -544,7 +570,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                       </button>
                     </div>
 
-                    {/* Card */}
+                    {/* Card — overflow-hidden clips image only */}
                     <div
                       className="rounded-lg overflow-hidden cursor-default"
                       style={{
@@ -552,9 +578,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                         aspectRatio: sizeToRatio(size),
                         transition: 'border-color 0.2s',
                         position: 'relative',
-                      }}
-                      onMouseEnter={() => img && setHoveredSize(size)}
-                      onMouseLeave={() => setHoveredSize(null)}>
+                      }}>
 
                       {sizeFixLoading === size ? (
                         <div className="w-full h-full flex items-center justify-center bg-gray-900">
@@ -565,26 +589,6 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                       ) : (
                         <div className="w-full h-full flex items-center justify-center bg-gray-900">
                           <span className="text-gray-600 text-xs">—</span>
-                        </div>
-                      )}
-
-                      {/* Hover zoom tooltip */}
-                      {hoveredSize === size && img && (
-                        <div
-                          className="pointer-events-none"
-                          style={{
-                            position: 'absolute',
-                            bottom: 'calc(100% + 8px)',
-                            left: '50%',
-                            transform: 'translateX(-50%)',
-                            width: 200,
-                            borderRadius: 12,
-                            overflow: 'hidden',
-                            boxShadow: '0 12px 40px rgba(0,0,0,0.8)',
-                            border: '1px solid var(--border)',
-                            zIndex: 100,
-                          }}>
-                          <img src={img} alt={`${size} zoom`} className="w-full block" />
                         </div>
                       )}
                     </div>
@@ -676,6 +680,10 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
 
 function sizeToRatio(size: string): string {
   const map: Record<string, string> = {
+    '1x1': '1/1', '4x5': '4/5', '1.91x1': '1.91/1', '9x16': '9/16',
+  }
+  return map[size] || '1/1'
+}
     '1x1': '1/1', '4x5': '4/5', '1.91x1': '1.91/1', '9x16': '9/16',
   }
   return map[size] || '1/1'

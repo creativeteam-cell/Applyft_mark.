@@ -1,10 +1,10 @@
 // Генерация изображений через Gemini 3.1 Flash Image Preview
 
 const TEXT_RULE = `
-CRITICAL — TEXT IS SACRED:
+CRITICAL - TEXT IS SACRED:
 You are NOT a writer. Do NOT write, invent, paraphrase, expand, or summarize ANY text.
 Copy every headline, subheadline, body copy, and CTA button WORD FOR WORD, CHARACTER FOR CHARACTER from the reference image.
-If the headline says "Your J is on a Liar List." — it must say exactly "Your J is on a Liar List." in the output. Nothing more. Nothing less.
+If the headline says "Your J is on a Liar List." - it must say exactly "Your J is on a Liar List." in the output. Nothing more. Nothing less.
 Adding even one extra word is a critical failure.`
 
 const RECOMPOSE_PROMPTS: Record<string, string> = {
@@ -112,8 +112,12 @@ async function withRetry(prompt: string, referenceBase64?: string, logoBase64?: 
   throw new Error('Image generation failed after all retries.')
 }
 
+// Appended to main generation prompts so Gemini composes natively in portrait 4:5.
+// Without this, Gemini defaults to square/landscape and Sharp cover-crops heavily.
+const PORTRAIT_HINT = '\n\n[CRITICAL - OUTPUT FORMAT]: PORTRAIT image, taller than wide, aspect ratio 4:5 (4 wide by 5 tall, like a phone held vertically). Do not generate landscape or square. Compose the scene for a tall vertical frame.'
+
 export async function generateImage(prompt: string, referenceBase64?: string, logoBase64?: string): Promise<string> {
-  return withRetry(prompt, referenceBase64, logoBase64)
+  return withRetry(prompt + PORTRAIT_HINT, referenceBase64, logoBase64)
 }
 
 export async function recomposeImage(imageBase64: string, targetSize: string): Promise<string> {
