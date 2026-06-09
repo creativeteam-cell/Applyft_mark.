@@ -684,7 +684,3 @@ function sizeToRatio(size: string): string {
   }
   return map[size] || '1/1'
 }
-    '1x1': '1/1', '4x5': '4/5', '1.91x1': '1.91/1', '9x16': '9/16',
-  }
-  return map[size] || '1/1'
-}
