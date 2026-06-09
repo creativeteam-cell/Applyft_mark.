@@ -14,7 +14,7 @@ interface GenerateModalProps {
   marketerCode: string
   mode: 'new' | 'var'
   varNumber: string
-  varLetters: [string, string, string]
+  varLetters: string[]
   onClose: () => void
   onSaved?: () => void
 }
