@@ -37,8 +37,7 @@ async function listFolders(folderId: string) {
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
     q: `'${folderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
-    fields: 'files(id, name)',
-    orderBy: 'createdTime desc',
+    fields: 'files(id, name, createdTime)',
   })
   return res.data.files || []
 }
@@ -99,7 +98,6 @@ export async function getCreativesForApp(appCode: string, limit = 20): Promise<C
         variantFolders.map(async (variantFolder) => {
           if (!variantFolder.id) return null
 
-          // Параллельно: lang folders + (потом) files
           const langFolders = await listFolders(variantFolder.id)
           const langFolder = langFolders.find(f => f.name === 'EN') || langFolders[0]
           if (!langFolder?.id) return null
@@ -120,20 +118,27 @@ export async function getCreativesForApp(appCode: string, limit = 20): Promise<C
           if (images.length === 0) return null
 
           return {
-            id: variantFolder.name || '',
-            appCode,
-            variantFolder: variantFolder.name || '',
-            variantFolderId: variantFolder.id || '',
-            images,
-          } as Creative
+            createdTime: (variantFolder as any).createdTime as string || '0',
+            creative: {
+              id: variantFolder.name || '',
+              appCode,
+              variantFolder: variantFolder.name || '',
+              variantFolderId: variantFolder.id || '',
+              images,
+            } as Creative,
+          }
         })
       )
 
-      return variants.filter(Boolean) as Creative[]
+      return variants.filter(Boolean) as { createdTime: string; creative: Creative }[]
     })
   )
 
-  const creatives = creativesNested.flat()
+  // Сортируем все варианты по дате создания (новые первые)
+  const creatives = creativesNested
+    .flat()
+    .sort((a, b) => b.createdTime.localeCompare(a.createdTime))
+    .map(item => item.creative)
 
   // Сохраняем в кэш
   cache.set(appCode, { data: creatives, expiresAt: Date.now() + CACHE_TTL })
