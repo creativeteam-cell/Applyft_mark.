@@ -1,44 +1,39 @@
 // Генерация изображений через Gemini 3.1 Flash Image Preview
 
+const TEXT_RULE = `
+CRITICAL — TEXT IS SACRED:
+You are NOT a writer. Do NOT write, invent, paraphrase, expand, or summarize ANY text.
+Copy every headline, subheadline, body copy, and CTA button WORD FOR WORD, CHARACTER FOR CHARACTER from the reference image.
+If the headline says "Your J is on a Liar List." — it must say exactly "Your J is on a Liar List." in the output. Nothing more. Nothing less.
+Adding even one extra word is a critical failure.`
+
 const RECOMPOSE_PROMPTS: Record<string, string> = {
   '1x1': `Recompose this exact ad creative for a square 1:1 aspect ratio.
+${TEXT_RULE}
 
-STRICT RULES — DO NOT BREAK:
-- Do NOT add any new visual elements, text, objects, or decorations
-- Do NOT remove any existing elements from the original image
-- Do NOT change colors, typography style, or visual identity in any way
-- Do NOT alter the meaning, text content, or any wording
-
-ONLY reposition and rescale existing elements to fit naturally in a square format:
+LAYOUT RULES (the ONLY thing you may change):
+- Reposition and rescale existing elements to fit naturally in a square format
 - Center the main subject and headline text horizontally and vertically
-- Ensure all text is fully visible and within safe zones (at least 10% padding from all edges)
-- Maintain the same overall mood, style, and composition hierarchy`,
+- Ensure all text is fully visible within safe zones (at least 10% padding from all edges)
+- Maintain the same overall mood, style, colors, typography, and composition hierarchy`,
 
   '9x16': `Recompose this exact ad creative for a tall vertical 9:16 aspect ratio.
+${TEXT_RULE}
 
-STRICT RULES — DO NOT BREAK:
-- Do NOT add any new visual elements, text, objects, or decorations
-- Do NOT remove any existing elements from the original image
-- Do NOT change colors, typography style, or visual identity in any way
-- Do NOT alter the meaning, text content, or any wording
-
-ONLY reposition and rescale existing elements to fit naturally in a tall vertical format:
+LAYOUT RULES (the ONLY thing you may change):
+- Reposition and rescale existing elements to fit naturally in a tall vertical format
 - Stack elements vertically: main visual in upper portion, headline in the middle, CTA button near the bottom
-- Ensure all text is fully visible and within safe zones (at least 10% padding from all edges)
-- Maintain the same overall mood, style, and composition hierarchy`,
+- Ensure all text is fully visible within safe zones (at least 10% padding from all edges)
+- Maintain the same overall mood, style, colors, typography, and composition hierarchy`,
 
   '1.91x1': `Recompose this exact ad creative for a wide horizontal 1.91:1 aspect ratio.
+${TEXT_RULE}
 
-STRICT RULES — DO NOT BREAK:
-- Do NOT add any new visual elements, text, objects, or decorations
-- Do NOT remove any existing elements from the original image
-- Do NOT change colors, typography style, or visual identity in any way
-- Do NOT alter the meaning, text content, or any wording
-
-ONLY reposition and rescale existing elements to fit naturally in a wide horizontal format:
+LAYOUT RULES (the ONLY thing you may change):
+- Reposition and rescale existing elements to fit naturally in a wide horizontal format
 - Place main visual on one side, text hierarchy (headline + subheadline + CTA) on the other side
-- Ensure all text is fully visible and within safe zones (at least 10% padding from all edges)
-- Maintain the same overall mood, style, and composition hierarchy`,
+- Ensure all text is fully visible within safe zones (at least 10% padding from all edges)
+- Maintain the same overall mood, style, colors, typography, and composition hierarchy`,
 }
 
 async function tryGenerate(prompt: string, referenceBase64?: string, logoBase64?: string, timeoutMs = 100000): Promise<string> {

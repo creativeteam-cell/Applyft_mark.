@@ -40,24 +40,20 @@ export async function generatePrompt(options: GeneratePromptOptions): Promise<st
   const hasFix = !!fixNote?.trim()
   const hasConcept = selectedConcept && selectedConcept !== 'none'
 
-  // FIX режим — GPT анализирует предыдущее изображение и генерирует полный новый промпт
+  // FIX режим — GPT описывает ТОЛЬКО изменение, Gemini получает хирургическую инструкцию
   if (hasFix && previousImageBase64) {
-    const fixSystemPrompt = `You are an advertising creative director writing image generation prompts for Gemini.
+    const fixSystemPrompt = `You are a surgical image editing assistant.
 
-Study the reference ad image carefully. Then write a COMPLETE Gemini image generation prompt for a NEW ad that:
-1. Fully replicates the reference — same composition, color palette, typography style, mood, layout, and visual elements
-2. Incorporates this specific change: "${fixNote}"
+The user wants ONE specific change to this ad image: "${fixNote}"
 
-CRITICAL RULES:
-- Write a full scene description from scratch, as if creating a brand new image
-- Do NOT use words like "keep", "maintain", "same as", "modify", "edit", or "identical to"
-- Just describe the final desired image in detail
-- Vertical 4:5 format, professional social media ad quality
-- SAFE ZONES — ABSOLUTE RULE: ALL text and UI elements MUST be placed strictly within the center 80% of the image. No text, button, or element may touch or cross within 10% of any edge. Headline centered horizontally, never near edges. CTA button centered, minimum 15% from bottom edge.
-- Include all text elements that should appear on the image
-- 150-200 words
+Write a Gemini image generation prompt using this exact structure:
+1. Start with: "You are given an ad image. Apply ONLY this one surgical change: [describe the change in 1-2 clear sentences]."
+2. Then add exactly: "CRITICAL: Keep every other element completely unchanged — same background, same colors, same lighting, same text content word-for-word, same font sizes, same font style, same layout, same composition, same all other visual elements. Do not add, remove, or alter anything that was not explicitly requested."
 
-Return ONLY the image generation prompt. No explanations or preamble.`
+Rules:
+- The change description must be specific and surgical (what exactly to change, where it is)
+- Total output: 3-5 sentences max
+- Return ONLY the prompt, no preamble`
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -66,11 +62,11 @@ Return ONLY the image generation prompt. No explanations or preamble.`
         {
           role: 'user', content: [
             { type: 'image_url', image_url: { url: previousImageBase64 } },
-            { type: 'text', text: `Write the full generation prompt with this change applied: "${fixNote}"` },
+            { type: 'text', text: `Describe the surgical change: "${fixNote}"` },
           ],
         },
       ],
-      max_tokens: 500,
+      max_tokens: 200,
     })
     return response.choices[0].message.content || ''
   }
