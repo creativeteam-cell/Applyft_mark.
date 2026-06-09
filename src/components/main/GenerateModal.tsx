@@ -53,6 +53,11 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
   const [saveError, setSaveError] = useState<string | null>(null)
   const [nextFolderName, setNextFolderName] = useState<string | null>(null)
 
+  // Per-size fix on done screen
+  const [fixingSize, setFixingSize] = useState<string | null>(null)
+  const [sizeFixNote, setSizeFixNote] = useState('')
+  const [sizeFixLoading, setSizeFixLoading] = useState<string | null>(null)
+
   const previewImage = fixHistory[currentFixIndex] || null
   const currentPrompt = promptHistory[currentFixIndex] || null
 
@@ -223,6 +228,53 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
       setSaveError(e.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleSizeFix(size: string) {
+    if (!sizeFixNote.trim()) return
+    setSizeFixLoading(size)
+    setFixingSize(null)
+
+    try {
+      const currentImage = allImages[size]
+      const compressed = await compressImage(currentImage, 1200)
+
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appCode,
+          selectedPain,
+          selectedHook: selectedHook !== 'none' ? selectedHook : undefined,
+          userText: prompt,
+          fixNote: sizeFixNote,
+          previousImageBase64: compressed,
+          logoBase64: logoBase64 || undefined,
+        }),
+      })
+
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+
+      // Resize to correct dimensions for this size
+      let finalImage = data.imageBase64
+      try {
+        const resizeRes = await fetch('/api/resize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: data.imageBase64, size }),
+        })
+        const resizeData = await resizeRes.json()
+        if (resizeData.imageBase64) finalImage = resizeData.imageBase64
+      } catch {}
+
+      setAllImages(prev => ({ ...prev, [size]: finalImage }))
+      setSizeFixNote('')
+    } catch (e: any) {
+      console.error(`Size fix failed for ${size}:`, e.message)
+    } finally {
+      setSizeFixLoading(null)
     }
   }
 
@@ -425,21 +477,79 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
         {stage === 'done' && (
           <div>
             <h3 className="text-lg font-bold mb-6">All sizes ready! 🎉</h3>
-            <div className="grid grid-cols-4 gap-3 mb-6">
+            <div className="grid grid-cols-4 gap-3 mb-3">
               {SIZES.map(size => (
                 <div key={size}>
-                  <div className="text-xs font-mono text-gray-500 text-center mb-2">{size}</div>
+                  <div className="flex items-center justify-center gap-1.5 mb-2">
+                    <span className="text-xs font-mono text-gray-500">{size}</span>
+                    <button
+                      onClick={() => { setFixingSize(fixingSize === size ? null : size); setSizeFixNote('') }}
+                      title={`Fix ${size}`}
+                      className="w-4 h-4 rounded flex items-center justify-center transition-colors"
+                      style={{
+                        color: fixingSize === size ? 'var(--accent)' : 'var(--text-muted, #6b7280)',
+                        fontSize: 11,
+                        opacity: sizeFixLoading ? 0.4 : 1,
+                      }}
+                      disabled={!!sizeFixLoading}>
+                      ✎
+                    </button>
+                  </div>
                   <div className="rounded-lg overflow-hidden"
-                    style={{ border: '1px solid var(--border)', aspectRatio: sizeToRatio(size) }}>
-                    {allImages[size]
-                      ? <img src={allImages[size]} alt={size} className="w-full h-full object-cover" />
-                      : <div className="w-full h-full flex items-center justify-center bg-gray-900">
-                          <span className="text-gray-600 text-xs">—</span>
-                        </div>}
+                    style={{
+                      border: `1px solid ${fixingSize === size ? 'var(--accent)' : 'var(--border)'}`,
+                      aspectRatio: sizeToRatio(size),
+                      transition: 'border-color 0.2s',
+                    }}>
+                    {sizeFixLoading === size ? (
+                      <div className="w-full h-full flex items-center justify-center bg-gray-900">
+                        <span className="animate-spin text-xl">⟳</span>
+                      </div>
+                    ) : allImages[size] ? (
+                      <img src={allImages[size]} alt={size} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-gray-900">
+                        <span className="text-gray-600 text-xs">—</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
+
+            {/* Per-size fix input */}
+            {fixingSize && (
+              <div className="mb-4 px-3 py-3 rounded-xl"
+                style={{ background: 'var(--bg)', border: '1px solid var(--accent)' }}>
+                <div className="text-xs font-mono mb-2" style={{ color: 'var(--accent)' }}>
+                  Fix {fixingSize}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    value={sizeFixNote}
+                    onChange={e => setSizeFixNote(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleSizeFix(fixingSize)}
+                    placeholder="e.g. text too close to edge, change background color..."
+                    autoFocus
+                    className="flex-1 px-3 py-2 rounded-xl text-sm outline-none"
+                    style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                  />
+                  <button
+                    onClick={() => handleSizeFix(fixingSize)}
+                    disabled={!sizeFixNote.trim()}
+                    className="px-4 py-2 rounded-xl font-semibold text-sm disabled:opacity-40"
+                    style={{ background: 'var(--accent)' }}>
+                    Fix
+                  </button>
+                  <button
+                    onClick={() => { setFixingSize(null); setSizeFixNote('') }}
+                    className="px-3 py-2 rounded-xl text-sm"
+                    style={{ background: 'var(--border)' }}>
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="flex gap-3 mb-3">
               <button onClick={downloadAll}
                 className="flex-1 py-3 rounded-xl font-semibold"
