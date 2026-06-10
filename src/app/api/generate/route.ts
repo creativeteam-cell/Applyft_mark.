@@ -103,7 +103,8 @@ export async function POST(req: NextRequest) {
     const imageBase64 = await generateImage(
       finalPromptWithLogo,
       imageReference,
-      logoBase64 || undefined
+      logoBase64 || undefined,
+      targetSize || '4x5'
     )
 
     return NextResponse.json({ prompt: finalPrompt, imageBase64 })

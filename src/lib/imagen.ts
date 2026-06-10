@@ -112,12 +112,18 @@ async function withRetry(prompt: string, referenceBase64?: string, logoBase64?: 
   throw new Error('Image generation failed after all retries.')
 }
 
-// Appended to main generation prompts so Gemini composes natively in portrait 4:5.
-// Without this, Gemini defaults to square/landscape and Sharp cover-crops heavily.
-const PORTRAIT_HINT = '\n\n[CRITICAL - OUTPUT FORMAT]: PORTRAIT image, taller than wide, aspect ratio 4:5 (4 wide by 5 tall, like a phone held vertically). Do not generate landscape or square. Compose the scene for a tall vertical frame.'
+// Per-size aspect ratio hints so Gemini composes natively at the right ratio.
+// Without these, Gemini defaults to square/landscape and Sharp cover-crops heavily.
+const SIZE_HINTS: Record<string, string> = {
+  '4x5':    '\n\n[CRITICAL - OUTPUT FORMAT]: PORTRAIT image, taller than wide, aspect ratio 4:5 (4 wide by 5 tall, like a phone held vertically). Do not generate landscape or square. Compose the scene for a tall vertical frame.',
+  '1x1':    '\n\n[CRITICAL - OUTPUT FORMAT]: SQUARE image, equal width and height, aspect ratio 1:1. Do not generate landscape or portrait. Compose the scene for a perfect square frame.',
+  '9x16':   '\n\n[CRITICAL - OUTPUT FORMAT]: TALL PORTRAIT image, much taller than wide, aspect ratio 9:16 (9 wide by 16 tall, like a phone screen). Do not generate landscape or square. Compose the scene for a very tall vertical frame.',
+  '1.91x1': '\n\n[CRITICAL - OUTPUT FORMAT]: LANDSCAPE image, wider than tall, aspect ratio 1.91:1 (almost 2 wide by 1 tall, like a cinema screen). Do not generate portrait or square. Compose the scene for a wide horizontal frame.',
+}
 
-export async function generateImage(prompt: string, referenceBase64?: string, logoBase64?: string): Promise<string> {
-  return withRetry(prompt + PORTRAIT_HINT, referenceBase64, logoBase64)
+export async function generateImage(prompt: string, referenceBase64?: string, logoBase64?: string, size = '4x5'): Promise<string> {
+  const hint = SIZE_HINTS[size] || SIZE_HINTS['4x5']
+  return withRetry(prompt + hint, referenceBase64, logoBase64)
 }
 
 export async function recomposeImage(imageBase64: string, targetSize: string): Promise<string> {

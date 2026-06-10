@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 
 interface GenerateModalProps {
   appCode: string
@@ -54,6 +55,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
   const [sizeIndexes, setSizeIndexes] = useState<Record<string, number>>({})
   // hover zoom
   const [hoveredSize, setHoveredSize] = useState<string | null>(null)
+  const [hoverRect, setHoverRect] = useState<DOMRect | null>(null)
 
   const [fixNote, setFixNote] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -281,6 +283,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
           fixNote: sizeFixNote,
           previousImageBase64: compressed,
           logoBase64: logoBase64 || undefined,
+          targetSize: size,
         }),
       })
 
@@ -530,28 +533,13 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                     key={size}
                     className="relative"
                     style={{ overflow: 'visible' }}
-                    onMouseEnter={() => img && setHoveredSize(size)}
-                    onMouseLeave={() => setHoveredSize(null)}>
-
-                    {/* Hover zoom — outside overflow-hidden card so it's not clipped */}
-                    {hoveredSize === size && img && (
-                      <div
-                        className="pointer-events-none"
-                        style={{
-                          position: 'absolute',
-                          bottom: 'calc(100% + 8px)',
-                          left: '50%',
-                          transform: 'translateX(-50%)',
-                          width: 200,
-                          borderRadius: 12,
-                          overflow: 'hidden',
-                          boxShadow: '0 12px 40px rgba(0,0,0,0.8)',
-                          border: '1px solid var(--border)',
-                          zIndex: 100,
-                        }}>
-                        <img src={img} alt={`${size} zoom`} className="w-full block" />
-                      </div>
-                    )}
+                    onMouseEnter={e => {
+                      if (img) {
+                        setHoveredSize(size)
+                        setHoverRect(e.currentTarget.getBoundingClientRect())
+                      }
+                    }}
+                    onMouseLeave={() => { setHoveredSize(null); setHoverRect(null) }}>
 
                     {/* Label row */}
                     <div className="flex items-center justify-center gap-1.5 mb-2">
@@ -674,6 +662,35 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
           </div>
         )}
       </div>
+
+      {/* Hover zoom portal — renders in document.body, bypasses all overflow/stacking context */}
+      {hoveredSize && hoverRect && typeof window !== 'undefined' && (() => {
+        const zoomImg = getSizeImage(hoveredSize)
+        if (!zoomImg) return null
+        const tooltipWidth = 200
+        const gap = 8
+        const top = hoverRect.top - gap
+        const left = hoverRect.left + hoverRect.width / 2
+        return createPortal(
+          <div
+            className="pointer-events-none"
+            style={{
+              position: 'fixed',
+              top,
+              left,
+              transform: 'translate(-50%, -100%)',
+              width: tooltipWidth,
+              borderRadius: 12,
+              overflow: 'hidden',
+              boxShadow: '0 12px 40px rgba(0,0,0,0.9)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              zIndex: 9999,
+            }}>
+            <img src={zoomImg} alt={hoveredSize + ' zoom'} style={{ width: '100%', display: 'block' }} />
+          </div>,
+          document.body
+        )
+      })()}
     </div>
   )
 }
