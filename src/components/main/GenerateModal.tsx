@@ -667,27 +667,34 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
       {hoveredSize && hoverRect && typeof window !== 'undefined' && (() => {
         const zoomImg = getSizeImage(hoveredSize)
         if (!zoomImg) return null
-        const tooltipWidth = 200
-        const gap = 8
-        const top = hoverRect.top - gap
-        const left = hoverRect.left + hoverRect.width / 2
+        const cx = hoverRect.left + hoverRect.width / 2
+        const cy = hoverRect.top + hoverRect.height / 2
         return createPortal(
-          <div
-            className="pointer-events-none"
-            style={{
-              position: 'fixed',
-              top,
-              left,
-              transform: 'translate(-50%, -100%)',
-              width: tooltipWidth,
-              borderRadius: 12,
-              overflow: 'hidden',
-              boxShadow: '0 12px 40px rgba(0,0,0,0.9)',
-              border: '1px solid rgba(255,255,255,0.15)',
-              zIndex: 9999,
-            }}>
-            <img src={zoomImg} alt={hoveredSize + ' zoom'} style={{ width: '100%', display: 'block' }} />
-          </div>,
+          <>
+            <style>{`
+              @keyframes hoverZoomIn {
+                from { opacity: 0; transform: translate(-50%, -50%) scale(0.65); }
+                to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+              }
+            `}</style>
+            <div
+              className="pointer-events-none"
+              style={{
+                position: 'fixed',
+                top: cy,
+                left: cx,
+                transform: 'translate(-50%, -50%)',
+                width: 340,
+                borderRadius: 16,
+                overflow: 'hidden',
+                boxShadow: '0 24px 80px rgba(0,0,0,0.95)',
+                border: '2px solid rgba(255,255,255,0.18)',
+                zIndex: 9999,
+                animation: 'hoverZoomIn 0.18s cubic-bezier(0.34, 1.56, 0.64, 1) forwards',
+              }}>
+              <img src={zoomImg} alt={hoveredSize + ' zoom'} style={{ width: '100%', display: 'block' }} />
+            </div>
+          </>,
           document.body
         )
       })()}
