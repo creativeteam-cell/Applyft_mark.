@@ -85,16 +85,18 @@ ${hasUserText
 
 PRIORITY 2 — REFERENCE IMAGE:
 ${hasReference
-  ? `A reference image is provided. Analyze it for visual style, composition, color palette, typography approach, and emotional feel. Use this as the visual style foundation — unless it conflicts with the user prompt above.
+  ? `A reference image is provided. Use it as the visual style foundation — artistic style, color palette, lighting, composition, typography feel.
 
-TEXT FROM REFERENCE — ABSOLUTE RULE: Copy ALL text visible in the reference image EXACTLY word-for-word, character-for-character (headline, subheadline, body copy, CTA button text). Do NOT rewrite, invent, expand, or paraphrase it. You may re-style the text visually (font, colour, size) to fit the new composition, but the wording must be identical. Only change the wording if the user prompt above explicitly requests a different text.`
+TEXT FROM REFERENCE — NON-NEGOTIABLE: Read every word of text visible in the reference image. Copy it EXACTLY into your output Gemini prompt as a hard requirement. Do NOT paraphrase, rewrite, invent, or improve it. The words on the generated image must be identical to the words on the reference image. You MUST quote the exact text in your prompt like this: "Headline text MUST be exactly: [quote from reference]". This rule overrides any creative instinct to use different wording.`
   : `No reference image.`}
 
 PRIORITY 3 — PAIN POINT + HEADLINER:
 ${hasPain ? `Pain point (sets emotional tone): "${selectedPain}"` : `No pain point.`}
 ${hasHook
-  ? `Headliner text: "${selectedHook}" — this text MUST appear verbatim on the image as the main bold headline, unless the user prompt explicitly specifies a different headline.`
-  : `No headliner — create a compelling headline that fits the concept.`}
+  ? `Headliner text: "${selectedHook}" — this text MUST appear verbatim on the image as the main bold headline, overriding any text from the reference image.`
+  : hasReference
+    ? `No headliner selected — use the EXACT headline text from the reference image as described in PRIORITY 2.`
+    : `No headliner — create a compelling headline that fits the concept.`}
 
 PRIORITY 4 — PRODUCT (always included as context):
 Use the app name and description to ensure the ad serves this product.
@@ -102,7 +104,7 @@ Use the app name and description to ensure the ad serves this product.
 OUTPUT FORMAT RULES:
 - Vertical 4:5 format
 - SAFE ZONES — ABSOLUTE RULE: ALL text and UI elements MUST be placed strictly within the center 80% of the image. No text, button, or element may touch or cross within 10% of any edge. Headline centered horizontally, never near edges. CTA button centered, minimum 15% from bottom edge.
-- Include text ON the image: headline${hasHook ? ` (MUST be exactly: "${selectedHook}" unless overridden by user prompt)` : ''}, optional subheadline, CTA button
+- Include text ON the image: ${hasHook ? `headline MUST be exactly: "${selectedHook}"` : hasReference ? `headline MUST be copied word-for-word from the reference image` : `headline, optional subheadline`}, CTA button
 - ABSOLUTELY NO logos, brand marks, icons, or watermarks of any kind — not from the reference, not invented. A logo will be injected separately only if explicitly provided by the user
 - NEVER repeat the same text or app name more than once in the image
 - NO pixel dimensions or technical specs
@@ -111,7 +113,7 @@ OUTPUT FORMAT RULES:
 ${hasConcept ? `- STYLE INSPIRATION: "${selectedConcept}" — use this as creative direction` : ''}
 
 ${hasReference ? `CRITICAL — END YOUR PROMPT WITH THIS EXACT SENTENCE:
-"Use the attached reference image as the primary visual style guide — preserve its artistic style, human emotional elements, color treatment, lighting mood, and overall composition feel. Adapt these into the new concept without copying the content."` : ''}
+"Use the attached reference image as the primary visual style guide — preserve its artistic style, human emotional elements, color treatment, lighting mood, and overall composition feel."` : ''}
 
 Return ONLY the Gemini image generation prompt (150-200 words). No explanations, no preamble.`
 

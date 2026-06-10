@@ -395,7 +395,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
             )}
 
             {fixHistory.length > 0 && (
-              <div className="relative mb-6" style={{ height: 420, overflow: 'hidden' }}>
+              <div className="relative mb-6" style={{ overflow: 'visible' }}>
                 {fixHistory.map((img, i) => {
                   const offset = i - currentFixIndex
                   const isActive = offset === 0
@@ -404,20 +404,29 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                     <div
                       key={i}
                       onClick={() => !isActive && setCurrentFixIndex(i)}
-                      className="absolute top-0 transition-all duration-300"
+                      className="transition-all duration-300"
                       style={{
+                        position: isActive ? 'relative' : 'absolute',
+                        top: 0,
                         left: '50%',
-                        transform: `translateX(calc(-50% + ${offset * 220}px)) scale(${isActive ? 1 : 0.78})`,
+                        transform: isActive
+                          ? 'none'
+                          : `translateX(calc(-50% + ${offset * 260}px)) scale(0.78)`,
                         opacity: isVisible ? (isActive ? 1 : 0.35) : 0,
                         zIndex: isActive ? 2 : 1,
                         cursor: isActive ? 'default' : 'pointer',
-                        height: '100%',
-                        display: 'flex',
-                        alignItems: 'center',
+                        width: isActive ? '100%' : 'auto',
+                        marginLeft: isActive ? 0 : undefined,
                       }}>
                       <img src={img} alt={`v${i + 1}`}
-                        className="rounded-xl object-cover shadow-2xl"
-                        style={{ height: isActive ? 400 : 310, aspectRatio: '4/5' }} />
+                        className="rounded-xl shadow-2xl"
+                        style={{
+                          width: isActive ? '100%' : 'auto',
+                          height: isActive ? 'auto' : 310,
+                          aspectRatio: '4/5',
+                          display: 'block',
+                          objectFit: 'contain',
+                        }} />
                       {!isActive && isVisible && (
                         <div className="absolute inset-0 rounded-xl"
                           style={{ background: 'rgba(0,0,0,0.3)' }} />
