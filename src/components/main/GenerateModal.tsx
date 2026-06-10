@@ -541,14 +541,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                   <div
                     key={size}
                     className="relative"
-                    style={{ overflow: 'visible' }}
-                    onMouseEnter={e => {
-                      if (img) {
-                        setHoveredSize(size)
-                        setHoverRect(e.currentTarget.getBoundingClientRect())
-                      }
-                    }}
-                    onMouseLeave={() => { setHoveredSize(null); setHoverRect(null) }}>
+                    style={{ overflow: 'visible' }}>
 
                     {/* Label row */}
                     <div className="flex items-center justify-center gap-1.5 mb-2">
@@ -567,7 +560,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                       </button>
                     </div>
 
-                    {/* Card — overflow-hidden clips image only */}
+                    {/* Card — hover triggers zoom, overflow-hidden clips image only */}
                     <div
                       className="rounded-lg overflow-hidden cursor-default"
                       style={{
@@ -575,7 +568,14 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                         aspectRatio: sizeToRatio(size),
                         transition: 'border-color 0.2s',
                         position: 'relative',
-                      }}>
+                      }}
+                      onMouseEnter={e => {
+                        if (img) {
+                          setHoveredSize(size)
+                          setHoverRect(e.currentTarget.getBoundingClientRect())
+                        }
+                      }}
+                      onMouseLeave={() => { setHoveredSize(null); setHoverRect(null) }}>
 
                       {sizeFixLoading === size ? (
                         <div className="w-full h-full flex items-center justify-center bg-gray-900">
