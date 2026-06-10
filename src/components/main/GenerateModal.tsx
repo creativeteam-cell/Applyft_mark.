@@ -351,8 +351,8 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: 'rgba(0,0,0,0.85)' }}>
-      <div className="relative w-full max-w-2xl mx-4 rounded-2xl p-8"
-        style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      <div className="relative w-full max-w-2xl mx-4 rounded-2xl p-8 overflow-y-auto"
+        style={{ background: 'var(--surface)', border: '1px solid var(--border)', maxHeight: '92vh' }}>
 
         {stage !== 'generating' && stage !== 'generating-all' && (
           <button onClick={onClose}
@@ -395,7 +395,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
             )}
 
             {fixHistory.length > 0 && (
-              <div className="relative mb-6" style={{ overflow: 'visible' }}>
+              <div className="relative mb-6 flex justify-center" style={{ overflow: 'visible' }}>
                 {fixHistory.map((img, i) => {
                   const offset = i - currentFixIndex
                   const isActive = offset === 0
@@ -408,21 +408,19 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                       style={{
                         position: isActive ? 'relative' : 'absolute',
                         top: 0,
-                        left: '50%',
+                        left: isActive ? 'auto' : '50%',
                         transform: isActive
                           ? 'none'
-                          : `translateX(calc(-50% + ${offset * 260}px)) scale(0.78)`,
+                          : `translateX(calc(-50% + ${offset * 200}px)) scale(0.78)`,
                         opacity: isVisible ? (isActive ? 1 : 0.35) : 0,
                         zIndex: isActive ? 2 : 1,
                         cursor: isActive ? 'default' : 'pointer',
-                        width: isActive ? '100%' : 'auto',
-                        marginLeft: isActive ? 0 : undefined,
                       }}>
                       <img src={img} alt={`v${i + 1}`}
                         className="rounded-xl shadow-2xl"
                         style={{
-                          width: isActive ? '100%' : 'auto',
-                          height: isActive ? 'auto' : 310,
+                          height: 'min(460px, 52vh)',
+                          width: 'auto',
                           aspectRatio: '4/5',
                           display: 'block',
                           objectFit: 'contain',
