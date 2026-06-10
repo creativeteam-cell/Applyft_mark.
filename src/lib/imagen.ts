@@ -1,5 +1,33 @@
 // Генерация изображений через Gemini 3.1 Flash Image Preview
 
+import sharp from 'sharp'
+
+// Composites a PNG logo onto a dark background before sending to Gemini.
+// Without this, white text on transparent PNG = white on white = invisible in the output.
+async function prepareLogoForGemini(logoBase64: string): Promise<string> {
+  try {
+    const base64Data = logoBase64.replace(/^data:image\/\w+;base64,/, '')
+    const mimeType = logoBase64.match(/^data:(image\/\w+);base64,/)?.[1] || ''
+    // Only preprocess PNG (may have alpha). JPEG/WebP are already opaque.
+    if (!mimeType.includes('png') && !mimeType.includes('svg')) return logoBase64
+    const buf = Buffer.from(base64Data, 'base64')
+    const meta = await sharp(buf).metadata()
+    const w = meta.width || 400
+    const h = meta.height || 400
+    // Dark background so white text stays visible; logo composited on top
+    const darkBg = await sharp({
+      create: { width: w, height: h, channels: 4, background: { r: 24, g: 24, b: 28, alpha: 1 } },
+    }).png().toBuffer()
+    const composited = await sharp(darkBg)
+      .composite([{ input: buf, blend: 'over' }])
+      .png()
+      .toBuffer()
+    return `data:image/png;base64,${composited.toString('base64')}`
+  } catch {
+    return logoBase64 // fallback: send as-is
+  }
+}
+
 const TEXT_RULE = `
 CRITICAL - TEXT IS SACRED:
 You are NOT a writer. Do NOT write, invent, paraphrase, expand, or summarize ANY text.
@@ -55,8 +83,9 @@ async function tryGenerate(prompt: string, referenceBase64?: string, logoBase64?
   }
 
   if (logoBase64) {
-    const base64Data = logoBase64.replace(/^data:image\/\w+;base64,/, '')
-    const mimeType = logoBase64.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/png'
+    const prepared = await prepareLogoForGemini(logoBase64)
+    const base64Data = prepared.replace(/^data:image\/\w+;base64,/, '')
+    const mimeType = prepared.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/png'
     parts.push({ inlineData: { mimeType, data: base64Data } })
   }
 
@@ -141,7 +170,9 @@ const SIZE_HINTS: Record<string, string> = {
 
 export async function generateImage(prompt: string, referenceBase64?: string, logoBase64?: string, size = '4x5'): Promise<string> {
   const hint = SIZE_HINTS[size] || SIZE_HINTS['4x5']
-  return withRetry(prompt + TEXT_FROM_REF_RULE + NO_LOGO_RULE + hint, referenceBase64, logoBase64, 3, size)
+  // Only add NO_LOGO_RULE when no logo is provided — otherwise it contradicts the logo placement instruction
+  const logoRule = logoBase64 ? '' : NO_LOGO_RULE
+  return withRetry(prompt + TEXT_FROM_REF_RULE + logoRule + hint, referenceBase64, logoBase64, 3, size)
 }
 
 export async function recomposeImage(imageBase64: string, targetSize: string): Promise<string> {

@@ -669,11 +669,15 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
         if (!zoomImg) return null
         const cx = hoverRect.left + hoverRect.width / 2
         const cy = hoverRect.top + hoverRect.height / 2
+        const zoomWidths: Record<string, number> = {
+          '4x5': 380, '1x1': 380, '9x16': 300, '1.91x1': 560,
+        }
+        const zoomWidth = zoomWidths[hoveredSize] || 380
         return createPortal(
           <>
             <style>{`
               @keyframes hoverZoomIn {
-                from { opacity: 0; transform: translate(-50%, -50%) scale(0.65); }
+                from { opacity: 0; transform: translate(-50%, -50%) scale(0.72); }
                 to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
               }
             `}</style>
@@ -684,13 +688,13 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                 top: cy,
                 left: cx,
                 transform: 'translate(-50%, -50%)',
-                width: 340,
+                width: zoomWidth,
                 borderRadius: 16,
                 overflow: 'hidden',
                 boxShadow: '0 24px 80px rgba(0,0,0,0.95)',
                 border: '2px solid rgba(255,255,255,0.18)',
                 zIndex: 9999,
-                animation: 'hoverZoomIn 0.18s cubic-bezier(0.34, 1.56, 0.64, 1) forwards',
+                animation: 'hoverZoomIn 0.25s cubic-bezier(0.22, 1.08, 0.36, 1) forwards',
               }}>
               <img src={zoomImg} alt={hoveredSize + ' zoom'} style={{ width: '100%', display: 'block' }} />
             </div>
