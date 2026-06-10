@@ -36,7 +36,15 @@ LAYOUT RULES (the ONLY thing you may change):
 - Maintain the same overall mood, style, colors, typography, and composition hierarchy`,
 }
 
-async function tryGenerate(prompt: string, referenceBase64?: string, logoBase64?: string, timeoutMs = 100000): Promise<string> {
+// Maps our size codes to Gemini imageConfig aspectRatio values
+const SIZE_TO_ASPECT: Record<string, string> = {
+  '4x5':    '4:5',
+  '1x1':    '1:1',
+  '9x16':   '9:16',
+  '1.91x1': '16:9',
+}
+
+async function tryGenerate(prompt: string, referenceBase64?: string, logoBase64?: string, timeoutMs = 100000, size = '4x5'): Promise<string> {
   const apiKey = process.env.GOOGLE_AI_API_KEY!
   const parts: any[] = []
 
@@ -54,6 +62,8 @@ async function tryGenerate(prompt: string, referenceBase64?: string, logoBase64?
 
   parts.push({ text: prompt })
 
+  const aspectRatio = SIZE_TO_ASPECT[size] || '4:5'
+
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
@@ -65,7 +75,10 @@ async function tryGenerate(prompt: string, referenceBase64?: string, logoBase64?
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts }],
-          generationConfig: { responseModalities: ['IMAGE', 'TEXT'] },
+          generationConfig: {
+            responseModalities: ['IMAGE', 'TEXT'],
+            imageConfig: { aspectRatio, imageSize: '2K' },
+          },
         }),
         signal: controller.signal,
       }
@@ -91,12 +104,12 @@ async function tryGenerate(prompt: string, referenceBase64?: string, logoBase64?
   }
 }
 
-async function withRetry(prompt: string, referenceBase64?: string, logoBase64?: string, maxAttempts = 3): Promise<string> {
+async function withRetry(prompt: string, referenceBase64?: string, logoBase64?: string, maxAttempts = 3, size = '4x5'): Promise<string> {
   const retryableErrors = ['TIMEOUT', 'No image in response']
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      return await tryGenerate(prompt, referenceBase64, logoBase64, 100000)
+      return await tryGenerate(prompt, referenceBase64, logoBase64, 100000, size)
     } catch (e: any) {
       const isRetryable = retryableErrors.includes(e.message)
       if (!isRetryable || attempt === maxAttempts) {
@@ -112,6 +125,11 @@ async function withRetry(prompt: string, referenceBase64?: string, logoBase64?: 
   throw new Error('Image generation failed after all retries.')
 }
 
+// Always appended so Gemini never hallucinates logos or rewrites reference text.
+const NO_LOGO_RULE = '\n\n[CRITICAL - LOGOS]: Do NOT generate, draw, or reproduce any logo, brand mark, icon badge, or watermark. If the reference image contains a logo, IGNORE it — do not include it. A logo will be provided separately as an explicit instruction if one is needed.'
+
+const TEXT_FROM_REF_RULE = '\n\n[CRITICAL - TEXT]: If a reference image is provided, copy ALL visible text from it EXACTLY — same words, same spelling, same capitalisation, same punctuation, same line breaks. Do NOT rewrite, translate, expand, or invent any text. Visually you may re-style the text (font, color, size) to match the new composition, but the wording must be identical to the reference. Only change the wording if the generation prompt below explicitly requests it.'
+
 // Per-size aspect ratio hints so Gemini composes natively at the right ratio.
 // Without these, Gemini defaults to square/landscape and Sharp cover-crops heavily.
 const SIZE_HINTS: Record<string, string> = {
@@ -123,11 +141,11 @@ const SIZE_HINTS: Record<string, string> = {
 
 export async function generateImage(prompt: string, referenceBase64?: string, logoBase64?: string, size = '4x5'): Promise<string> {
   const hint = SIZE_HINTS[size] || SIZE_HINTS['4x5']
-  return withRetry(prompt + hint, referenceBase64, logoBase64)
+  return withRetry(prompt + TEXT_FROM_REF_RULE + NO_LOGO_RULE + hint, referenceBase64, logoBase64, 3, size)
 }
 
 export async function recomposeImage(imageBase64: string, targetSize: string): Promise<string> {
   const prompt = RECOMPOSE_PROMPTS[targetSize]
   if (!prompt) throw new Error(`Unknown target size: ${targetSize}`)
-  return withRetry(prompt, imageBase64)
+  return withRetry(prompt, imageBase64, undefined, 3, targetSize)
 }
