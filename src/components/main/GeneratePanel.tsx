@@ -124,7 +124,7 @@ export function GeneratePanel({
   const generateDisabled = mode === 'var' && (!varNumber.trim() || lettersLoading || !!lettersError)
 
   return (
-    <div className="fixed left-0 right-0 z-39 border-b px-8 py-4"
+    <div className="fixed left-0 right-0 z-40 border-b px-8 py-4"
       style={{ top: '104px', background: 'var(--bg)', borderColor: 'var(--border)' }}>
 
       <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />

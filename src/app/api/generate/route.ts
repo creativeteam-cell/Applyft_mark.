@@ -97,7 +97,10 @@ export async function POST(req: NextRequest) {
     // Логотип — передаём Gemini если юзер выбрал
     let finalPromptWithLogo = finalPrompt
     if (logoBase64) {
-      finalPromptWithLogo = finalPrompt + `\n\nLOGO PLACEMENT — CRITICAL: The last image provided is the app logo. You MUST reproduce it exactly as-is in the top-left corner of the ad. Rules: (1) Copy every detail — icon, wordmark, text, colors, proportions — pixel-perfectly. Do NOT simplify, redraw, or omit any part including any text in the logo. (2) Size: approximately 15% of the image width. (3) Do not let it overlap headlines, subheadlines, or CTA buttons. (4) Place it on a clean background area with enough contrast to be readable.`
+      const logoPositionRule = fixNote
+        ? `Maintain the logo position from the previous image UNLESS the fix instruction explicitly requests moving it — in that case follow the fix instruction for logo placement.`
+        : `Place it in the top-left corner of the ad. (4) Place it on a clean background area with enough contrast to be readable.`
+      finalPromptWithLogo = finalPrompt + `\n\nLOGO PLACEMENT — CRITICAL: The last image provided is the app logo. You MUST reproduce it exactly as-is. Rules: (1) Copy every detail — icon, wordmark, text, colors, proportions — pixel-perfectly. Do NOT simplify, redraw, or omit any part including any text in the logo. (2) Size: approximately 15% of the image width. (3) Do not let it overlap headlines, subheadlines, or CTA buttons. (4) ${logoPositionRule}`
     }
 
     const imageBase64 = await generateImage(
