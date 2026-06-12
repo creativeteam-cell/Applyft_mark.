@@ -310,6 +310,52 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
     }
   }
 
+  const [rebuilding, setRebuilding] = useState(false)
+
+  async function handleRebuildSizes() {
+    const base = getSizeImage('4x5')
+    if (!base) return
+    setRebuilding(true)
+    try {
+      const compressed = await compressImage(base, 1200)
+
+      async function recomposeSize(size: string): Promise<void> {
+        try {
+          const res = await fetch('/api/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ recomposeBase64: compressed, targetSize: size }),
+          })
+          const data = await res.json()
+          if (!data.error && data.imageBase64) {
+            let finalImage = data.imageBase64
+            try {
+              const resizeRes = await fetch('/api/resize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imageBase64: data.imageBase64, size }),
+              })
+              const resizeData = await resizeRes.json()
+              if (resizeData.imageBase64) finalImage = resizeData.imageBase64
+            } catch {}
+            // Append new version to that size's history
+            setSizeHistories(prev => {
+              const newHist = [...(prev[size] || []), finalImage]
+              setSizeIndexes(idx => ({ ...idx, [size]: newHist.length - 1 }))
+              return { ...prev, [size]: newHist }
+            })
+          }
+        } catch (e) {
+          console.error(`Rebuild failed for ${size}:`, e)
+        }
+      }
+
+      await Promise.all(['1x1', '9x16', '1.91x1'].map(recomposeSize))
+    } finally {
+      setRebuilding(false)
+    }
+  }
+
   async function handleSizeFix(size: string) {
     if (!sizeFixNote.trim()) return
     setSizeFixLoading(size)
@@ -723,6 +769,19 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
               </button>
               <button onClick={onClose} className="px-6 py-3 rounded-xl"
                 style={{ background: 'var(--border)' }}>Close</button>
+            </div>
+
+            <div className="flex justify-center">
+              <button
+                onClick={handleRebuildSizes}
+                disabled={rebuilding}
+                className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-medium transition-all disabled:opacity-50"
+                style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+                title="Regenerate 1x1, 9x16, 1.91x1 from the current 4x5">
+                {rebuilding
+                  ? <><span className="animate-spin">⟳</span> Rebuilding sizes...</>
+                  : <>↺ Rebuild sizes</>}
+              </button>
             </div>
             {saveError && (
               <div className="text-red-400 text-xs text-center">{saveError}</div>

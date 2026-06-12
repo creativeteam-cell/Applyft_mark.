@@ -42,12 +42,17 @@ export function GeneratePanel({
   availableLogos,
   selectedLogo,
   onLogoChange,
-  assets,
+  assets: assetsProp,
   onAssetsChange,
 }: GeneratePanelProps) {
-  // Always-fresh ref so callbacks never capture a stale assets value
-  const assetsRef = useRef(assets)
-  assetsRef.current = assets
+  // Local state — avoids stale-closure issues with prop drilling.
+  // Functional setState always receives the latest prev value.
+  const [assets, setAssets] = useState<Asset[]>(assetsProp)
+
+  function updateAssets(next: Asset[]) {
+    setAssets(next)
+    onAssetsChange(next)
+  }
 
   const [logoOpen, setLogoOpen] = useState(false)
   const [promptBorder, setPromptBorder] = useState('var(--border)')
@@ -128,15 +133,22 @@ export function GeneratePanel({
   function confirmAsset() {
     const name = assetNameInput.trim().replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase()
     if (!name || !pendingAssetBase64) return
-    const current = assetsRef.current
-    const filtered = current.filter(a => a.name !== name)
-    onAssetsChange([...filtered, { name, base64: pendingAssetBase64 }])
+    const base64 = pendingAssetBase64
+    setAssets(prev => {
+      const next = [...prev.filter(a => a.name !== name), { name, base64 }]
+      onAssetsChange(next)
+      return next
+    })
     setPendingAssetBase64(null)
     setAssetNameInput('')
   }
 
   function removeAsset(name: string) {
-    onAssetsChange(assetsRef.current.filter(a => a.name !== name))
+    setAssets(prev => {
+      const next = prev.filter(a => a.name !== name)
+      onAssetsChange(next)
+      return next
+    })
   }
 
   async function handleUrlFetch(url: string) {
