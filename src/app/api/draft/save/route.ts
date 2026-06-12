@@ -48,10 +48,10 @@ export async function POST(req: NextRequest) {
 
   try {
     const auth = getAuthClient()
-    const tokenInfo = await auth.getAccessToken()
-    const token = tokenInfo.token!
+    const token = await auth.getAccessToken()
+    if (!token) throw new Error('Failed to get access token')
     const fileName = `${appCode}_draft_${Date.now()}.jpg`
-    const file = await uploadToDraft(token, fileName, imageBase64)
+    const file = await uploadToDraft(token as string, fileName, imageBase64)
     return NextResponse.json({ fileId: file.id, fileName: file.name })
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })
