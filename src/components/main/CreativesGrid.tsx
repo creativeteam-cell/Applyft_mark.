@@ -47,6 +47,8 @@ export function CreativesGrid({ appCode, page, onPageChange, refreshKey = 0 }: C
   const [error, setError] = useState<string | null>(null)
   const [localRefresh, setLocalRefresh] = useState(0)
   const [search, setSearch] = useState('')
+  const [searchResults, setSearchResults] = useState<Creative[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
   // Per-carousel frame index: key = creative.id
   const [carouselIndexes, setCarouselIndexes] = useState<Record<string, number>>({})
 
@@ -88,14 +90,33 @@ export function CreativesGrid({ appCode, page, onPageChange, refreshKey = 0 }: C
     setLocalRefresh(v => v + 1)
   }
 
+  // Drive-wide search when search term changes
+  useEffect(() => {
+    const q = search.trim()
+    if (!q || !appCode) {
+      setSearchResults([])
+      return
+    }
+    const controller = new AbortController()
+    setSearchLoading(true)
+    fetch(`/api/creatives/search?app=${appCode}&q=${q}`, { signal: controller.signal })
+      .then(r => r.json())
+      .then(data => { if (!data.error) setSearchResults(data.creatives || []) })
+      .catch(() => {})
+      .finally(() => setSearchLoading(false))
+    return () => controller.abort()
+  }, [search, appCode])
+
   function setCarouselIndex(id: string, index: number) {
     setCarouselIndexes(prev => ({ ...prev, [id]: index }))
   }
 
-  // Filter by number — match against the numeric part of the folder name
-  const filtered = search.trim()
-    ? creatives.filter(c => c.variantFolder.includes(search.trim()))
-    : creatives
+  // Local filter (instant) + merge with Drive search results (deduped)
+  const q = search.trim()
+  const localFiltered = q ? creatives.filter(c => c.variantFolder.includes(q)) : creatives
+  const localIds = new Set(localFiltered.map(c => c.id))
+  const extraFromDrive = searchResults.filter(c => !localIds.has(c.id))
+  const filtered = q ? [...localFiltered, ...extraFromDrive] : creatives
 
   return (
     <div>
@@ -108,19 +129,24 @@ export function CreativesGrid({ appCode, page, onPageChange, refreshKey = 0 }: C
         </div>
 
         {/* Number search */}
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value.replace(/\D/g, '').slice(0, 3))}
-          placeholder="001"
-          maxLength={3}
-          className="w-16 px-2 py-1 rounded-lg text-xs font-mono text-center outline-none"
-          style={{
-            background: 'var(--surface)',
-            border: `1px solid ${search ? 'var(--accent)' : 'var(--border)'}`,
-            color: 'var(--text)',
-          }}
-          title="Search by number"
-        />
+        <div className="relative flex items-center">
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value.replace(/\D/g, '').slice(0, 3))}
+            placeholder="001"
+            maxLength={3}
+            className="w-16 px-2 py-1 rounded-lg text-xs font-mono text-center outline-none"
+            style={{
+              background: 'var(--surface)',
+              border: `1px solid ${search ? 'var(--accent)' : 'var(--border)'}`,
+              color: 'var(--text)',
+            }}
+            title="Search by number"
+          />
+          {searchLoading && (
+            <span className="absolute -right-4 text-gray-500 animate-spin text-xs">⟳</span>
+          )}
+        </div>
 
         <button
           onClick={handleRefresh}
@@ -148,9 +174,15 @@ export function CreativesGrid({ appCode, page, onPageChange, refreshKey = 0 }: C
         <div className="flex items-center justify-center py-32">
           <div className="text-gray-500 text-sm">No creatives found for {appCode}</div>
         </div>
-      ) : filtered.length === 0 ? (
+      ) : filtered.length === 0 && !searchLoading ? (
         <div className="flex items-center justify-center py-32">
           <div className="text-gray-500 text-sm">No creatives matching <span className="font-mono" style={{ color: 'var(--accent)' }}>{search}</span></div>
+        </div>
+      ) : filtered.length === 0 && searchLoading ? (
+        <div className="flex items-center justify-center py-32">
+          <div className="text-gray-500 flex items-center gap-2 text-sm">
+            <span className="animate-spin">⟳</span> Searching Drive...
+          </div>
         </div>
       ) : (
         <div className="space-y-4" style={{ opacity: loading ? 0.6 : 1, transition: 'opacity 0.2s' }}>

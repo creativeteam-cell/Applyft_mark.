@@ -45,6 +45,10 @@ export function GeneratePanel({
   assets,
   onAssetsChange,
 }: GeneratePanelProps) {
+  // Always-fresh ref so callbacks never capture a stale assets value
+  const assetsRef = useRef(assets)
+  assetsRef.current = assets
+
   const [logoOpen, setLogoOpen] = useState(false)
   const [promptBorder, setPromptBorder] = useState('var(--border)')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -124,15 +128,15 @@ export function GeneratePanel({
   function confirmAsset() {
     const name = assetNameInput.trim().replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase()
     if (!name || !pendingAssetBase64) return
-    // Replace if name already exists
-    const filtered = assets.filter(a => a.name !== name)
+    const current = assetsRef.current
+    const filtered = current.filter(a => a.name !== name)
     onAssetsChange([...filtered, { name, base64: pendingAssetBase64 }])
     setPendingAssetBase64(null)
     setAssetNameInput('')
   }
 
   function removeAsset(name: string) {
-    onAssetsChange(assets.filter(a => a.name !== name))
+    onAssetsChange(assetsRef.current.filter(a => a.name !== name))
   }
 
   async function handleUrlFetch(url: string) {

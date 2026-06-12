@@ -84,6 +84,12 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
   const previewImage = fixHistory[currentFixIndex] || null
   const currentPrompt = promptHistory[currentFixIndex] || null
 
+  // Reset draft save state when switching between variants
+  useEffect(() => {
+    setDraftSaved(false)
+    setDraftError(null)
+  }, [currentFixIndex])
+
   useEffect(() => {
     if (initialImage) {
       setFixHistory([initialImage])
