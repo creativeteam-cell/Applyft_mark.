@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, useEffect } from 'react'
+import { useRef, useState, useEffect, useReducer } from 'react'
 import { HighlightTextarea } from './HighlightTextarea'
 
 export interface Asset {
@@ -8,8 +8,19 @@ export interface Asset {
   base64: string
 }
 
-// Module-level store — survives any component re-mount, just like panelStore in MainPage
-let _assets: Asset[] = []
+type AssetsAction =
+  | { type: 'confirm'; name: string; base64: string }
+  | { type: 'remove'; name: string }
+
+function assetsReducer(state: Asset[], action: AssetsAction): Asset[] {
+  if (action.type === 'confirm') {
+    return [...state.filter(a => a.name !== action.name), { name: action.name, base64: action.base64 }]
+  }
+  if (action.type === 'remove') {
+    return state.filter(a => a.name !== action.name)
+  }
+  return state
+}
 
 interface GeneratePanelProps {
   prompt: string
@@ -48,15 +59,17 @@ export function GeneratePanel({
   assets: assetsProp,
   onAssetsChange,
 }: GeneratePanelProps) {
-  // _assets (module-level) is the source of truth for reads.
-  // assets state is only used for rendering — updated via setAssets to trigger re-render.
-  const [assets, setAssets] = useState<Asset[]>(_assets)
-
-  function applyAssets(next: Asset[]) {
-    _assets = next
-    setAssets([...next])
-    onAssetsChange(next)
-  }
+  // useReducer guarantees reducer always receives latest state — no stale closures
+  const [assets, dispatchAssets] = useReducer(assetsReducer, [])
+  const onAssetsChangeRef = useRef(onAssetsChange)
+  useEffect(() => { onAssetsChangeRef.current = onAssetsChange })
+  const prevAssetsRef = useRef(assets)
+  useEffect(() => {
+    if (prevAssetsRef.current !== assets) {
+      prevAssetsRef.current = assets
+      onAssetsChangeRef.current(assets)
+    }
+  }, [assets])
 
   const [logoOpen, setLogoOpen] = useState(false)
   const [promptBorder, setPromptBorder] = useState('var(--border)')
@@ -127,7 +140,7 @@ export function GeneratePanel({
     reader.onload = () => {
       setPendingAssetBase64(reader.result as string)
       // Auto-suggest name from filename (without extension, slugified)
-      const suggested = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase().slice(0, 20)
+      const suggested = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase().slice(0, 40)
       setAssetNameInput(suggested)
     }
     reader.readAsDataURL(file)
@@ -137,14 +150,13 @@ export function GeneratePanel({
   function confirmAsset() {
     const name = assetNameInput.trim().replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase()
     if (!name || !pendingAssetBase64) return
-    const next = [..._assets.filter(a => a.name !== name), { name, base64: pendingAssetBase64 }]
-    applyAssets(next)
+    dispatchAssets({ type: 'confirm', name, base64: pendingAssetBase64 })
     setPendingAssetBase64(null)
     setAssetNameInput('')
   }
 
   function removeAsset(name: string) {
-    applyAssets(_assets.filter(a => a.name !== name))
+    dispatchAssets({ type: 'remove', name })
   }
 
   async function handleUrlFetch(url: string) {
@@ -297,8 +309,8 @@ export function GeneratePanel({
                   onKeyDown={e => { if (e.key === 'Enter') confirmAsset(); if (e.key === 'Escape') { setPendingAssetBase64(null); setAssetNameInput('') } }}
                   placeholder="name"
                   autoFocus
-                  maxLength={20}
-                  className="w-20 text-xs font-mono outline-none bg-transparent"
+                  maxLength={40}
+                  className="w-28 text-xs font-mono outline-none bg-transparent"
                   style={{ color: 'var(--text)' }}
                 />
                 <button onClick={confirmAsset}
