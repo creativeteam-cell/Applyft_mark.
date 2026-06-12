@@ -8,6 +8,9 @@ export interface Asset {
   base64: string
 }
 
+// Module-level store — survives any component re-mount, just like panelStore in MainPage
+let _assets: Asset[] = []
+
 interface GeneratePanelProps {
   prompt: string
   onPromptChange: (v: string) => void
@@ -45,14 +48,13 @@ export function GeneratePanel({
   assets: assetsProp,
   onAssetsChange,
 }: GeneratePanelProps) {
-  // assetsRef is the single source of truth for reads inside callbacks.
-  // assets state drives rendering. Both are always kept in sync.
-  const assetsRef = useRef<Asset[]>([])
-  const [assets, setAssets] = useState<Asset[]>([])
+  // _assets (module-level) is the source of truth for reads.
+  // assets state is only used for rendering — updated via setAssets to trigger re-render.
+  const [assets, setAssets] = useState<Asset[]>(_assets)
 
   function applyAssets(next: Asset[]) {
-    assetsRef.current = next
-    setAssets(next)
+    _assets = next
+    setAssets([...next])
     onAssetsChange(next)
   }
 
@@ -135,14 +137,14 @@ export function GeneratePanel({
   function confirmAsset() {
     const name = assetNameInput.trim().replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase()
     if (!name || !pendingAssetBase64) return
-    const next = [...assetsRef.current.filter(a => a.name !== name), { name, base64: pendingAssetBase64 }]
+    const next = [..._assets.filter(a => a.name !== name), { name, base64: pendingAssetBase64 }]
     applyAssets(next)
     setPendingAssetBase64(null)
     setAssetNameInput('')
   }
 
   function removeAsset(name: string) {
-    applyAssets(assetsRef.current.filter(a => a.name !== name))
+    applyAssets(_assets.filter(a => a.name !== name))
   }
 
   async function handleUrlFetch(url: string) {
