@@ -175,3 +175,52 @@ export function invalidateCache(appCode?: string) {
   if (appCode) cache.delete(appCode)
   else cache.clear()
 }
+
+// ─── Localization ─────────────────────────────────────────────────────────────
+
+const LANG_CODES = new Set(['EN','PT','SP','FR','DE','IT','RU','UA','AR','JP','KR','HE','BG','CN','CZ','ND','HI','PL','TW'])
+
+export interface LocalizationFolder {
+  id: string
+  name: string
+  driveUrl: string
+  languages: string[]
+}
+
+export async function getLocalizationFoldersForApp(appCode: string): Promise<LocalizationFolder[]> {
+  const appFolder = await findAppFolder(appCode)
+  if (!appFolder?.id) return []
+
+  const numberFolders = await listFolders(appFolder.id)
+
+  // Параллельно: для каждой числовой папки → вариантные папки → подпапки языков
+  const nested = await Promise.all(
+    numberFolders.map(async (numFolder) => {
+      if (!numFolder.id) return []
+      const variantFolders = await listFolders(numFolder.id)
+      return Promise.all(
+        variantFolders.map(async (varFolder) => {
+          if (!varFolder.id || !varFolder.name) return null
+          const subfolders = await listFolders(varFolder.id)
+          const languages = subfolders
+            .map(f => (f.name || '').toUpperCase())
+            .filter(name => LANG_CODES.has(name))
+            .sort()
+          return {
+            id: varFolder.id,
+            name: varFolder.name,
+            driveUrl: `https://drive.google.com/drive/folders/${varFolder.id}`,
+            languages,
+            createdTime: varFolder.createdTime || '',
+          } as LocalizationFolder & { createdTime: string }
+        })
+      )
+    })
+  )
+
+  return nested
+    .flat()
+    .filter((f): f is LocalizationFolder & { createdTime: string } => f !== null)
+    .sort((a, b) => b.createdTime.localeCompare(a.createdTime))
+    .map(({ createdTime: _ct, ...rest }) => rest)
+}
