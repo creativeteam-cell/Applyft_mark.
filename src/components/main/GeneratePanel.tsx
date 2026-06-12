@@ -45,11 +45,13 @@ export function GeneratePanel({
   assets: assetsProp,
   onAssetsChange,
 }: GeneratePanelProps) {
-  // Local state — avoids stale-closure issues with prop drilling.
-  // Functional setState always receives the latest prev value.
-  const [assets, setAssets] = useState<Asset[]>(assetsProp)
+  // assetsRef is the single source of truth for reads inside callbacks.
+  // assets state drives rendering. Both are always kept in sync.
+  const assetsRef = useRef<Asset[]>([])
+  const [assets, setAssets] = useState<Asset[]>([])
 
-  function updateAssets(next: Asset[]) {
+  function applyAssets(next: Asset[]) {
+    assetsRef.current = next
     setAssets(next)
     onAssetsChange(next)
   }
@@ -133,22 +135,14 @@ export function GeneratePanel({
   function confirmAsset() {
     const name = assetNameInput.trim().replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase()
     if (!name || !pendingAssetBase64) return
-    const base64 = pendingAssetBase64
-    setAssets(prev => {
-      const next = [...prev.filter(a => a.name !== name), { name, base64 }]
-      onAssetsChange(next)
-      return next
-    })
+    const next = [...assetsRef.current.filter(a => a.name !== name), { name, base64: pendingAssetBase64 }]
+    applyAssets(next)
     setPendingAssetBase64(null)
     setAssetNameInput('')
   }
 
   function removeAsset(name: string) {
-    setAssets(prev => {
-      const next = prev.filter(a => a.name !== name)
-      onAssetsChange(next)
-      return next
-    })
+    applyAssets(assetsRef.current.filter(a => a.name !== name))
   }
 
   async function handleUrlFetch(url: string) {
