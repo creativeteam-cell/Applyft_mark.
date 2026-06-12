@@ -12,13 +12,12 @@ export async function GET(req: NextRequest) {
 
   try {
     const auth = getAuthClient()
-    const tokenInfo = await auth.getAccessToken()
-    const token = tokenInfo?.token
+    const token = await auth.getAccessToken()
     if (!token) throw new Error('Failed to get access token')
 
     const res = await fetch(
       `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
-      { headers: { Authorization: `Bearer ${token}` } }
+      { headers: { Authorization: `Bearer ${token as string}` } }
     )
     if (!res.ok) throw new Error(`Drive fetch failed: ${res.status}`)
 
