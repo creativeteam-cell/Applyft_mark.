@@ -3,6 +3,11 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 
+interface Asset {
+  name: string
+  base64: string
+}
+
 interface GenerateModalProps {
   appCode: string
   selectedPain: string
@@ -18,6 +23,9 @@ interface GenerateModalProps {
   varLetters: string[]
   onClose: () => void
   onSaved?: () => void
+  /** If provided, skip generation and start directly at preview stage with this image */
+  initialImage?: string
+  assets?: Asset[]
 }
 
 async function compressImage(base64: string, maxWidth = 800): Promise<string> {
@@ -41,7 +49,7 @@ type Stage = 'generating' | 'preview' | 'fixing' | 'generating-all' | 'done'
 const SIZES = ['4x5', '1x1', '9x16', '1.91x1']
 const MAX_HISTORY = 10
 
-export function GenerateModal({ appCode, selectedPain, selectedHook, selectedConcept, prompt, reference, competitor, logoBase64, marketerCode, mode, varNumber, varLetters, onClose, onSaved }: GenerateModalProps) {
+export function GenerateModal({ appCode, selectedPain, selectedHook, selectedConcept, prompt, reference, competitor, logoBase64, marketerCode, mode, varNumber, varLetters, onClose, onSaved, initialImage, assets }: GenerateModalProps) {
   const [stage, setStage] = useState<Stage>('generating')
   const [fixHistory, setFixHistory] = useState<string[]>([])
   const [promptHistory, setPromptHistory] = useState<string[]>([])
@@ -60,6 +68,10 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
   const [fixNote, setFixNote] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  // Draft save state
+  const [draftSaving, setDraftSaving] = useState(false)
+  const [draftSaved, setDraftSaved] = useState(false)
+  const [draftError, setDraftError] = useState<string | null>(null)
   const [savedFolder, setSavedFolder] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [nextFolderName, setNextFolderName] = useState<string | null>(null)
@@ -73,7 +85,14 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
   const currentPrompt = promptHistory[currentFixIndex] || null
 
   useEffect(() => {
-    generateFirst()
+    if (initialImage) {
+      setFixHistory([initialImage])
+      setPromptHistory([''])
+      setCurrentFixIndex(0)
+      setStage('preview')
+    } else {
+      generateFirst()
+    }
   }, [])
 
   // Returns the currently selected image for a size (from history, fallback to allImages)
@@ -110,6 +129,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
           previousImageBase64: prevImage,
           customPrompt: customPrompt,
           logoBase64: logoBase64 || undefined,
+          assets: assets?.length ? assets : undefined,
         }),
       })
 
@@ -218,6 +238,27 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
     } catch (e: any) {
       setError(e.message)
       setStage('preview')
+    }
+  }
+
+  async function handleSaveDraft() {
+    if (!previewImage || !appCode) return
+    setDraftSaving(true)
+    setDraftError(null)
+    setDraftSaved(false)
+    try {
+      const res = await fetch('/api/draft/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: previewImage, appCode }),
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setDraftSaved(true)
+    } catch (e: any) {
+      setDraftError(e.message)
+    } finally {
+      setDraftSaving(false)
     }
   }
 
@@ -465,7 +506,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                     className="px-8 py-3 rounded-xl font-semibold"
                     style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>↺ Recreate</button>
                 </div>
-                <div className="flex justify-center">
+                <div className="flex justify-center gap-3 flex-wrap">
                   <button onClick={() => {
                     const link = document.createElement('a')
                     link.href = previewImage!
@@ -476,7 +517,21 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                     style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
                     ⬇ Download preview
                   </button>
+                  <button
+                    onClick={handleSaveDraft}
+                    disabled={draftSaving || draftSaved}
+                    className="text-xs transition-all flex items-center gap-1.5 px-4 py-2 rounded-lg disabled:opacity-60"
+                    style={{
+                      background: draftSaved ? 'rgba(34,197,94,0.15)' : 'var(--bg)',
+                      border: `1px solid ${draftSaved ? '#22c55e' : 'var(--border)'}`,
+                      color: draftSaved ? '#22c55e' : 'var(--text-muted, #6b7280)',
+                    }}>
+                    {draftSaving ? '⟳ Saving...' : draftSaved ? '✓ Saved to Drafts' : '📋 Save as Draft'}
+                  </button>
                 </div>
+                {draftError && (
+                  <div className="text-center text-red-400 text-xs mt-2">{draftError}</div>
+                )}
               </div>
             )}
             {error && (

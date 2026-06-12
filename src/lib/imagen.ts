@@ -72,7 +72,12 @@ const SIZE_TO_ASPECT: Record<string, string> = {
   '1.91x1': '16:9',
 }
 
-async function tryGenerate(prompt: string, referenceBase64?: string, logoBase64?: string, timeoutMs = 100000, size = '4x5'): Promise<string> {
+interface Asset {
+  name: string
+  base64: string
+}
+
+async function tryGenerate(prompt: string, referenceBase64?: string, logoBase64?: string, timeoutMs = 100000, size = '4x5', assets?: Asset[]): Promise<string> {
   const apiKey = process.env.GOOGLE_AI_API_KEY!
   const parts: any[] = []
 
@@ -87,6 +92,16 @@ async function tryGenerate(prompt: string, referenceBase64?: string, logoBase64?
     const base64Data = prepared.replace(/^data:image\/\w+;base64,/, '')
     const mimeType = prepared.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/png'
     parts.push({ inlineData: { mimeType, data: base64Data } })
+  }
+
+  // Inject asset images — each preceded by a text label so Gemini knows which @name it is
+  if (assets && assets.length > 0) {
+    for (const asset of assets) {
+      const base64Data = asset.base64.replace(/^data:image\/\w+;base64,/, '')
+      const mimeType = asset.base64.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg'
+      parts.push({ text: `[ASSET @${asset.name}]:` })
+      parts.push({ inlineData: { mimeType, data: base64Data } })
+    }
   }
 
   parts.push({ text: prompt })
@@ -133,12 +148,12 @@ async function tryGenerate(prompt: string, referenceBase64?: string, logoBase64?
   }
 }
 
-async function withRetry(prompt: string, referenceBase64?: string, logoBase64?: string, maxAttempts = 3, size = '4x5'): Promise<string> {
+async function withRetry(prompt: string, referenceBase64?: string, logoBase64?: string, maxAttempts = 3, size = '4x5', assets?: Asset[]): Promise<string> {
   const retryableErrors = ['TIMEOUT', 'No image in response']
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      return await tryGenerate(prompt, referenceBase64, logoBase64, 100000, size)
+      return await tryGenerate(prompt, referenceBase64, logoBase64, 100000, size, assets)
     } catch (e: any) {
       const isRetryable = retryableErrors.includes(e.message)
       if (!isRetryable || attempt === maxAttempts) {
@@ -159,20 +174,50 @@ const NO_LOGO_RULE = '\n\n[CRITICAL - LOGOS]: Do NOT generate, draw, or reproduc
 
 const TEXT_FROM_REF_RULE = '\n\n[CRITICAL - TEXT]: If a reference image is provided, copy ALL visible text from it EXACTLY — same words, same spelling, same capitalisation, same punctuation, same line breaks. Do NOT rewrite, translate, expand, or invent any text. Visually you may re-style the text (font, color, size) to match the new composition, but the wording must be identical to the reference. Only change the wording if the generation prompt below explicitly requests it.'
 
-// Per-size aspect ratio hints so Gemini composes natively at the right ratio.
-// Without these, Gemini defaults to square/landscape and Sharp cover-crops heavily.
+// Per-size aspect ratio hints + crop-aware safe-zone instructions.
+// Sharp resizes with `fit: 'cover'`. For sizes where Gemini's native ratio differs
+// from the target, some pixels ARE cropped:
+//   4x5    → Gemini 4:5,  target 4:5   → 0 px crop  → safe zone ≥ 34 px from all edges
+//   1x1    → Gemini 1:1,  target 1:1   → 0 px crop  → safe zone ≥ 34 px from all edges
+//   9x16   → Gemini 9:16, target 9:16  → 0 px crop  → safe zone ≥ 34 px from all edges
+//   1.91x1 → Gemini 16:9 (1.78:1), target 1.91:1 → ~40 px cropped top & bottom
+//            → safe zone ≥ 74 px from top/bottom, ≥ 34 px from left/right
 const SIZE_HINTS: Record<string, string> = {
-  '4x5':    '\n\n[CRITICAL - OUTPUT FORMAT]: PORTRAIT image, taller than wide, aspect ratio 4:5 (4 wide by 5 tall, like a phone held vertically). Do not generate landscape or square. Compose the scene for a tall vertical frame.',
-  '1x1':    '\n\n[CRITICAL - OUTPUT FORMAT]: SQUARE image, equal width and height, aspect ratio 1:1. Do not generate landscape or portrait. Compose the scene for a perfect square frame.',
-  '9x16':   '\n\n[CRITICAL - OUTPUT FORMAT]: TALL PORTRAIT image, much taller than wide, aspect ratio 9:16 (9 wide by 16 tall, like a phone screen). Do not generate landscape or square. Compose the scene for a very tall vertical frame.',
-  '1.91x1': '\n\n[CRITICAL - OUTPUT FORMAT]: LANDSCAPE image, wider than tall, aspect ratio 1.91:1 (almost 2 wide by 1 tall, like a cinema screen). Do not generate portrait or square. Compose the scene for a wide horizontal frame.',
+  '4x5':
+    '\n\n[CRITICAL - OUTPUT FORMAT]: PORTRAIT image, aspect ratio 4:5 (4 wide by 5 tall). ' +
+    'SAFE ZONE: ALL text, buttons, and UI elements MUST be at least 34 pixels from EVERY edge (top, bottom, left, right).',
+
+  '1x1':
+    '\n\n[CRITICAL - OUTPUT FORMAT]: SQUARE image, aspect ratio 1:1. ' +
+    'SAFE ZONE: ALL text, buttons, and UI elements MUST be at least 34 pixels from EVERY edge.',
+
+  '9x16':
+    '\n\n[CRITICAL - OUTPUT FORMAT]: TALL PORTRAIT image, aspect ratio 9:16 (phone screen). ' +
+    'SAFE ZONE: ALL text, buttons, and UI elements MUST be at least 34 pixels from EVERY edge.',
+
+  '1.91x1':
+    '\n\n[CRITICAL - OUTPUT FORMAT]: LANDSCAPE image, aspect ratio 16:9 (wide horizontal). ' +
+    'CROP WARNING: the top 40px and bottom 40px of this image WILL BE CROPPED after generation. ' +
+    'SAFE ZONE: ALL text, buttons, and UI elements MUST be at least 74 pixels from TOP, ' +
+    '74 pixels from BOTTOM, and 34 pixels from LEFT and RIGHT. ' +
+    'Place all content strictly in the vertical center — never near the top or bottom edges.',
 }
 
-export async function generateImage(prompt: string, referenceBase64?: string, logoBase64?: string, size = '4x5'): Promise<string> {
+export async function generateImage(prompt: string, referenceBase64?: string, logoBase64?: string, size = '4x5', assets?: Asset[]): Promise<string> {
   const hint = SIZE_HINTS[size] || SIZE_HINTS['4x5']
   // Only add NO_LOGO_RULE when no logo is provided — otherwise it contradicts the logo placement instruction
   const logoRule = logoBase64 ? '' : NO_LOGO_RULE
-  return withRetry(prompt + TEXT_FROM_REF_RULE + logoRule + hint, referenceBase64, logoBase64, 3, size)
+
+  // Add asset reference instructions to the prompt if assets provided
+  let assetRule = ''
+  if (assets && assets.length > 0) {
+    const names = assets.map(a => `@${a.name}`).join(', ')
+    assetRule = `\n\n[ASSETS]: The following asset images are provided above: ${names}. ` +
+      `When the prompt references @name, visually incorporate that asset image as described. ` +
+      `Integrate each asset naturally into the composition.`
+  }
+
+  return withRetry(prompt + TEXT_FROM_REF_RULE + logoRule + hint + assetRule, referenceBase64, logoBase64, 3, size, assets)
 }
 
 export async function recomposeImage(imageBase64: string, targetSize: string): Promise<string> {

@@ -111,6 +111,28 @@ export function AppCard({ app, expanded, onExpand, onSave, onDelete }: AppCardPr
       {expanded && (
         <div className="border-t px-6 pb-6 pt-5 space-y-6" style={{ borderColor: 'var(--border)' }}>
 
+          {/* 0 · Abbreviation */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-2 uppercase tracking-widest font-mono">
+              0 · Abbreviation (Drive folder code)
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                value={form.code}
+                onChange={e => setForm({ ...form, code: e.target.value.toUpperCase().slice(0, 4) })}
+                placeholder="e.g. ST"
+                maxLength={4}
+                className="w-24 rounded-xl px-4 py-2.5 text-sm outline-none font-mono font-bold tracking-widest"
+                style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--accent)' }}
+                onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'}
+                onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'}
+              />
+              <span className="text-xs text-gray-500">
+                Must match the Drive folder name, e.g. folder <span className="font-mono text-gray-400">&quot;ST — Stride&quot;</span> → code <span className="font-mono text-gray-400">ST</span>
+              </span>
+            </div>
+          </div>
+
           {/* 1 · Description */}
           <div>
             <label className="block text-xs text-gray-400 mb-2 uppercase tracking-widest font-mono">

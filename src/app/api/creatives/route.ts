@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { getCreativesForApp, APPS } from '@/lib/googleDrive'
+import { getCreativesForApp } from '@/lib/googleDrive'
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -10,7 +10,8 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url)
-  const appCode = searchParams.get('app') || APPS[0].code
+  const appCode = searchParams.get('app')
+  if (!appCode) return NextResponse.json({ error: 'app param required' }, { status: 400 })
   const page = parseInt(searchParams.get('page') || '1')
   const limit = 10
 

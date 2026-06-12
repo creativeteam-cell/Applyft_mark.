@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { GeneratePanel } from './GeneratePanel'
+import { GeneratePanel, Asset } from './GeneratePanel'
 import { CreativesGrid } from './CreativesGrid'
 import { GenerateModal } from './GenerateModal'
+import { DraftModal } from './DraftModal'
 import { FilterBar } from './FilterBar'
 
 interface App { code: string; name: string; active: boolean; painPoints?: string[]; hooks?: string[]; logos?: string[]; logoBase64?: string }
@@ -17,6 +18,7 @@ const panelStore = {
   mode: 'new' as 'new' | 'var',
   varNumber: '',
   varLetters: [] as string[],
+  assets: [] as Asset[],
 }
 
 export function MainPage() {
@@ -34,6 +36,9 @@ export function MainPage() {
   const [selectedLogo, setSelectedLogo] = useState<string | null>(panelStore.selectedLogo)
   const [gridRefreshKey, setGridRefreshKey] = useState(0)
   const [panelLettersKey, setPanelLettersKey] = useState(0)
+  const [showDraftModal, setShowDraftModal] = useState(false)
+  const [draftImage, setDraftImage] = useState<string | null>(null)
+  const [assets, setAssets] = useState<Asset[]>(panelStore.assets)
 
   // New / Var
   const [mode, setMode] = useState<'new' | 'var'>(panelStore.mode)
@@ -66,16 +71,26 @@ export function MainPage() {
       })
   }, [])
 
-  function handleGenerate() {
+  function validateGenerate(): boolean {
     if (!selectedApp) {
       alert('Please select an app first.')
-      return
+      return false
     }
     if (mode === 'var' && !varNumber.trim()) {
       alert('Please enter a variant number before generating.')
-      return
+      return false
     }
+    return true
+  }
+
+  function handleGenerate() {
+    if (!validateGenerate()) return
     setShowModal(true)
+  }
+
+  function handleOpenDraft() {
+    if (!validateGenerate()) return
+    setShowDraftModal(true)
   }
 
   return (
@@ -89,6 +104,10 @@ export function MainPage() {
           setSelectedPain('none')
           setSelectedHook('none')
           setSelectedConcept('none')
+          if (mode === 'var') {
+            setVarNumber('')
+            panelStore.varNumber = ''
+          }
         }}
         selectedPain={selectedPain}
         onPainChange={setSelectedPain}
@@ -113,6 +132,7 @@ export function MainPage() {
         onVarLettersChange={v => { setVarLetters(v); panelStore.varLetters = v }}
         lettersFetchKey={panelLettersKey}
         onGenerate={handleGenerate}
+        onOpenDraft={handleOpenDraft}
         appCode={selectedApp}
         availableLogos={(() => {
           const app = apps.find(a => a.code === selectedApp)
@@ -123,6 +143,8 @@ export function MainPage() {
         })()}
         selectedLogo={selectedLogo}
         onLogoChange={v => { setSelectedLogo(v); panelStore.selectedLogo = v }}
+        assets={assets}
+        onAssetsChange={v => { setAssets(v); panelStore.assets = v }}
       />
 
       <div className="px-8 pb-8" style={{ marginTop: mode === 'var' ? '390px' : '340px' }}>
@@ -148,8 +170,23 @@ export function MainPage() {
           mode={mode}
           varNumber={varNumber}
           varLetters={varLetters}
-          onClose={() => setShowModal(false)}
+          assets={assets}
+          onClose={() => { setShowModal(false); setDraftImage(null) }}
           onSaved={() => { setGridRefreshKey(k => k + 1); setPanelLettersKey(k => k + 1) }}
+          initialImage={draftImage || undefined}
+        />
+      )}
+
+      {showDraftModal && (
+        <DraftModal
+          apps={apps}
+          currentAppCode={selectedApp}
+          onSelect={(imageBase64) => {
+            setDraftImage(imageBase64)
+            setShowDraftModal(false)
+            setShowModal(true)
+          }}
+          onClose={() => setShowDraftModal(false)}
         />
       )}
     </div>

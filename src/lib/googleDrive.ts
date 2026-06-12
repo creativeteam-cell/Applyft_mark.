@@ -1,17 +1,5 @@
 import { google } from 'googleapis'
 
-export const APPS = [
-  { code: 'UN', name: 'Universal Locators' },
-  { code: 'KD', name: 'Kidden' },
-  { code: 'LM', name: 'Looma' },
-  { code: 'TR', name: 'Trace' },
-  { code: 'GZ', name: 'GeoZilla' },
-  { code: 'FA', name: 'FamLocate' },
-  { code: 'FL', name: 'Family Locator' },
-  { code: 'FM', name: 'Familo' },
-  { code: 'SF', name: 'SafetyTips' },
-  { code: 'RL', name: 'Refinely' },
-]
 
 export const SIZES = ['1x1', '4x5', '1.91x1', '9x16']
 
@@ -72,6 +60,8 @@ export interface Creative {
     fileName: string
     url: string
   }[]
+  /** True when the pack contains carousel frames instead of the 4 standard sizes */
+  isCarousel?: boolean
 }
 
 export async function getCreativesForApp(appCode: string): Promise<Creative[]> {
@@ -104,6 +94,40 @@ export async function getCreativesForApp(appCode: string): Promise<Creative[]> {
 
           const files = await listFiles(langFolder.id)
 
+          // --- Carousel detection ---
+          // A pack is a carousel when: >4 files contain "frame" in the name AND all share one size
+          const frameFiles = files.filter(f => f.name?.toLowerCase().includes('frame'))
+          const isCarousel = frameFiles.length > 4
+
+          if (isCarousel) {
+            const commonSize = SIZES.find(size => frameFiles.every(f => f.name?.includes(`_${size}_`)))
+            if (commonSize) {
+              const sortedFrames = [...frameFiles].sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+              const images = sortedFrames
+                .filter(f => f.id)
+                .map(f => ({
+                  size: commonSize,
+                  fileId: f.id!,
+                  fileName: f.name || '',
+                  url: `/api/image?id=${f.id}`,
+                }))
+              if (images.length > 0) {
+                return {
+                  createdTime: (variantFolder as any).createdTime as string || '0',
+                  creative: {
+                    id: variantFolder.name || '',
+                    appCode,
+                    variantFolder: variantFolder.name || '',
+                    variantFolderId: variantFolder.id || '',
+                    images,
+                    isCarousel: true,
+                  } as Creative,
+                }
+              }
+            }
+          }
+
+          // --- Standard 4-size pack ---
           const images = SIZES.map(size => {
             const file = files.find(f => f.name?.includes(`_${size}_`))
             if (!file?.id) return null

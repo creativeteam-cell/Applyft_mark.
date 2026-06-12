@@ -29,6 +29,7 @@ export async function POST(req: NextRequest) {
       recomposeBase64,
       targetSize,
       logoBase64,
+      assets,
     } = body
 
     // Режим рекомпозиции
@@ -107,7 +108,8 @@ export async function POST(req: NextRequest) {
       finalPromptWithLogo,
       imageReference,
       logoBase64 || undefined,
-      targetSize || '4x5'
+      targetSize || '4x5',
+      assets || undefined
     )
 
     return NextResponse.json({ prompt: finalPrompt, imageBase64 })

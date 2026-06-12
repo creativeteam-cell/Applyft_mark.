@@ -1,6 +1,12 @@
 'use client'
 
 import { useRef, useState, useEffect } from 'react'
+import { HighlightTextarea } from './HighlightTextarea'
+
+export interface Asset {
+  name: string
+  base64: string
+}
 
 interface GeneratePanelProps {
   prompt: string
@@ -14,10 +20,13 @@ interface GeneratePanelProps {
   onVarLettersChange: (letters: string[]) => void
   lettersFetchKey?: number
   onGenerate: () => void
+  onOpenDraft: () => void
   appCode: string
   availableLogos: string[]
   selectedLogo: string | null
   onLogoChange: (logo: string | null) => void
+  assets: Asset[]
+  onAssetsChange: (assets: Asset[]) => void
 }
 
 export function GeneratePanel({
@@ -28,13 +37,20 @@ export function GeneratePanel({
   onVarLettersChange,
   lettersFetchKey,
   onGenerate,
+  onOpenDraft,
   appCode,
   availableLogos,
   selectedLogo,
   onLogoChange,
+  assets,
+  onAssetsChange,
 }: GeneratePanelProps) {
   const [logoOpen, setLogoOpen] = useState(false)
+  const [promptBorder, setPromptBorder] = useState('var(--border)')
   const fileRef = useRef<HTMLInputElement>(null)
+  const assetFileRef = useRef<HTMLInputElement>(null)
+  const [pendingAssetBase64, setPendingAssetBase64] = useState<string | null>(null)
+  const [assetNameInput, setAssetNameInput] = useState('')
   const [urlInput, setUrlInput] = useState('')
   const [urlLoading, setUrlLoading] = useState(false)
   const [urlError, setUrlError] = useState('')
@@ -46,7 +62,6 @@ export function GeneratePanel({
   const [lettersError, setLettersError] = useState('')
   const lettersDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Fetch next letters whenever mode/varNumber/appCode changes
   useEffect(() => {
     if (mode !== 'var' || !varNumber.trim() || !appCode) {
       setNextVarName('')
@@ -92,6 +107,34 @@ export function GeneratePanel({
     reader.readAsDataURL(file)
   }
 
+  function handleAssetFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      setPendingAssetBase64(reader.result as string)
+      // Auto-suggest name from filename (without extension, slugified)
+      const suggested = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase().slice(0, 20)
+      setAssetNameInput(suggested)
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }
+
+  function confirmAsset() {
+    const name = assetNameInput.trim().replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase()
+    if (!name || !pendingAssetBase64) return
+    // Replace if name already exists
+    const filtered = assets.filter(a => a.name !== name)
+    onAssetsChange([...filtered, { name, base64: pendingAssetBase64 }])
+    setPendingAssetBase64(null)
+    setAssetNameInput('')
+  }
+
+  function removeAsset(name: string) {
+    onAssetsChange(assets.filter(a => a.name !== name))
+  }
+
   async function handleUrlFetch(url: string) {
     if (!url.trim()) return
     setUrlLoading(true)
@@ -128,6 +171,7 @@ export function GeneratePanel({
       style={{ top: '104px', background: 'var(--bg)', borderColor: 'var(--border)' }}>
 
       <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
+      <input ref={assetFileRef} type="file" accept="image/*" onChange={handleAssetFile} className="hidden" />
 
       <div className="flex gap-4">
 
@@ -197,19 +241,83 @@ export function GeneratePanel({
 
         {/* Правая колонка */}
         <div className="flex-1 flex flex-col gap-2">
-          <textarea
+
+          {/* Prompt with highlight */}
+          <HighlightTextarea
             value={prompt}
-            onChange={e => onPromptChange(e.target.value)}
-            placeholder="Describe what to generate... (optional)"
+            onChange={onPromptChange}
+            assets={assets}
+            placeholder="Describe what to generate... use @assetname to reference uploaded assets"
             rows={4}
-            className="w-full px-4 py-3 rounded-xl text-sm outline-none resize-none leading-relaxed"
-            style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
-            onFocus={e => e.currentTarget.style.borderColor = 'var(--accent)'}
-            onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'}
+            borderColor={promptBorder}
+            onFocus={() => setPromptBorder('var(--accent)')}
+            onBlur={() => setPromptBorder('var(--border)')}
             onKeyDown={e => e.key === 'Enter' && e.metaKey && onGenerate()}
           />
 
-          {/* New / Var toggle */}
+          {/* Assets row */}
+          <div className="flex items-center gap-2 flex-wrap min-h-[28px]">
+            {/* Existing assets */}
+            {assets.map(asset => (
+              <div key={asset.name}
+                className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-mono"
+                style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid var(--accent)' }}>
+                <img src={asset.base64} alt={asset.name}
+                  className="w-5 h-5 rounded object-cover" />
+                <span style={{ color: 'var(--accent)' }}>@{asset.name}</span>
+                <button onClick={() => removeAsset(asset.name)}
+                  className="text-gray-500 hover:text-red-400 transition-colors leading-none ml-0.5">
+                  ×
+                </button>
+              </div>
+            ))}
+
+            {/* Pending asset — name input */}
+            {pendingAssetBase64 && (
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg"
+                style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                <img src={pendingAssetBase64} alt="pending"
+                  className="w-5 h-5 rounded object-cover" />
+                <span className="text-xs text-gray-500">@</span>
+                <input
+                  value={assetNameInput}
+                  onChange={e => setAssetNameInput(e.target.value.replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase())}
+                  onKeyDown={e => { if (e.key === 'Enter') confirmAsset(); if (e.key === 'Escape') { setPendingAssetBase64(null); setAssetNameInput('') } }}
+                  placeholder="name"
+                  autoFocus
+                  maxLength={20}
+                  className="w-20 text-xs font-mono outline-none bg-transparent"
+                  style={{ color: 'var(--text)' }}
+                />
+                <button onClick={confirmAsset}
+                  disabled={!assetNameInput.trim()}
+                  className="text-xs px-2 py-0.5 rounded disabled:opacity-40"
+                  style={{ background: 'var(--accent)', color: '#fff' }}>
+                  Add
+                </button>
+                <button onClick={() => { setPendingAssetBase64(null); setAssetNameInput('') }}
+                  className="text-gray-500 hover:text-red-400 transition-colors text-xs">
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* Add asset button */}
+            {!pendingAssetBase64 && (
+              <button
+                onClick={() => assetFileRef.current?.click()}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                style={{ background: 'var(--surface)', border: '1px dashed var(--border)' }}
+                title="Upload an asset image and reference it in your prompt with @name">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                Add asset
+              </button>
+            )}
+          </div>
+
+          {/* New / Var toggle + buttons */}
           <div className="flex items-center gap-3">
             <div className="flex rounded-xl overflow-hidden text-sm font-semibold"
               style={{ border: '1px solid var(--accent)' }}>
@@ -233,10 +341,8 @@ export function GeneratePanel({
               </button>
             </div>
 
-            {/* Var поля */}
             {mode === 'var' && (
               <div className="flex items-center gap-3">
-                {/* NUMBER */}
                 <div className="flex flex-col">
                   <span className="text-xs text-gray-500 mb-1 uppercase tracking-widest font-mono">Number</span>
                   <input
@@ -253,7 +359,6 @@ export function GeneratePanel({
                   />
                 </div>
 
-                {/* Auto-computed variant name preview */}
                 <div className="flex flex-col justify-end pb-0.5">
                   <span className="text-xs text-gray-500 mb-1 uppercase tracking-widest font-mono">Next variant</span>
                   <span className="text-sm font-mono" style={{ height: 36, display: 'flex', alignItems: 'center' }}>
@@ -271,8 +376,6 @@ export function GeneratePanel({
             )}
 
             <div className="flex-1 flex items-center justify-end gap-3">
-
-              {/* Logo switcher */}
               {availableLogos.length > 0 && (
                 <div className="flex items-center gap-2">
                   <button
@@ -315,6 +418,14 @@ export function GeneratePanel({
                 </div>
               )}
 
+              <button
+                onClick={onOpenDraft}
+                disabled={generateDisabled}
+                className="flex items-center gap-2 px-5 py-2 rounded-xl font-semibold text-sm transition-opacity disabled:opacity-40"
+                style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                <span>📋</span>
+                From Draft
+              </button>
               <button
                 onClick={onGenerate}
                 disabled={generateDisabled}
