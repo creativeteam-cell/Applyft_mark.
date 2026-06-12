@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { getAuthClient } from '@/lib/googleDrive'
 
 const DRAFT_FOLDER_ID = '1GfOiLpEjAem8KAuyxmzzhLQCjBRgNSt9'
 
@@ -19,7 +18,7 @@ async function uploadToDraft(token: string, name: string, base64: string) {
   ])
 
   const res = await fetch(
-    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,name',
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name',
     {
       method: 'POST',
       headers: {
@@ -43,15 +42,16 @@ export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  // Use the user's own OAuth token — service accounts have no personal storage quota
+  const token = session.accessToken
+  if (!token) return NextResponse.json({ error: 'No access token in session' }, { status: 401 })
+
   const { imageBase64, appCode } = await req.json()
   if (!imageBase64 || !appCode) return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
 
   try {
-    const auth = getAuthClient()
-    const token = await auth.getAccessToken()
-    if (!token) throw new Error('Failed to get access token')
     const fileName = `${appCode}_draft_${Date.now()}.jpg`
-    const file = await uploadToDraft(token as string, fileName, imageBase64)
+    const file = await uploadToDraft(token, fileName, imageBase64)
     return NextResponse.json({ fileId: file.id, fileName: file.name })
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })

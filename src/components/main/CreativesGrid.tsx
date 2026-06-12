@@ -46,6 +46,7 @@ export function CreativesGrid({ appCode, page, onPageChange, refreshKey = 0 }: C
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [localRefresh, setLocalRefresh] = useState(0)
+  const [search, setSearch] = useState('')
   // Per-carousel frame index: key = creative.id
   const [carouselIndexes, setCarouselIndexes] = useState<Record<string, number>>({})
 
@@ -91,20 +92,41 @@ export function CreativesGrid({ appCode, page, onPageChange, refreshKey = 0 }: C
     setCarouselIndexes(prev => ({ ...prev, [id]: index }))
   }
 
+  // Filter by number — match against the numeric part of the folder name
+  const filtered = search.trim()
+    ? creatives.filter(c => c.variantFolder.includes(search.trim()))
+    : creatives
+
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center mb-4 px-1">
+      <div className="flex items-center mb-4 px-1 gap-3">
         <div className="grid grid-cols-4 gap-4 flex-1">
           {SIZES.map(size => (
             <div key={size} className="text-xs font-mono text-gray-600 text-center">{size}</div>
           ))}
         </div>
+
+        {/* Number search */}
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value.replace(/\D/g, '').slice(0, 3))}
+          placeholder="001"
+          maxLength={3}
+          className="w-16 px-2 py-1 rounded-lg text-xs font-mono text-center outline-none"
+          style={{
+            background: 'var(--surface)',
+            border: `1px solid ${search ? 'var(--accent)' : 'var(--border)'}`,
+            color: 'var(--text)',
+          }}
+          title="Search by number"
+        />
+
         <button
           onClick={handleRefresh}
           disabled={loading}
           title="Refresh creatives"
-          className="ml-4 w-7 h-7 flex items-center justify-center rounded-lg transition-all disabled:opacity-40"
+          className="w-7 h-7 flex items-center justify-center rounded-lg transition-all disabled:opacity-40"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}>
           <span className={loading ? 'animate-spin inline-block' : ''} style={{ fontSize: 14 }}>⟳</span>
         </button>
@@ -126,9 +148,13 @@ export function CreativesGrid({ appCode, page, onPageChange, refreshKey = 0 }: C
         <div className="flex items-center justify-center py-32">
           <div className="text-gray-500 text-sm">No creatives found for {appCode}</div>
         </div>
+      ) : filtered.length === 0 ? (
+        <div className="flex items-center justify-center py-32">
+          <div className="text-gray-500 text-sm">No creatives matching <span className="font-mono" style={{ color: 'var(--accent)' }}>{search}</span></div>
+        </div>
       ) : (
         <div className="space-y-4" style={{ opacity: loading ? 0.6 : 1, transition: 'opacity 0.2s' }}>
-          {creatives.map(creative => (
+          {filtered.map(creative => (
             creative.isCarousel
               ? <CarouselRow
                   key={creative.id}
