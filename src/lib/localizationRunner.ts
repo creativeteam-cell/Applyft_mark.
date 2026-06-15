@@ -1,5 +1,31 @@
 import OpenAI, { toFile } from 'openai'
+import sharp from 'sharp'
 import { getDriveClient, invalidateLocCache } from './googleDrive'
+
+// --- Size helpers ---
+
+const SIZE_MAP: Record<string, { width: number; height: number }> = {
+  '1.91x1': { width: 1200, height: 628 },
+  '9x16':   { width: 1080, height: 1920 },
+  '4x5':    { width: 1200, height: 1500 },
+  '1x1':    { width: 1200, height: 1200 },
+}
+
+function getSizeFromName(name: string): { width: number; height: number } | null {
+  for (const [key, dims] of Object.entries(SIZE_MAP)) {
+    if (name.includes(`_${key}_`) || name.includes(`_${key}.`) || name.includes(`_${key.replace('.', ',')}`) ) {
+      return dims
+    }
+  }
+  return null
+}
+
+async function resizeToTarget(buffer: Buffer, width: number, height: number): Promise<Buffer> {
+  return sharp(buffer)
+    .resize(width, height, { fit: 'fill' })
+    .jpeg({ quality: 92 })
+    .toBuffer()
+}
 
 // --- OpenAI image editing localization ---
 
@@ -11,23 +37,29 @@ async function localizeImageWithOpenAI(
 ): Promise<Buffer> {
   const translationsText = phrases.map(p => `"${p.en}" → "${p.translated}"`).join('\n')
 
-  const prompt = `You are editing an advertising image. Replace ONLY the text listed below. Do not change anything else — keep all people, objects, backgrounds, colors, and layout exactly as they are.
+  const prompt = `You are editing an advertising image. Your ONLY task: replace the listed text with translations. Do NOT change anything else.
 
-For each replacement:
-1. ERASE the original text completely (no ghost letters, no remnants)
-2. Render the translation in the same location, same style, same size
+CRITICAL RULES:
+- Do NOT add any people, faces, bodies, or figures that are not already in the image
+- Do NOT add any new objects, decorations, backgrounds, or visual elements
+- Do NOT remove or modify any existing visual elements
+- Keep the background EXACTLY as it is — if it is plain white, it must remain plain white
+- If the original has no people, the result must have no people
+- Only modify the specific text areas listed below
+
+For each text replacement:
+1. Erase the original text completely (no ghost letters, no remnants)
+2. Render the translation in the same position, same font style, same size, same color
 
 TARGET LANGUAGE: ${language}
-${language === 'AR' || language === 'HE' ? '⚠️ Use right-to-left text direction for all replaced text.' : ''}
+${language === 'AR' || language === 'HE' ? '⚠️ Text direction: right-to-left.' : ''}
 
 TEXT REPLACEMENTS (original → translation):
 ${translationsText}
 
-Rules:
 - Replace EVERY occurrence of each listed text
-- Do NOT mix languages — zero original-language letters may remain in replaced areas
-- Do NOT translate anything not listed above
-- Keep exact positions, font styles, and colors`
+- Zero original-language letters may remain in replaced areas
+- Do NOT translate anything not listed above`
 
   const ext = mimeType === 'image/png' ? 'image.png' : 'image.jpg'
   const imageFile = await toFile(imgBuffer, ext, { type: mimeType })
@@ -565,7 +597,8 @@ export async function runLocalizationJob(
 
         let uploaded = 0
         let failed = 0
-        for (const img of allImages) {
+
+        await Promise.all(allImages.map(async (img) => {
           try {
             const imgBuffer = await downloadFileAsBuffer(img.id)
             const newName = buildNewName(img.name, lang, cp)
@@ -588,13 +621,23 @@ export async function runLocalizationJob(
                   }
                 }
               } catch (reviewErr) {
-                console.warn(`[loc] Review failed (non-blocking):`, reviewErr)
+                console.warn(`[loc] Review failed:`, reviewErr)
               }
             } catch (openaiErr: any) {
               console.warn(`[loc] gpt-image-1 failed for ${img.name}, uploading original:`, openaiErr.message)
             }
 
-            await uploadToDrive(finalBuffer, mime, newName, langFolderId, userAccessToken)
+            // Resize to correct dimensions
+            const targetSize = getSizeFromName(img.name)
+            if (targetSize) {
+              try {
+                finalBuffer = await resizeToTarget(finalBuffer, targetSize.width, targetSize.height)
+              } catch (resizeErr: any) {
+                console.warn(`[loc] Resize failed for ${img.name}:`, resizeErr.message)
+              }
+            }
+
+            await uploadToDrive(finalBuffer, 'image/jpeg', newName, langFolderId, userAccessToken)
             uploaded++
             patch(folder.id, { uploadInfo: `${lang}: ${uploaded}/${allImages.length}` })
             emit()
@@ -605,7 +648,7 @@ export async function runLocalizationJob(
             patch(folder.id, { error: `${lang}/${img.name}: ${msg}` })
             emit()
           }
-        }
+        }))
 
         completedLangs.push(lang)
         patch(folder.id, {
