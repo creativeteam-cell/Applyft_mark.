@@ -23,6 +23,7 @@ export async function POST(req: NextRequest) {
     return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400 })
   }
 
+  const userAccessToken = (session as any).accessToken as string | undefined
   const encoder = new TextEncoder()
 
   const stream = new ReadableStream({
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
       }
 
       try {
-        await runLocalizationJob(folders, languages, cp, appCode, send)
+        await runLocalizationJob(folders, languages, cp, appCode, send, userAccessToken)
       } catch (err: any) {
         send({ status: 'error', folders: [], error: err.message })
       } finally {

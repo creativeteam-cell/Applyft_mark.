@@ -72,12 +72,14 @@ async function createDriveFolder(name: string, parentId: string): Promise<string
   return res.data.id!
 }
 
-async function uploadToDrive(buffer: Buffer, mimeType: string, name: string, parentId: string): Promise<void> {
-  // googleapis wraps media uploads so supportsAllDrives is lost from the upload URL,
-  // causing 'Service Accounts do not have storage quota' on Shared Drives.
-  // Fix: raw multipart upload via fetch with supportsAllDrives=true in the URL.
-  const auth = getAuthClient()
-  const accessToken = await auth.getAccessToken()
+async function uploadToDrive(buffer: Buffer, mimeType: string, name: string, parentId: string, userToken?: string): Promise<void> {
+  // Use user's OAuth token (from session) to upload — avoids service account quota issue.
+  // Fall back to service account token if user token not provided.
+  let accessToken: string | null = userToken || null
+  if (!accessToken) {
+    const auth = getAuthClient()
+    accessToken = await auth.getAccessToken()
+  }
   if (!accessToken) throw new Error('Failed to get access token')
 
   const boundary = 'locboundary314159265'
@@ -255,6 +257,7 @@ export async function runLocalizationJob(
   cp: string,
   appCode: string,
   onUpdate: (snapshot: JobSnapshot) => void,
+  userAccessToken?: string,
 ): Promise<void> {
 
   const state: FolderProgress[] = folders.map(f => ({
@@ -342,7 +345,7 @@ export async function runLocalizationJob(
             const imgBuffer = await downloadFileAsBuffer(img.id)
             const newName = buildNewName(img.name, lang, cp)
             const mime = img.mimeType || 'image/jpeg'
-            await uploadToDrive(imgBuffer, mime, newName, langFolderId)
+            await uploadToDrive(imgBuffer, mime, newName, langFolderId, userAccessToken)
             uploaded++
             patch(folder.id, { uploadInfo: `${lang}: ${uploaded}/${allImages.length}` })
             emit()
