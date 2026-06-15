@@ -491,7 +491,7 @@ function FolderRow({ folder, checked, onToggle, progress }: {
             <span className="text-xs text-gray-400 font-mono">{progress!.uploadInfo}</span>
           )}
           {progress!.error && (
-            <span className="text-xs text-red-400 font-mono cursor-help max-w-xs truncate" title={progress!.error}>
+            <span className="text-xs text-red-400 font-mono break-all">
               ! {progress!.error}
             </span>
           )}

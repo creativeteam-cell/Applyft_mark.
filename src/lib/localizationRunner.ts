@@ -1,4 +1,5 @@
 import OpenAI from 'openai'
+import { Readable } from 'stream'
 import { getDriveClient, invalidateLocCache } from './googleDrive'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -73,8 +74,6 @@ async function createDriveFolder(name: string, parentId: string): Promise<string
 
 async function uploadToDrive(buffer: Buffer, mimeType: string, name: string, parentId: string): Promise<void> {
   const drive = getDriveClient()
-  const { Readable } = await import('stream')
-  // Readable.from([buffer]) yields the buffer as a single chunk (not byte-by-byte)
   const bodyStream = Readable.from([buffer])
   await drive.files.create({
     supportsAllDrives: true,
