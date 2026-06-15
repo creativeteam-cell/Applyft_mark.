@@ -1,6 +1,6 @@
 import OpenAI from 'openai'
 import { Readable } from 'stream'
-import { getDriveClient, invalidateLocCache } from './googleDrive'
+import { getAuthClient, getDriveClient, invalidateLocCache } from './googleDrive'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -73,14 +73,42 @@ async function createDriveFolder(name: string, parentId: string): Promise<string
 }
 
 async function uploadToDrive(buffer: Buffer, mimeType: string, name: string, parentId: string): Promise<void> {
-  const drive = getDriveClient()
-  const bodyStream = Readable.from([buffer])
-  await drive.files.create({
-    supportsAllDrives: true,
-    requestBody: { name, parents: [parentId] },
-    media: { mimeType, body: bodyStream },
-    fields: 'id',
-  } as any)
+  // googleapis wraps media uploads in a way that loses supportsAllDrives in the upload URL,
+  // causing 'Service Accounts do not have storage quota' on Shared Drives.
+  // Fix: raw multipart upload via fetch with supportsAllDrives=true explicitly in the URL.
+  const auth = getAuthClient()
+  const tokenRes = await auth.getAccessToken()
+  const accessToken = tokenRes.token
+  if (!accessToken) throw new Error('Failed to get access token')
+
+  const boundary = 'locboundary314159265'
+  const metadata = JSON.stringify({ name, parents: [parentId] })
+
+  const bodyBuffer = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`),
+    Buffer.from(metadata),
+    Buffer.from(`\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`),
+    buffer,
+    Buffer.from(`\r\n--${boundary}--`),
+  ])
+
+  const res = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`,
+        'Content-Length': String(bodyBuffer.length),
+      },
+      body: bodyBuffer,
+    }
+  )
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText)
+    throw new Error(`Drive upload ${res.status}: ${text}`)
+  }
 }
 
 // --- Naming ---
@@ -98,9 +126,7 @@ function buildNewName(originalName: string, lang: string, cp: string): string {
   const extMatch = originalName.match(/(\.[^.]+)$/)
   const ext = extMatch ? extMatch[1] : '.jpg'
   let base = originalName.replace(/\.[^.]+$/, '')
-  // strip trailing 2-letter lang code e.g. _EN
   base = base.replace(/_[A-Z]{2}$/, '')
-  // strip known CP suffixes
   base = base.replace(/_(TMK|KZA|AHB|ASR|SMV|DDT|VTL|YKH|DKR|ASM|NBL|RSK|KIS|MMM)$/i, '')
   return cp ? `${base}_${cp}_${lang}${ext}` : `${base}_${lang}${ext}`
 }
@@ -182,7 +208,7 @@ Response must start with { and end with }`,
   return JSON.parse(clean.slice(clean.indexOf('{'), clean.lastIndexOf('}') + 1))
 }
 
-// --- GPT Analyzer 2 -- verify ---
+// --- GPT Analyzer 2 - verify ---
 
 async function verifyCreative(
   imageBase64DataUrl: string,
@@ -250,7 +276,6 @@ export async function runLocalizationJob(
 
   for (const folder of folders) {
     try {
-      // -- Find EN folder --
       patch(folder.id, { status: 'analyzing' })
       emit()
 
@@ -269,14 +294,12 @@ export async function runLocalizationJob(
         continue
       }
 
-      // -- Analyze representative image --
       const representative = pickRepresentative(allImages)!
       const repBuffer = await downloadFileAsBuffer(representative.id)
       const repMime = representative.name.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg'
       const repBase64 = `data:${repMime};base64,${repBuffer.toString('base64')}`
       const analysis = await analyzeImage(repBase64)
 
-      // -- Translate --
       patch(folder.id, { status: 'translating' })
       emit()
 
@@ -284,7 +307,6 @@ export async function runLocalizationJob(
       const translations: { language: string; phrases: { id: string; en: string; translated: string }[] }[] =
         translationResult.translations || []
 
-      // -- Upload --
       patch(folder.id, { status: 'uploading', uploadInfo: `0/${allImages.length} images` })
       emit()
 
@@ -322,7 +344,6 @@ export async function runLocalizationJob(
         emit()
       }
 
-      // -- Verify (non-blocking) --
       patch(folder.id, { status: 'verifying' })
       emit()
 
