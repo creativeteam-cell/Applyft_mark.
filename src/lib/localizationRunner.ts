@@ -39,7 +39,7 @@ Rules:
     size: 'auto',
   } as any)
 
-  const b64 = response.data[0]?.b64_json
+  const b64 = response.data?.[0]?.b64_json
   if (!b64) throw new Error('gpt-image-1 returned no image data')
 
   return Buffer.from(b64, 'base64')
