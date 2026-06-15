@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { AppCard } from './AppCard'
 import { AddAppModal } from './AddAppModal'
 import { MarketersSection } from './MarketersSection'
+import { LanguagesSection } from './LanguagesSection'
 
 interface App {
   code: string
@@ -16,6 +17,11 @@ interface App {
 }
 
 interface Marketer {
+  code: string
+  name: string
+}
+
+interface Language {
   code: string
   name: string
 }
@@ -50,11 +56,13 @@ function SectionHeader({ title, count, expanded, onToggle }: {
 export function SettingsPage() {
   const [apps, setApps] = useState<App[]>([])
   const [marketers, setMarketers] = useState<Marketer[]>([])
+  const [languages, setLanguages] = useState<Language[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [expandedApp, setExpandedApp] = useState<string | null>(null)
   const [appsOpen, setAppsOpen] = useState(true)
   const [producersOpen, setProducersOpen] = useState(false)
+  const [languagesOpen, setLanguagesOpen] = useState(false)
 
   useEffect(() => { loadApps() }, [])
 
@@ -64,6 +72,7 @@ export function SettingsPage() {
     const data = await res.json()
     setApps(data.apps || data)
     if (data.marketers) setMarketers(data.marketers)
+    if (data.languages) setLanguages(data.languages)
     setLoading(false)
   }
 
@@ -99,6 +108,15 @@ export function SettingsPage() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'marketers', data: updated }),
+    })
+  }
+
+  async function handleSaveLanguages(updated: Language[]) {
+    setLanguages(updated)
+    await fetch('/api/apps', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'languages', data: updated }),
     })
   }
 
@@ -144,6 +162,14 @@ export function SettingsPage() {
         <SectionHeader title="Producers" count={marketers.length} expanded={producersOpen} onToggle={() => setProducersOpen(!producersOpen)} />
         {producersOpen && (
           <MarketersSection marketers={marketers} onChange={handleSaveMarketers} />
+        )}
+      </div>
+
+      {/* Languages */}
+      <div className="mb-6">
+        <SectionHeader title="Languages" count={languages.length} expanded={languagesOpen} onToggle={() => setLanguagesOpen(!languagesOpen)} />
+        {languagesOpen && (
+          <LanguagesSection languages={languages} onChange={handleSaveLanguages} />
         )}
       </div>
 

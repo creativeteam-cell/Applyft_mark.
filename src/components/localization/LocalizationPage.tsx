@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 
 interface App { code: string; name: string; active: boolean }
 interface Marketer { code: string; name: string }
+interface Language { code: string; name: string }
 
 interface LocalizationFolder {
   id: string
@@ -12,27 +13,6 @@ interface LocalizationFolder {
   languages: string[]
 }
 
-const LANGUAGES = [
-  { code: 'EN', label: 'English' },
-  { code: 'PT', label: 'Portuguese' },
-  { code: 'SP', label: 'Spanish' },
-  { code: 'FR', label: 'French' },
-  { code: 'DE', label: 'German' },
-  { code: 'IT', label: 'Italian' },
-  { code: 'RU', label: 'Russian' },
-  { code: 'UA', label: 'Ukrainian' },
-  { code: 'AR', label: 'Arabic' },
-  { code: 'JP', label: 'Japanese' },
-  { code: 'KR', label: 'Korean' },
-  { code: 'HE', label: 'Hebrew' },
-  { code: 'BG', label: 'Bulgarian' },
-  { code: 'CN', label: 'Chinese' },
-  { code: 'CZ', label: 'Czech' },
-  { code: 'ND', label: 'Dutch' },
-  { code: 'HI', label: 'Hindi' },
-  { code: 'PL', label: 'Polish' },
-  { code: 'TW', label: 'Taiwan' },
-]
 
 // Extracts the numeric part from folder name, e.g. "ST_S_052_a" → 52
 function folderNumber(name: string): number {
@@ -43,6 +23,7 @@ function folderNumber(name: string): number {
 export function LocalizationPage() {
   const [apps, setApps] = useState<App[]>([])
   const [marketers, setMarketers] = useState<Marketer[]>([])
+  const [languages, setLanguages] = useState<Language[]>([])
   const [selectedApp, setSelectedApp] = useState('')
   const [selectedMarketer, setSelectedMarketer] = useState('')
   const [search, setSearch] = useState('')
@@ -62,6 +43,7 @@ export function LocalizationPage() {
         const activeApps = (data.apps || data).filter((a: App) => a.active)
         setApps(activeApps)
         setMarketers(data.marketers || [])
+        setLanguages(data.languages || [])
 
         const savedApp = localStorage.getItem('cs_selected_app')
         const savedMarketer = localStorage.getItem('cs_selected_marketer')
@@ -202,7 +184,7 @@ export function LocalizationPage() {
 
         {/* Row 2: Language chips + Localize button */}
         <div className="flex items-center gap-2 px-8 pb-2.5 flex-wrap">
-          {LANGUAGES.map(lang => {
+          {languages.map(lang => {
             const active = selectedLangs.has(lang.code)
             return (
               <button
@@ -316,7 +298,7 @@ function FolderRow({ folder }: { folder: LocalizationFolder }) {
       </div>
 
       {/* Hover preview popup */}
-      {hovered && fileId !== 'none' && (
+      {hovered && (
         <div
           className="absolute left-0 z-50 rounded-xl overflow-hidden shadow-2xl pointer-events-none"
           style={{
@@ -330,6 +312,11 @@ function FolderRow({ folder }: { folder: LocalizationFolder }) {
           {fileId === 'loading' ? (
             <div className="w-full h-full flex items-center justify-center">
               <span className="text-gray-500 animate-spin text-lg">⟳</span>
+            </div>
+          ) : fileId === 'none' ? (
+            <div className="w-full h-full flex flex-col items-center justify-center gap-2 px-4 text-center">
+              <span className="text-2xl">🚧</span>
+              <span className="text-xs text-gray-500">Not created yet</span>
             </div>
           ) : (
             <img

@@ -16,6 +16,11 @@ export interface Marketer {
   name: string
 }
 
+export interface Language {
+  code: string
+  name: string
+}
+
 export interface CreativeConcept {
   id: string
   emoji: string
@@ -26,6 +31,7 @@ export interface CreativeConcept {
 export interface ConfigData {
   apps: App[]
   marketers: Marketer[]
+  languages: Language[]
   concepts: Record<string, CreativeConcept[]> // appCode → concepts
 }
 
@@ -63,8 +69,8 @@ export async function getConfig(): Promise<ConfigData> {
       { responseType: 'text' }
     )
     const data = JSON.parse(res.data as string)
-    // Добавляем concepts если нет
     if (!data.concepts) data.concepts = {}
+    if (!data.languages) data.languages = getDefaultConfig().languages
     return data
   } catch (e) {
     console.error('Failed to load config:', e)
@@ -122,6 +128,27 @@ function getDefaultConfig(): ConfigData {
       { code: 'RSK', name: 'Romana Skrabut' },
       { code: 'KIS', name: 'Kseniia Ilienko' },
       { code: 'MMM', name: 'Mariia Minaieva' },
+    ],
+    languages: [
+      { code: 'EN', name: 'English' },
+      { code: 'PT', name: 'Portuguese' },
+      { code: 'SP', name: 'Spanish' },
+      { code: 'FR', name: 'French' },
+      { code: 'DE', name: 'German' },
+      { code: 'IT', name: 'Italian' },
+      { code: 'RU', name: 'Russian' },
+      { code: 'UA', name: 'Ukrainian' },
+      { code: 'AR', name: 'Arabic' },
+      { code: 'JP', name: 'Japanese' },
+      { code: 'KR', name: 'Korean' },
+      { code: 'HE', name: 'Hebrew' },
+      { code: 'BG', name: 'Bulgarian' },
+      { code: 'CN', name: 'Chinese' },
+      { code: 'CZ', name: 'Czech' },
+      { code: 'ND', name: 'Dutch' },
+      { code: 'HI', name: 'Hindi' },
+      { code: 'PL', name: 'Polish' },
+      { code: 'TW', name: 'Taiwan' },
     ],
     concepts: {},
   }

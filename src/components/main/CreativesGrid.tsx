@@ -175,15 +175,15 @@ export function CreativesGrid({ appCode, page, onPageChange, refreshKey = 0 }: C
         <div className="flex items-center justify-center py-32">
           <div className="text-gray-500 text-sm">No creatives found for {appCode}</div>
         </div>
-      ) : filtered.length === 0 && !searchLoading ? (
-        <div className="flex items-center justify-center py-32">
-          <div className="text-gray-500 text-sm">No creatives matching <span className="font-mono" style={{ color: 'var(--accent)' }}>{search}</span></div>
-        </div>
       ) : filtered.length === 0 && searchLoading ? (
         <div className="flex items-center justify-center py-32">
           <div className="text-gray-500 flex items-center gap-2 text-sm">
             <span className="animate-spin">⟳</span> Searching Drive...
           </div>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="flex items-center justify-center py-32">
+          <div className="text-gray-500 text-sm">No creatives matching <span className="font-mono" style={{ color: 'var(--accent)' }}>{search}</span></div>
         </div>
       ) : (
         <div className="space-y-4" style={{ opacity: loading ? 0.6 : 1, transition: 'opacity 0.2s' }}>

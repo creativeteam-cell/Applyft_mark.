@@ -20,6 +20,8 @@ export async function POST(req: NextRequest) {
 
   if (body.type === 'marketers') {
     config.marketers = body.data
+  } else if (body.type === 'languages') {
+    config.languages = body.data
   } else {
     // type === 'app'
     const app = body.data
