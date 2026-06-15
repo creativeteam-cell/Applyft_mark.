@@ -24,11 +24,8 @@ interface FolderProgress {
 }
 
 interface JobState {
-  jobId: string
   status: 'running' | 'done' | 'error'
   folders: FolderProgress[]
-  startedAt: string
-  completedAt?: string
 }
 
 function folderNumber(name: string): number {
@@ -72,10 +69,9 @@ export function LocalizationPage() {
   const [searchLoading, setSearchLoading] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
-  // Job tracking
   const [activeJob, setActiveJob] = useState<JobState | null>(null)
   const [localizing, setLocalizing] = useState(false)
-  const pollRef = useRef<NodeJS.Timeout | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   function toggleSelect(id: string) {
     setSelected(prev => {
@@ -99,7 +95,6 @@ export function LocalizationPage() {
       .finally(() => setLoading(false))
   }, [selectedApp])
 
-  // Load apps + marketers
   useEffect(() => {
     fetch('/api/apps')
       .then(r => r.json())
@@ -126,13 +121,11 @@ export function LocalizationPage() {
       })
   }, [])
 
-  // Fetch folders when app changes
   useEffect(() => {
     fetchFolders()
     setSearchResults([])
   }, [fetchFolders])
 
-  // Drive-wide search
   useEffect(() => {
     const q = search.trim()
     if (!q || !selectedApp) { setSearchResults([]); return }
@@ -147,44 +140,9 @@ export function LocalizationPage() {
     return () => controller.abort()
   }, [search, selectedApp])
 
-  // Poll job status
   useEffect(() => {
-    if (!activeJob || activeJob.status !== 'running') return
-
-    pollRef.current = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/localization/status?jobId=${activeJob.jobId}`)
-        const data: JobState = await res.json()
-        setActiveJob(data)
-
-        if (data.status === 'done' || data.status === 'error') {
-          clearInterval(pollRef.current!)
-          setLocalizing(false)
-          setSelected(new Set())
-
-          // Refresh folder list to show new language badges
-          setTimeout(() => fetchFolders(), 1500)
-
-          // Browser notification
-          if (typeof window !== 'undefined' && 'Notification' in window) {
-            const doneCount = data.folders.filter(f => f.status === 'done').length
-            const errCount = data.folders.filter(f => f.status === 'error').length
-            const msg = data.status === 'done'
-              ? `✅ Localization done! ${doneCount} folder${doneCount !== 1 ? 's' : ''} processed.`
-              : `⚠️ Finished with ${errCount} error${errCount !== 1 ? 's' : ''}. ${doneCount} folder${doneCount !== 1 ? 's' : ''} ok.`
-
-            if (Notification.permission === 'granted') {
-              new Notification('Applyft Mark', { body: msg, icon: '/favicon.ico' })
-            }
-          }
-        }
-      } catch {
-        // polling failure — keep trying
-      }
-    }, 3000)
-
-    return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [activeJob?.jobId, activeJob?.status, fetchFolders])
+    return () => { abortRef.current?.abort() }
+  }, [])
 
   function handleAppChange(code: string) {
     localStorage.setItem('cs_selected_app', code)
@@ -207,7 +165,6 @@ export function LocalizationPage() {
   async function handleLocalize() {
     if (selected.size === 0 || selectedLangs.size === 0 || !selectedMarketer) return
 
-    // Request notification permission if not yet granted
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
       await Notification.requestPermission()
     }
@@ -216,7 +173,21 @@ export function LocalizationPage() {
       .filter(f => selected.has(f.id))
       .map(f => ({ id: f.id, name: f.name }))
 
+    setActiveJob({
+      status: 'running',
+      folders: selectedFolders.map(f => ({
+        folderId: f.id,
+        folderName: f.name,
+        status: 'pending' as const,
+        completedLangs: [],
+      })),
+    })
     setLocalizing(true)
+
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
     try {
       const res = await fetch('/api/localization/run', {
         method: 'POST',
@@ -227,24 +198,55 @@ export function LocalizationPage() {
           cp: selectedMarketer,
           appCode: selectedApp,
         }),
+        signal: controller.signal,
       })
-      const data = await res.json()
-      if (data.error) throw new Error(data.error)
 
-      setActiveJob({
-        jobId: data.jobId,
-        status: 'running',
-        startedAt: new Date().toISOString(),
-        folders: selectedFolders.map(f => ({
-          folderId: f.id,
-          folderName: f.name,
-          status: 'pending',
-          completedLangs: [],
-        })),
-      })
+      if (!res.ok || !res.body) {
+        const err = await res.json().catch(() => ({ error: 'Failed to start' }))
+        throw new Error(err.error || 'Failed to start')
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const snapshot = JSON.parse(line.slice(6))
+            setActiveJob(snapshot)
+
+            if (snapshot.status === 'done' || snapshot.status === 'error') {
+              setLocalizing(false)
+              setSelected(new Set())
+              setTimeout(() => fetchFolders(), 1500)
+
+              if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+                const doneCount = (snapshot.folders as FolderProgress[]).filter(f => f.status === 'done').length
+                const errCount = (snapshot.folders as FolderProgress[]).filter(f => f.status === 'error').length
+                const msg = snapshot.status === 'done'
+                  ? '✅ Localization done! ' + doneCount + ' folder' + (doneCount !== 1 ? 's' : '') + ' processed.'
+                  : '⚠️ Finished with ' + errCount + ' error' + (errCount !== 1 ? 's' : '') + '. ' + doneCount + ' ok.'
+                new Notification('Applyft Mark', { body: msg, icon: '/favicon.ico' })
+              }
+            }
+          } catch {
+            // malformed JSON chunk
+          }
+        }
+      }
     } catch (err: any) {
+      if (err.name === 'AbortError') return
       setLocalizing(false)
-      alert(`Failed to start: ${err.message}`)
+      alert('Localization failed: ' + err.message)
     }
   }
 
@@ -262,12 +264,10 @@ export function LocalizationPage() {
 
   return (
     <>
-      {/* ── Top Panel ──────────────────────────────────────────────────── */}
       <div
         className="fixed left-0 right-0 z-40 border-b"
         style={{ top: 56, background: 'var(--bg)', borderColor: 'var(--border)' }}
       >
-        {/* Row 1: App / Search / Producer / Job counter */}
         <div className="flex items-center gap-4 px-8 py-2.5">
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-500 uppercase tracking-widest font-mono">App</span>
@@ -278,13 +278,13 @@ export function LocalizationPage() {
               style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
             >
               {apps.map(app => (
-                <option key={app.code} value={app.code}>{app.code} — {app.name}</option>
+                <option key={app.code} value={app.code}>{app.code} &mdash; {app.name}</option>
               ))}
             </select>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500 uppercase tracking-widest font-mono">№</span>
+            <span className="text-xs text-gray-500 uppercase tracking-widest font-mono">No.</span>
             <div className="relative">
               <input
                 value={search}
@@ -294,12 +294,12 @@ export function LocalizationPage() {
                 className="w-16 px-2 py-1.5 rounded-lg text-xs font-mono text-center outline-none"
                 style={{
                   background: 'var(--surface)',
-                  border: `1px solid ${search ? 'var(--accent)' : 'var(--border)'}`,
+                  border: '1px solid ' + (search ? 'var(--accent)' : 'var(--border)'),
                   color: 'var(--text)',
                 }}
               />
               {searchLoading && (
-                <span className="absolute -right-4 top-1/2 -translate-y-1/2 text-gray-500 animate-spin text-xs">⟳</span>
+                <span className="absolute -right-4 top-1/2 -translate-y-1/2 text-gray-500 animate-spin text-xs">o</span>
               )}
             </div>
           </div>
@@ -313,21 +313,19 @@ export function LocalizationPage() {
               style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
             >
               {marketers.map(m => (
-                <option key={m.code} value={m.code}>{m.code} — {m.name}</option>
+                <option key={m.code} value={m.code}>{m.code} &mdash; {m.name}</option>
               ))}
             </select>
           </div>
 
-          {/* Active job counter */}
           {activeJob && activeJob.status === 'running' && (
             <div className="ml-auto flex items-center gap-2 text-xs text-gray-400 font-mono">
-              <span className="animate-spin">⟳</span>
-              {activeJob.folders.filter(f => f.status === 'done').length}/{activeJob.folders.length} done
+              <span className="animate-spin">~</span>
+              {activeJob.folders?.filter(f => f.status === 'done').length ?? 0}/{activeJob.folders?.length ?? 0} done
             </div>
           )}
         </div>
 
-        {/* Row 2: Language chips + Localize button */}
         <div className="flex items-center gap-2 px-8 pb-2.5 flex-wrap">
           {languages.map(lang => {
             const active = selectedLangs.has(lang.code)
@@ -339,7 +337,7 @@ export function LocalizationPage() {
                 className="px-2.5 py-1 rounded-lg text-xs font-mono font-medium transition-all"
                 style={{
                   background: active ? 'rgba(99,102,241,0.18)' : 'var(--surface)',
-                  border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                  border: '1px solid ' + (active ? 'var(--accent)' : 'var(--border)'),
                   color: active ? 'var(--accent)' : 'var(--text-muted)',
                 }}
               >
@@ -359,38 +357,33 @@ export function LocalizationPage() {
               cursor: canLocalize ? 'pointer' : 'not-allowed',
             }}
           >
-            {localizing ? (
-              <span className="flex items-center gap-2">
-                <span className="animate-spin">⟳</span> Localizing...
-              </span>
-            ) : (
-              `✦ Localize${selected.size > 0 ? ` (${selected.size})` : ''}`
-            )}
+            {localizing
+              ? 'Localizing...'
+              : ('Localize' + (selected.size > 0 ? ' (' + selected.size + ')' : ''))}
           </button>
         </div>
       </div>
 
-      {/* ── Content ────────────────────────────────────────────────────── */}
       <div style={{ paddingTop: contentTop + 24, paddingLeft: 32, paddingRight: 32, paddingBottom: 40 }}>
         {error ? (
           <div className="flex items-center justify-center py-32 text-red-400 text-sm">Error: {error}</div>
         ) : loading ? (
           <div className="flex items-center justify-center py-32 text-gray-500 gap-3">
-            <span className="animate-spin text-xl">⟳</span>
+            <span className="animate-spin text-xl">~</span>
             Loading folders...
           </div>
         ) : filtered.length === 0 && searchLoading ? (
           <div className="flex items-center justify-center py-32 text-gray-500 gap-2">
-            <span className="animate-spin">⟳</span> Searching Drive...
+            <span className="animate-spin">~</span> Searching Drive...
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex items-center justify-center py-32 text-gray-500 text-sm">
-            {q ? `No folders matching "${q}"` : `No folders found for ${selectedApp}`}
+            {q ? 'No folders matching "' + q + '"' : 'No folders found for ' + selectedApp}
           </div>
         ) : (
           <div className="space-y-2">
             {filtered.map(folder => {
-              const progress = activeJob?.folders.find(f => f.folderId === folder.id)
+              const progress = activeJob?.folders?.find(f => f.folderId === folder.id)
               return (
                 <FolderRow
                   key={folder.id}
@@ -408,17 +401,14 @@ export function LocalizationPage() {
   )
 }
 
-function Checkbox({ checked, onChange }: {
-  checked: boolean
-  onChange: () => void
-}) {
+function Checkbox({ checked, onChange }: { checked: boolean; onChange: () => void }) {
   return (
     <button
       onClick={onChange}
       className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0 transition-all"
       style={{
         background: checked ? 'var(--accent)' : 'transparent',
-        border: `1.5px solid ${checked ? 'var(--accent)' : 'var(--border)'}`,
+        border: '1.5px solid ' + (checked ? 'var(--accent)' : 'var(--border)'),
       }}
     >
       {checked && (
@@ -444,7 +434,7 @@ function FolderRow({ folder, checked, onToggle, progress }: {
     setHovered(true)
     if (!fetchedRef.current) {
       fetchedRef.current = true
-      fetch(`/api/localization/preview?folderId=${folder.id}`)
+      fetch('/api/localization/preview?folderId=' + folder.id)
         .then(r => r.json())
         .then(data => setFileId(data.fileId || 'none'))
         .catch(() => setFileId('none'))
@@ -459,7 +449,7 @@ function FolderRow({ folder, checked, onToggle, progress }: {
       className="relative flex items-center gap-3 px-5 py-3 rounded-xl"
       style={{
         background: checked ? 'rgba(99,102,241,0.07)' : 'var(--surface)',
-        border: `1px solid ${checked ? 'rgba(99,102,241,0.35)' : 'var(--border)'}`,
+        border: '1px solid ' + (checked ? 'rgba(99,102,241,0.35)' : 'var(--border)'),
       }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={() => setHovered(false)}
@@ -476,18 +466,17 @@ function FolderRow({ folder, checked, onToggle, progress }: {
         {folder.name}
       </a>
 
-      {/* Progress status badge */}
       {isActive && (
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {spinning && (
-            <span className="animate-spin text-xs" style={{ color: STATUS_COLOR[progress!.status] }}>⟳</span>
+            <span className="animate-spin text-xs" style={{ color: STATUS_COLOR[progress!.status] }}>~</span>
           )}
           <span
             className="text-xs font-mono px-2 py-0.5 rounded-md"
             style={{
               color: STATUS_COLOR[progress!.status] || 'var(--text-muted)',
-              background: `${STATUS_COLOR[progress!.status] || 'var(--text-muted)'}22`,
-              border: `1px solid ${STATUS_COLOR[progress!.status] || 'var(--border)'}44`,
+              background: (STATUS_COLOR[progress!.status] || 'var(--text-muted)') + '22',
+              border: '1px solid ' + (STATUS_COLOR[progress!.status] || 'var(--border)') + '44',
             }}
           >
             {STATUS_LABEL[progress!.status] || progress!.status}
@@ -498,15 +487,14 @@ function FolderRow({ folder, checked, onToggle, progress }: {
             </span>
           )}
           {progress!.status === 'error' && progress!.error && (
-            <span className="text-xs text-red-400 cursor-help" title={progress!.error}>⚠</span>
+            <span className="text-xs text-red-400 cursor-help" title={progress!.error}>!</span>
           )}
         </div>
       )}
 
-      {/* Existing language badges */}
       <div className="flex-1 flex items-center gap-1.5 flex-wrap justify-end">
         {folder.languages.length === 0 ? (
-          <span className="text-xs text-gray-600 font-mono">—</span>
+          <span className="text-xs text-gray-600 font-mono">-</span>
         ) : (
           folder.languages.map(lang => (
             <span
@@ -514,7 +502,7 @@ function FolderRow({ folder, checked, onToggle, progress }: {
               className="px-2 py-0.5 rounded-md text-xs font-mono font-medium"
               style={{
                 background: lang === 'EN' ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.08)',
-                border: `1px solid ${lang === 'EN' ? 'rgba(99,102,241,0.4)' : 'var(--border)'}`,
+                border: '1px solid ' + (lang === 'EN' ? 'rgba(99,102,241,0.4)' : 'var(--border)'),
                 color: lang === 'EN' ? 'var(--accent)' : 'var(--text-muted)',
               }}
             >
@@ -524,7 +512,6 @@ function FolderRow({ folder, checked, onToggle, progress }: {
         )}
       </div>
 
-      {/* Hover preview popup */}
       {hovered && (
         <div
           className="absolute left-0 z-50 rounded-xl overflow-hidden shadow-2xl pointer-events-none"
@@ -538,16 +525,15 @@ function FolderRow({ folder, checked, onToggle, progress }: {
         >
           {fileId === 'loading' ? (
             <div className="w-full h-full flex items-center justify-center">
-              <span className="text-gray-500 animate-spin text-lg">⟳</span>
+              <span className="text-gray-500 animate-spin text-lg">~</span>
             </div>
           ) : fileId === 'none' ? (
             <div className="w-full h-full flex flex-col items-center justify-center gap-2 px-4 text-center">
-              <span className="text-2xl">🚧</span>
-              <span className="text-xs text-gray-500">Not created yet</span>
+              <span className="text-sm text-gray-500">Not created yet</span>
             </div>
           ) : (
             <img
-              src={`/api/image?id=${fileId}`}
+              src={'/api/image?id=' + fileId}
               alt={folder.name}
               className="w-full h-full object-cover"
             />

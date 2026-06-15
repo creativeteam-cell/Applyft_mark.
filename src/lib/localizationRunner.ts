@@ -1,7 +1,6 @@
 import OpenAI from 'openai'
 import sharp from 'sharp'
-import { getDriveClient } from './googleDrive'
-import { invalidateLocCache } from './googleDrive'
+import { getDriveClient, invalidateLocCache } from './googleDrive'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -14,7 +13,7 @@ const SIZE_MAP: Record<string, { width: number; height: number }> = {
   '1x1':    { width: 1200, height: 1200 },
 }
 
-// ─── Job state ───────────────────────────────────────────────────────────────
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 export type FolderStatus =
   | 'pending'
@@ -33,25 +32,12 @@ export interface FolderProgress {
   completedLangs?: string[]
 }
 
-export interface JobState {
-  jobId: string
+export interface JobSnapshot {
   status: 'running' | 'done' | 'error'
   folders: FolderProgress[]
-  startedAt: string
-  completedAt?: string
 }
-
-// In-memory store
-export const jobs = new Map<string, JobState>()
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function updateFolder(jobId: string, folderId: string, patch: Partial<FolderProgress>) {
-  const job = jobs.get(jobId)
-  if (!job) return
-  const idx = job.folders.findIndex(f => f.folderId === folderId)
-  if (idx >= 0) job.folders[idx] = { ...job.folders[idx], ...patch }
-}
 
 async function listSubfolders(folderId: string) {
   const drive = getDriveClient()
@@ -88,7 +74,6 @@ async function bufferToBase64DataUrl(buffer: Buffer, mimeType = 'image/jpeg'): P
   return `data:${mimeType};base64,${buffer.toString('base64')}`
 }
 
-/** Pick representative image: prefer 9x16, fallback to 4x5, then first */
 function pickRepresentative(images: { id: string; name: string }[]): { id: string; name: string } | null {
   return (
     images.find(f => f.name.includes('_9x16_') || f.name.includes('_9x16.')) ||
@@ -98,28 +83,22 @@ function pickRepresentative(images: { id: string; name: string }[]): { id: strin
   )
 }
 
-/** Extract size key from filename, e.g. "UN_S_013_a_4x5_EN.jpg" → "4x5" */
 function extractSize(name: string): string | null {
   const match = name.match(/_(1[.,]91x1|9x16|4x5|1x1)[_.]/)
   return match ? match[1].replace(',', '.') : null
 }
 
-/** Build new filename: strip old lang + CP suffix, append _CP_LANG */
 function buildNewName(originalName: string, lang: string, cp: string): string {
   const extMatch = originalName.match(/(\.[^.]+)$/)
   const ext = extMatch ? extMatch[1] : '.jpg'
-  // Remove extension
   let base = originalName.replace(/\.[^.]+$/, '')
-  // Remove trailing _EN (or any 2-letter lang code)
   base = base.replace(/_[A-Z]{2}$/, '')
-  // Remove any CP code that was at the end before lang (e.g. _TMK)
   const cpPattern = /_(TMK|KZA|AHB|ASR|SMV|DDT|VTL|YKH|DKR|ASM|NBL|RSK|KIS|MMM)$/i
   base = base.replace(cpPattern, '')
-
   return cp ? `${base}_${cp}_${lang}${ext}` : `${base}_${lang}${ext}`
 }
 
-// ─── Analyzer 1: GPT Vision — extract texts from image ───────────────────────
+// ─── GPT Analyzer 1 ──────────────────────────────────────────────────────────
 
 async function analyzeImage(imageBase64DataUrl: string): Promise<any> {
   const response = await openai.chat.completions.create({
@@ -182,15 +161,15 @@ Rules:
   return JSON.parse(clean.slice(start, end + 1))
 }
 
-// ─── Translator: GPT — translate texts to target languages ───────────────────
+// ─── GPT Translator ──────────────────────────────────────────────────────────
 
 async function translateTexts(analysis: any, targetLanguages: string[]): Promise<any> {
   const LANG_MAP: Record<string, string> = {
     JP: 'Japanese', SP: 'Spanish', DE: 'German', FR: 'French',
     IT: 'Italian', PT: 'Portuguese', RU: 'Russian', UA: 'Ukrainian',
     AR: 'Arabic', KR: 'Korean', HE: 'Hebrew', CN: 'Chinese',
-    CZ: 'Czech', ND: 'Dutch', HI: 'Hindi', PL: 'Polish', TW: 'Traditional Chinese (Taiwan)',
-    BG: 'Bulgarian',
+    CZ: 'Czech', ND: 'Dutch', HI: 'Hindi', PL: 'Polish',
+    TW: 'Traditional Chinese (Taiwan)', BG: 'Bulgarian',
   }
 
   const langNames = targetLanguages.map(c => `${c} = ${LANG_MAP[c] || c}`).join(', ')
@@ -227,12 +206,7 @@ Output schema:
     {
       "language": "JP",
       "phrases": [
-        {
-          "id": "text_1",
-          "en": "original text",
-          "translated": "translated text",
-          "type": "headline"
-        }
+        { "id": "text_1", "en": "original text", "translated": "translated text", "type": "headline" }
       ]
     }
   ]
@@ -255,7 +229,7 @@ Response must start with { and end with }`,
   return JSON.parse(clean.slice(start, end + 1))
 }
 
-// ─── Analyzer 2: verify uploaded creative ────────────────────────────────────
+// ─── GPT Analyzer 2 — verify ─────────────────────────────────────────────────
 
 async function verifyCreative(imageBase64DataUrl: string, expectedPhrases: { en: string; translated: string }[]): Promise<{ ok: boolean; issues: string[] }> {
   if (expectedPhrases.length === 0) return { ok: true, issues: [] }
@@ -266,20 +240,9 @@ async function verifyCreative(imageBase64DataUrl: string, expectedPhrases: { en:
       {
         role: 'system',
         content: `You are a quality control reviewer for localized ad creatives.
-
-Return ONLY valid raw JSON:
-{
-  "ok": true|false,
-  "issues": ["list of problems if any"]
-}
-
-Check:
-- Are the translated texts actually visible in the image?
-- Are there any obvious layout breaks, text overflow, or missing text?
-- Does the image look like a proper ad creative?
-
-If everything looks correct → ok: true, issues: []
-Response must start with { and end with }`,
+Return ONLY valid raw JSON: { "ok": true|false, "issues": ["..."] }
+Check: Are translated texts visible? Any layout breaks or missing text?
+If all correct → ok: true, issues: []. Response must start with { and end with }`,
       },
       {
         role: 'user',
@@ -298,187 +261,172 @@ Response must start with { and end with }`,
   try {
     const raw = response.choices[0].message.content || '{}'
     const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
-    const start = clean.indexOf('{')
-    const end = clean.lastIndexOf('}')
-    return JSON.parse(clean.slice(start, end + 1))
+    return JSON.parse(clean.slice(clean.indexOf('{'), clean.lastIndexOf('}') + 1))
   } catch {
     return { ok: true, issues: [] }
   }
 }
 
-// ─── Create Drive folder ──────────────────────────────────────────────────────
+// ─── Drive helpers ────────────────────────────────────────────────────────────
 
 async function createDriveFolder(name: string, parentId: string): Promise<string> {
   const drive = getDriveClient()
   const res = await drive.files.create({
     supportsAllDrives: true,
-    requestBody: {
-      name,
-      mimeType: 'application/vnd.google-apps.folder',
-      parents: [parentId],
-    },
+    requestBody: { name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] },
     fields: 'id',
   } as any) as any
   return res.data.id!
 }
 
-// ─── Upload file to Drive ─────────────────────────────────────────────────────
-
-async function uploadToDrive(buffer: Buffer, mimeType: string, name: string, parentId: string): Promise<string> {
+async function uploadToDrive(buffer: Buffer, mimeType: string, name: string, parentId: string): Promise<void> {
   const drive = getDriveClient()
   const { Readable } = await import('stream')
-  const stream = Readable.from(buffer)
-  const res = await drive.files.create({
+  await drive.files.create({
     supportsAllDrives: true,
     requestBody: { name, parents: [parentId] },
-    media: { mimeType, body: stream },
+    media: { mimeType, body: Readable.from(buffer) },
     fields: 'id',
-  } as any) as any
-  return res.data.id!
+  } as any)
 }
 
-// ─── Process one folder ───────────────────────────────────────────────────────
-
-async function processFolder(
-  jobId: string,
-  folderId: string,
-  folderName: string,
-  targetLanguages: string[],
-  cp: string,
-): Promise<void> {
-  updateFolder(jobId, folderId, { status: 'analyzing' })
-
-  // 1. Find EN subfolder
-  const subfolders = await listSubfolders(folderId)
-  const enFolder = subfolders.find(f => f.name.toUpperCase() === 'EN')
-  if (!enFolder) {
-    updateFolder(jobId, folderId, { status: 'error', error: 'No EN folder found' })
-    return
-  }
-
-  // 2. Get all images from EN
-  const allImages = await listImages(enFolder.id)
-  if (allImages.length === 0) {
-    updateFolder(jobId, folderId, { status: 'error', error: 'No images in EN folder' })
-    return
-  }
-
-  // 3. Pick representative image for analysis
-  const representative = pickRepresentative(allImages)
-  if (!representative) {
-    updateFolder(jobId, folderId, { status: 'error', error: 'Could not pick representative image' })
-    return
-  }
-
-  // 4. Download + analyze representative image
-  const repBuffer = await downloadFileAsBuffer(representative.id)
-  const repBase64 = await bufferToBase64DataUrl(repBuffer)
-  const analysis = await analyzeImage(repBase64)
-
-  // 5. Translate
-  updateFolder(jobId, folderId, { status: 'translating' })
-  const translationResult = await translateTexts(analysis, targetLanguages)
-  const translations: { language: string; phrases: { id: string; en: string; translated: string; type: string }[] }[] =
-    translationResult.translations || []
-
-  // 6. Upload phase
-  updateFolder(jobId, folderId, { status: 'uploading' })
-
-  const completedLangs: string[] = []
-
-  for (const translation of translations) {
-    const lang = translation.language
-
-    // Create language subfolder inside the creative folder
-    const langFolderId = await createDriveFolder(lang, folderId)
-
-    // Upload each image from EN, resized, with new name
-    for (const img of allImages) {
-      try {
-        const imgBuffer = await downloadFileAsBuffer(img.id)
-
-        // Resize if we know the target size
-        const sizeKey = extractSize(img.name)
-        const dims = sizeKey ? SIZE_MAP[sizeKey] : null
-
-        let finalBuffer: Buffer
-        if (dims) {
-          finalBuffer = await sharp(imgBuffer)
-            .resize(dims.width, dims.height, { fit: 'fill' })
-            .jpeg({ quality: 92 })
-            .toBuffer()
-        } else {
-          finalBuffer = imgBuffer
-        }
-
-        const newName = buildNewName(img.name, lang, cp)
-        await uploadToDrive(finalBuffer, 'image/jpeg', newName, langFolderId)
-      } catch (imgErr) {
-        console.error(`Failed to process image ${img.name} for lang ${lang}:`, imgErr)
-        // Continue with next image
-      }
-    }
-
-    completedLangs.push(lang)
-    updateFolder(jobId, folderId, { completedLangs: [...completedLangs] })
-  }
-
-  // 7. Analyzer 2: verify one uploaded image
-  updateFolder(jobId, folderId, { status: 'verifying' })
-  try {
-    const firstTranslation = translations[0]
-    if (firstTranslation) {
-      // Download the first uploaded image for verification (re-fetch from Drive)
-      // For simplicity, we verify using the re-processed buffer of representative image
-      const firstLangPhrases = firstTranslation.phrases.map((p: any) => ({
-        en: p.en,
-        translated: p.translated,
-      }))
-      // We verify with the representative image + expected phrases
-      // (full re-download of uploaded file would require knowing its ID)
-      const verifyBuffer = await sharp(repBuffer)
-        .resize(600, 750, { fit: 'fill' })
-        .jpeg({ quality: 70 })
-        .toBuffer()
-      const verifyBase64 = await bufferToBase64DataUrl(verifyBuffer)
-      const verification = await verifyCreative(verifyBase64, firstLangPhrases.slice(0, 3))
-      if (!verification.ok) {
-        console.warn(`Verification issues for ${folderName}:`, verification.issues)
-      }
-    }
-  } catch (verifyErr) {
-    console.warn('Verification step failed (non-blocking):', verifyErr)
-  }
-
-  updateFolder(jobId, folderId, { status: 'done' })
-}
-
-// ─── Main job runner ──────────────────────────────────────────────────────────
+// ─── Main runner — uses callback instead of global Map ───────────────────────
 
 export async function runLocalizationJob(
-  jobId: string,
   folders: { id: string; name: string }[],
   targetLanguages: string[],
   cp: string,
   appCode: string,
+  onUpdate: (snapshot: JobSnapshot) => void,
 ): Promise<void> {
-  const job = jobs.get(jobId)
-  if (!job) return
 
-  // Process folders sequentially to avoid Drive API rate limits
+  // Local mutable state
+  const state: FolderProgress[] = folders.map(f => ({
+    folderId: f.id,
+    folderName: f.name,
+    status: 'pending' as FolderStatus,
+    completedLangs: [],
+  }))
+
+  function emit(status: JobSnapshot['status'] = 'running') {
+    onUpdate({ status, folders: state.map(f => ({ ...f })) })
+  }
+
+  function patchFolder(folderId: string, patch: Partial<FolderProgress>) {
+    const idx = state.findIndex(f => f.folderId === folderId)
+    if (idx >= 0) state[idx] = { ...state[idx], ...patch }
+  }
+
+  emit('running')
+
   for (const folder of folders) {
     try {
-      await processFolder(jobId, folder.id, folder.name, targetLanguages, cp)
+      // ── Analyzing ──
+      patchFolder(folder.id, { status: 'analyzing' })
+      emit()
+
+      const subfolders = await listSubfolders(folder.id)
+      const enFolder = subfolders.find(f => f.name.toUpperCase() === 'EN')
+      if (!enFolder) {
+        patchFolder(folder.id, { status: 'error', error: 'No EN folder found' })
+        emit()
+        continue
+      }
+
+      const allImages = await listImages(enFolder.id)
+      if (allImages.length === 0) {
+        patchFolder(folder.id, { status: 'error', error: 'No images in EN folder' })
+        emit()
+        continue
+      }
+
+      const representative = pickRepresentative(allImages)
+      if (!representative) {
+        patchFolder(folder.id, { status: 'error', error: 'Could not pick representative image' })
+        emit()
+        continue
+      }
+
+      const repBuffer = await downloadFileAsBuffer(representative.id)
+      const repBase64 = await bufferToBase64DataUrl(repBuffer)
+      const analysis = await analyzeImage(repBase64)
+
+      // ── Translating ──
+      patchFolder(folder.id, { status: 'translating' })
+      emit()
+
+      const translationResult = await translateTexts(analysis, targetLanguages)
+      const translations: { language: string; phrases: { id: string; en: string; translated: string; type: string }[] }[] =
+        translationResult.translations || []
+
+      // ── Uploading ──
+      patchFolder(folder.id, { status: 'uploading' })
+      emit()
+
+      const completedLangs: string[] = []
+
+      for (const translation of translations) {
+        const lang = translation.language
+        const langFolderId = await createDriveFolder(lang, folder.id)
+
+        for (const img of allImages) {
+          try {
+            const imgBuffer = await downloadFileAsBuffer(img.id)
+            const sizeKey = extractSize(img.name)
+            const dims = sizeKey ? SIZE_MAP[sizeKey] : null
+
+            let finalBuffer: Buffer
+            if (dims) {
+              finalBuffer = await sharp(imgBuffer)
+                .resize(dims.width, dims.height, { fit: 'fill' })
+                .jpeg({ quality: 92 })
+                .toBuffer()
+            } else {
+              finalBuffer = imgBuffer
+            }
+
+            const newName = buildNewName(img.name, lang, cp)
+            await uploadToDrive(finalBuffer, 'image/jpeg', newName, langFolderId)
+          } catch (imgErr) {
+            console.error(`Failed to process image ${img.name} for lang ${lang}:`, imgErr)
+          }
+        }
+
+        completedLangs.push(lang)
+        patchFolder(folder.id, { completedLangs: [...completedLangs] })
+        emit()
+      }
+
+      // ── Verifying ──
+      patchFolder(folder.id, { status: 'verifying' })
+      emit()
+
+      try {
+        const firstTranslation = translations[0]
+        if (firstTranslation) {
+          const verifyBuffer = await sharp(repBuffer)
+            .resize(600, 750, { fit: 'fill' })
+            .jpeg({ quality: 70 })
+            .toBuffer()
+          const verifyBase64 = await bufferToBase64DataUrl(verifyBuffer)
+          await verifyCreative(verifyBase64, firstTranslation.phrases.slice(0, 3).map((p: any) => ({ en: p.en, translated: p.translated })))
+        }
+      } catch (verifyErr) {
+        console.warn('Verification step failed (non-blocking):', verifyErr)
+      }
+
+      patchFolder(folder.id, { status: 'done' })
+      emit()
+
     } catch (err: any) {
-      console.error(`Job ${jobId} folder ${folder.name} failed:`, err)
-      updateFolder(jobId, folder.id, { status: 'error', error: err.message || 'Unknown error' })
+      console.error(`Folder ${folder.name} failed:`, err)
+      patchFolder(folder.id, { status: 'error', error: err.message || 'Unknown error' })
+      emit()
     }
   }
 
-  // Invalidate localization cache so the UI gets fresh data
   invalidateLocCache(appCode)
 
-  const anyError = job.folders.some(f => f.status === 'error')
-  job.status = anyError ? 'error' : 'done'
-  job.completedAt = new Date().toISOString()
+  const anyError = state.some(f => f.status === 'error')
+  emit(anyError ? 'error' : 'done')
 }

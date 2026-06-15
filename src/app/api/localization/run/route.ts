@@ -1,15 +1,15 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { jobs, runLocalizationJob } from '@/lib/localizationRunner'
-import type { JobState } from '@/lib/localizationRunner'
-import { randomUUID } from 'crypto'
+import { runLocalizationJob } from '@/lib/localizationRunner'
 
 export const maxDuration = 300
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions)
-  if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!session?.user) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })
+  }
 
   const body = await req.json()
   const { folders, languages, cp, appCode } = body as {
@@ -20,34 +20,36 @@ export async function POST(req: NextRequest) {
   }
 
   if (!folders?.length || !languages?.length || !cp || !appCode) {
-    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+    return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400 })
   }
 
-  const jobId = randomUUID()
+  const encoder = new TextEncoder()
 
-  const jobState: JobState = {
-    jobId,
-    status: 'running',
-    startedAt: new Date().toISOString(),
-    folders: folders.map(f => ({
-      folderId: f.id,
-      folderName: f.name,
-      status: 'pending',
-      completedLangs: [],
-    })),
-  }
+  const stream = new ReadableStream({
+    async start(controller) {
+      function send(data: object) {
+        try {
+          controller.enqueue(encoder.encode('data: ' + JSON.stringify(data) + '\n\n'))
+        } catch {
+          // client disconnected
+        }
+      }
 
-  jobs.set(jobId, jobState)
-
-  // Run in background (no await)
-  runLocalizationJob(jobId, folders, languages, cp, appCode).catch(err => {
-    console.error('Job crashed:', err)
-    const job = jobs.get(jobId)
-    if (job) {
-      job.status = 'error'
-      job.completedAt = new Date().toISOString()
-    }
+      try {
+        await runLocalizationJob(folders, languages, cp, appCode, send)
+      } catch (err: any) {
+        send({ status: 'error', folders: [], error: err.message })
+      } finally {
+        try { controller.close() } catch {}
+      }
+    },
   })
 
-  return NextResponse.json({ jobId })
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    },
+  })
 }
