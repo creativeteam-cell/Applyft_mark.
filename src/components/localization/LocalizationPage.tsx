@@ -190,7 +190,7 @@ export function LocalizationPage() {
               <button
                 key={lang.code}
                 onClick={() => toggleLang(lang.code)}
-                title={lang.label}
+                title={lang.name}
                 className="px-2.5 py-1 rounded-lg text-xs font-mono font-medium transition-all"
                 style={{
                   background: active ? 'rgba(99,102,241,0.18)' : 'var(--surface)',
