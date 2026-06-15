@@ -124,7 +124,7 @@ export function LocalizationPage() {
   }
 
   const q = search.trim()
-  const localFiltered = q ? folders.filter(f => f.name.includes(q)) : folders
+  const localFiltered = q ? folders.filter(f => f.name.includes(`_${q}_`)) : folders
   const localIds = new Set(localFiltered.map(f => f.id))
   const extraFromDrive = searchResults.filter(f => !localIds.has(f.id))
   const filtered = q ? [...localFiltered, ...extraFromDrive] : folders
