@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 
 interface App { code: string; name: string; active: boolean }
 interface Marketer { code: string; name: string }
@@ -13,11 +13,47 @@ interface LocalizationFolder {
   languages: string[]
 }
 
+type FolderStatus = 'pending' | 'analyzing' | 'translating' | 'uploading' | 'verifying' | 'done' | 'error'
 
-// Extracts the numeric part from folder name, e.g. "ST_S_052_a" → 52
+interface FolderProgress {
+  folderId: string
+  folderName: string
+  status: FolderStatus
+  error?: string
+  completedLangs?: string[]
+}
+
+interface JobState {
+  jobId: string
+  status: 'running' | 'done' | 'error'
+  folders: FolderProgress[]
+  startedAt: string
+  completedAt?: string
+}
+
 function folderNumber(name: string): number {
   const match = name.match(/(\d+)/)
   return match ? parseInt(match[1], 10) : 0
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  pending:     'Waiting',
+  analyzing:   'Analyzing',
+  translating: 'Translating',
+  uploading:   'Uploading',
+  verifying:   'Verifying',
+  done:        'Done',
+  error:       'Error',
+}
+
+const STATUS_COLOR: Record<string, string> = {
+  pending:     'var(--text-muted)',
+  analyzing:   '#f59e0b',
+  translating: '#6366f1',
+  uploading:   '#22c55e',
+  verifying:   '#06b6d4',
+  done:        '#22c55e',
+  error:       '#ef4444',
 }
 
 export function LocalizationPage() {
@@ -36,6 +72,11 @@ export function LocalizationPage() {
   const [searchLoading, setSearchLoading] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
+  // Job tracking
+  const [activeJob, setActiveJob] = useState<JobState | null>(null)
+  const [localizing, setLocalizing] = useState(false)
+  const pollRef = useRef<NodeJS.Timeout | null>(null)
+
   function toggleSelect(id: string) {
     setSelected(prev => {
       const next = new Set(prev)
@@ -44,7 +85,21 @@ export function LocalizationPage() {
     })
   }
 
-  // Load apps + marketers, restore selection from localStorage (synced with dashboard)
+  const fetchFolders = useCallback(() => {
+    if (!selectedApp) return
+    setLoading(true)
+    setError(null)
+    fetch(`/api/localization?app=${selectedApp}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) throw new Error(data.error)
+        setFolders(data.folders || [])
+      })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [selectedApp])
+
+  // Load apps + marketers
   useEffect(() => {
     fetch('/api/apps')
       .then(r => r.json())
@@ -71,24 +126,13 @@ export function LocalizationPage() {
       })
   }, [])
 
-  // Fetch all folders when app changes
+  // Fetch folders when app changes
   useEffect(() => {
-    if (!selectedApp) return
-    setLoading(true)
-    setError(null)
-    setFolders([])
+    fetchFolders()
     setSearchResults([])
-    fetch(`/api/localization?app=${selectedApp}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.error) throw new Error(data.error)
-        setFolders(data.folders || [])
-      })
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false))
-  }, [selectedApp])
+  }, [fetchFolders])
 
-  // Drive-wide search when query changes
+  // Drive-wide search
   useEffect(() => {
     const q = search.trim()
     if (!q || !selectedApp) { setSearchResults([]); return }
@@ -102,6 +146,45 @@ export function LocalizationPage() {
       .finally(() => setSearchLoading(false))
     return () => controller.abort()
   }, [search, selectedApp])
+
+  // Poll job status
+  useEffect(() => {
+    if (!activeJob || activeJob.status !== 'running') return
+
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/localization/status?jobId=${activeJob.jobId}`)
+        const data: JobState = await res.json()
+        setActiveJob(data)
+
+        if (data.status === 'done' || data.status === 'error') {
+          clearInterval(pollRef.current!)
+          setLocalizing(false)
+          setSelected(new Set())
+
+          // Refresh folder list to show new language badges
+          setTimeout(() => fetchFolders(), 1500)
+
+          // Browser notification
+          if (typeof window !== 'undefined' && 'Notification' in window) {
+            const doneCount = data.folders.filter(f => f.status === 'done').length
+            const errCount = data.folders.filter(f => f.status === 'error').length
+            const msg = data.status === 'done'
+              ? `✅ Localization done! ${doneCount} folder${doneCount !== 1 ? 's' : ''} processed.`
+              : `⚠️ Finished with ${errCount} error${errCount !== 1 ? 's' : ''}. ${doneCount} folder${doneCount !== 1 ? 's' : ''} ok.`
+
+            if (Notification.permission === 'granted') {
+              new Notification('Applyft Mark', { body: msg, icon: '/favicon.ico' })
+            }
+          }
+        }
+      } catch {
+        // polling failure — keep trying
+      }
+    }, 3000)
+
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [activeJob?.jobId, activeJob?.status, fetchFolders])
 
   function handleAppChange(code: string) {
     localStorage.setItem('cs_selected_app', code)
@@ -121,6 +204,50 @@ export function LocalizationPage() {
     })
   }
 
+  async function handleLocalize() {
+    if (selected.size === 0 || selectedLangs.size === 0 || !selectedMarketer) return
+
+    // Request notification permission if not yet granted
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+      await Notification.requestPermission()
+    }
+
+    const selectedFolders = filtered
+      .filter(f => selected.has(f.id))
+      .map(f => ({ id: f.id, name: f.name }))
+
+    setLocalizing(true)
+    try {
+      const res = await fetch('/api/localization/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          folders: selectedFolders,
+          languages: Array.from(selectedLangs),
+          cp: selectedMarketer,
+          appCode: selectedApp,
+        }),
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+
+      setActiveJob({
+        jobId: data.jobId,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+        folders: selectedFolders.map(f => ({
+          folderId: f.id,
+          folderName: f.name,
+          status: 'pending',
+          completedLangs: [],
+        })),
+      })
+    } catch (err: any) {
+      setLocalizing(false)
+      alert(`Failed to start: ${err.message}`)
+    }
+  }
+
   const q = search.trim()
   const qPadded = q.padStart(3, '0')
   const localFiltered = q ? folders.filter(f => f.name.includes(qPadded)) : folders
@@ -129,7 +256,8 @@ export function LocalizationPage() {
   const merged = q ? [...localFiltered, ...extraFromDrive] : folders
   const filtered = [...merged].sort((a, b) => folderNumber(b.name) - folderNumber(a.name))
 
-  const panelHeight = 104 // 56px header + ~104px panel (2 rows)
+  const canLocalize = selected.size > 0 && selectedLangs.size > 0 && !!selectedMarketer && !localizing
+  const panelHeight = 104
   const contentTop = 56 + panelHeight
 
   return (
@@ -139,7 +267,7 @@ export function LocalizationPage() {
         className="fixed left-0 right-0 z-40 border-b"
         style={{ top: 56, background: 'var(--bg)', borderColor: 'var(--border)' }}
       >
-        {/* Row 1: App / Search / Producer */}
+        {/* Row 1: App / Search / Producer / Job counter */}
         <div className="flex items-center gap-4 px-8 py-2.5">
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-500 uppercase tracking-widest font-mono">App</span>
@@ -189,6 +317,14 @@ export function LocalizationPage() {
               ))}
             </select>
           </div>
+
+          {/* Active job counter */}
+          {activeJob && activeJob.status === 'running' && (
+            <div className="ml-auto flex items-center gap-2 text-xs text-gray-400 font-mono">
+              <span className="animate-spin">⟳</span>
+              {activeJob.folders.filter(f => f.status === 'done').length}/{activeJob.folders.length} done
+            </div>
+          )}
         </div>
 
         {/* Row 2: Language chips + Localize button */}
@@ -213,11 +349,23 @@ export function LocalizationPage() {
           })}
 
           <button
-            disabled
-            className="ml-auto px-5 py-1.5 rounded-xl text-sm font-semibold opacity-30 cursor-not-allowed"
-            style={{ background: 'var(--accent)', color: '#fff' }}
+            onClick={handleLocalize}
+            disabled={!canLocalize}
+            className="ml-auto px-5 py-1.5 rounded-xl text-sm font-semibold transition-all"
+            style={{
+              background: 'var(--accent)',
+              color: '#fff',
+              opacity: canLocalize ? 1 : 0.3,
+              cursor: canLocalize ? 'pointer' : 'not-allowed',
+            }}
           >
-            ✦ Localize
+            {localizing ? (
+              <span className="flex items-center gap-2">
+                <span className="animate-spin">⟳</span> Localizing...
+              </span>
+            ) : (
+              `✦ Localize${selected.size > 0 ? ` (${selected.size})` : ''}`
+            )}
           </button>
         </div>
       </div>
@@ -241,14 +389,18 @@ export function LocalizationPage() {
           </div>
         ) : (
           <div className="space-y-2">
-            {filtered.map(folder => (
-              <FolderRow
-                key={folder.id}
-                folder={folder}
-                checked={selected.has(folder.id)}
-                onToggle={() => toggleSelect(folder.id)}
-              />
-            ))}
+            {filtered.map(folder => {
+              const progress = activeJob?.folders.find(f => f.folderId === folder.id)
+              return (
+                <FolderRow
+                  key={folder.id}
+                  folder={folder}
+                  checked={selected.has(folder.id)}
+                  onToggle={() => toggleSelect(folder.id)}
+                  progress={progress}
+                />
+              )
+            })}
           </div>
         )}
       </div>
@@ -256,9 +408,8 @@ export function LocalizationPage() {
   )
 }
 
-function Checkbox({ checked, indeterminate, onChange }: {
+function Checkbox({ checked, onChange }: {
   checked: boolean
-  indeterminate?: boolean
   onChange: () => void
 }) {
   return (
@@ -266,27 +417,24 @@ function Checkbox({ checked, indeterminate, onChange }: {
       onClick={onChange}
       className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0 transition-all"
       style={{
-        background: checked || indeterminate ? 'var(--accent)' : 'transparent',
-        border: `1.5px solid ${checked || indeterminate ? 'var(--accent)' : 'var(--border)'}`,
+        background: checked ? 'var(--accent)' : 'transparent',
+        border: `1.5px solid ${checked ? 'var(--accent)' : 'var(--border)'}`,
       }}
     >
-      {indeterminate && !checked ? (
-        <svg width="8" height="2" viewBox="0 0 8 2" fill="none">
-          <rect x="0" y="0.5" width="8" height="1" rx="0.5" fill="white"/>
-        </svg>
-      ) : checked ? (
+      {checked && (
         <svg width="8" height="6" viewBox="0 0 8 6" fill="none">
           <path d="M1 3l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
-      ) : null}
+      )}
     </button>
   )
 }
 
-function FolderRow({ folder, checked, onToggle }: {
+function FolderRow({ folder, checked, onToggle, progress }: {
   folder: LocalizationFolder
   checked: boolean
   onToggle: () => void
+  progress?: FolderProgress
 }) {
   const [hovered, setHovered] = useState(false)
   const [fileId, setFileId] = useState<string | null | 'loading' | 'none'>('loading')
@@ -303,6 +451,9 @@ function FolderRow({ folder, checked, onToggle }: {
     }
   }
 
+  const isActive = progress && progress.status !== 'pending'
+  const spinning = progress && ['analyzing', 'translating', 'uploading', 'verifying'].includes(progress.status)
+
   return (
     <div
       className="relative flex items-center gap-3 px-5 py-3 rounded-xl"
@@ -315,7 +466,6 @@ function FolderRow({ folder, checked, onToggle }: {
     >
       <Checkbox checked={checked} onChange={onToggle} />
 
-      {/* Folder name — link to Drive */}
       <a
         href={folder.driveUrl}
         target="_blank"
@@ -325,6 +475,33 @@ function FolderRow({ folder, checked, onToggle }: {
       >
         {folder.name}
       </a>
+
+      {/* Progress status badge */}
+      {isActive && (
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {spinning && (
+            <span className="animate-spin text-xs" style={{ color: STATUS_COLOR[progress!.status] }}>⟳</span>
+          )}
+          <span
+            className="text-xs font-mono px-2 py-0.5 rounded-md"
+            style={{
+              color: STATUS_COLOR[progress!.status] || 'var(--text-muted)',
+              background: `${STATUS_COLOR[progress!.status] || 'var(--text-muted)'}22`,
+              border: `1px solid ${STATUS_COLOR[progress!.status] || 'var(--border)'}44`,
+            }}
+          >
+            {STATUS_LABEL[progress!.status] || progress!.status}
+          </span>
+          {progress!.completedLangs && progress!.completedLangs.length > 0 && (
+            <span className="text-xs text-gray-500 font-mono">
+              {progress!.completedLangs.join(' ')}
+            </span>
+          )}
+          {progress!.status === 'error' && progress!.error && (
+            <span className="text-xs text-red-400 cursor-help" title={progress!.error}>⚠</span>
+          )}
+        </div>
+      )}
 
       {/* Existing language badges */}
       <div className="flex-1 flex items-center gap-1.5 flex-wrap justify-end">

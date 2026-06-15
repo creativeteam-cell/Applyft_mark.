@@ -243,3 +243,8 @@ export async function getLocalizationFoldersForApp(appCode: string): Promise<Loc
   locCache.set(appCode, { data: result, expiresAt: Date.now() + LOC_CACHE_TTL })
   return result
 }
+
+export function invalidateLocCache(appCode?: string) {
+  if (appCode) locCache.delete(appCode)
+  else locCache.clear()
+}
