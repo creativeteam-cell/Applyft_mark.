@@ -60,7 +60,7 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [expandedApp, setExpandedApp] = useState<string | null>(null)
-  const [appsOpen, setAppsOpen] = useState(true)
+  const [appsOpen, setAppsOpen] = useState(false)
   const [producersOpen, setProducersOpen] = useState(false)
   const [languagesOpen, setLanguagesOpen] = useState(false)
 

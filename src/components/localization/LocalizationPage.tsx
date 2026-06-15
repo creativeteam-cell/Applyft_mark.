@@ -34,6 +34,15 @@ export function LocalizationPage() {
   const [error, setError] = useState<string | null>(null)
   const [searchResults, setSearchResults] = useState<LocalizationFolder[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+
+  function toggleSelect(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
 
   // Load apps + marketers, restore selection from localStorage (synced with dashboard)
   useEffect(() => {
@@ -233,7 +242,12 @@ export function LocalizationPage() {
         ) : (
           <div className="space-y-2">
             {filtered.map(folder => (
-              <FolderRow key={folder.id} folder={folder} />
+              <FolderRow
+                key={folder.id}
+                folder={folder}
+                checked={selected.has(folder.id)}
+                onToggle={() => toggleSelect(folder.id)}
+              />
             ))}
           </div>
         )}
@@ -242,7 +256,38 @@ export function LocalizationPage() {
   )
 }
 
-function FolderRow({ folder }: { folder: LocalizationFolder }) {
+function Checkbox({ checked, indeterminate, onChange }: {
+  checked: boolean
+  indeterminate?: boolean
+  onChange: () => void
+}) {
+  return (
+    <button
+      onClick={onChange}
+      className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0 transition-all"
+      style={{
+        background: checked || indeterminate ? 'var(--accent)' : 'transparent',
+        border: `1.5px solid ${checked || indeterminate ? 'var(--accent)' : 'var(--border)'}`,
+      }}
+    >
+      {indeterminate && !checked ? (
+        <svg width="8" height="2" viewBox="0 0 8 2" fill="none">
+          <rect x="0" y="0.5" width="8" height="1" rx="0.5" fill="white"/>
+        </svg>
+      ) : checked ? (
+        <svg width="8" height="6" viewBox="0 0 8 6" fill="none">
+          <path d="M1 3l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      ) : null}
+    </button>
+  )
+}
+
+function FolderRow({ folder, checked, onToggle }: {
+  folder: LocalizationFolder
+  checked: boolean
+  onToggle: () => void
+}) {
   const [hovered, setHovered] = useState(false)
   const [fileId, setFileId] = useState<string | null | 'loading' | 'none'>('loading')
   const fetchedRef = useRef(false)
@@ -260,11 +305,16 @@ function FolderRow({ folder }: { folder: LocalizationFolder }) {
 
   return (
     <div
-      className="relative flex items-center justify-between px-5 py-3 rounded-xl"
-      style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+      className="relative flex items-center gap-3 px-5 py-3 rounded-xl"
+      style={{
+        background: checked ? 'rgba(99,102,241,0.07)' : 'var(--surface)',
+        border: `1px solid ${checked ? 'rgba(99,102,241,0.35)' : 'var(--border)'}`,
+      }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={() => setHovered(false)}
     >
+      <Checkbox checked={checked} onChange={onToggle} />
+
       {/* Folder name — link to Drive */}
       <a
         href={folder.driveUrl}
@@ -277,7 +327,7 @@ function FolderRow({ folder }: { folder: LocalizationFolder }) {
       </a>
 
       {/* Existing language badges */}
-      <div className="flex items-center gap-1.5 flex-wrap justify-end">
+      <div className="flex-1 flex items-center gap-1.5 flex-wrap justify-end">
         {folder.languages.length === 0 ? (
           <span className="text-xs text-gray-600 font-mono">—</span>
         ) : (
