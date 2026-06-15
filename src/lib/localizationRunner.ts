@@ -78,7 +78,7 @@ async function uploadToDrive(buffer: Buffer, mimeType: string, name: string, par
   // Fix: raw multipart upload via fetch with supportsAllDrives=true explicitly in the URL.
   const auth = getAuthClient()
   const tokenRes = await auth.getAccessToken()
-  const accessToken = tokenRes.token
+  const accessToken = tokenRes?.token
   if (!accessToken) throw new Error('Failed to get access token')
 
   const boundary = 'locboundary314159265'
