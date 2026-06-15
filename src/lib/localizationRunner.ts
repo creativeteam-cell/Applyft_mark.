@@ -1,4 +1,4 @@
-import OpenAI, { toFile } from 'openai'
+import OpenAI from 'openai'
 import sharp from 'sharp'
 import { getDriveClient, invalidateLocCache } from './googleDrive'
 
@@ -27,54 +27,92 @@ async function resizeToTarget(buffer: Buffer, width: number, height: number): Pr
     .toBuffer()
 }
 
-// --- OpenAI image editing localization ---
+// --- Gemini two-pass localization ---
 
-async function localizeImageWithOpenAI(
+async function geminiRequest(parts: any[], mimeType: string): Promise<Buffer> {
+  const apiKey = process.env.GOOGLE_AI_API_KEY
+  if (!apiKey) throw new Error('GOOGLE_AI_API_KEY not set')
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: { responseModalities: ['IMAGE'] },
+      }),
+    }
+  )
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText)
+    throw new Error(`Gemini ${res.status}: ${text}`)
+  }
+  const json = await res.json()
+  const data = json?.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData)?.inlineData?.data
+  if (!data) {
+    const reason = json?.candidates?.[0]?.finishReason || 'unknown'
+    throw new Error(`Gemini returned no image (finishReason: ${reason})`)
+  }
+  return Buffer.from(data, 'base64')
+}
+
+// Pass 1: erase all text from image
+async function eraseText(imgBuffer: Buffer, mimeType: string): Promise<Buffer> {
+  return geminiRequest([
+    {
+      text: `Remove ALL visible text from this image. Fill each text area with the natural background behind it (color, texture, pattern). Do NOT add anything new. Do NOT change any non-text element — preserve all people, objects, colors, layout exactly. Return the image with zero text.`,
+    },
+    { inline_data: { mime_type: mimeType, data: imgBuffer.toString('base64') } },
+  ], mimeType)
+}
+
+// Pass 2: draw translations onto clean image, using original as position reference
+async function addTranslations(
+  originalBuffer: Buffer,
+  cleanBuffer: Buffer,
+  mimeType: string,
+  language: string,
+  phrases: { en: string; translated: string; role?: string }[],
+): Promise<Buffer> {
+  const translationsText = phrases
+    .map(p => `"${p.en}"${p.role ? ` [${p.role}]` : ''} → "${p.translated}"`)
+    .join('\n')
+
+  return geminiRequest([
+    {
+      text: `You have two images:
+IMAGE 1 = original image with English text (use as position/style reference only)
+IMAGE 2 = same image with all text erased (this is your canvas to draw on)
+
+Your task: draw the translated text onto IMAGE 2, placing each translation in the same position and same visual style as its English original in IMAGE 1.
+
+TARGET LANGUAGE: ${language}
+${language === 'AR' || language === 'HE' ? '⚠️ Use right-to-left text direction.' : ''}
+
+TRANSLATIONS (English original → ${language} translation):
+${translationsText}
+
+RULES:
+- Draw on IMAGE 2 only — do not modify IMAGE 1
+- Match position, alignment, font size, color, and weight from IMAGE 1
+- Do NOT add any extra elements, people, or decorations
+- Do NOT leave any English text on the result
+- Output only the final IMAGE 2 with translations applied`,
+    },
+    { inline_data: { mime_type: mimeType, data: originalBuffer.toString('base64') } },
+    { inline_data: { mime_type: mimeType, data: cleanBuffer.toString('base64') } },
+  ], mimeType)
+}
+
+async function localizeImage(
   imgBuffer: Buffer,
   mimeType: string,
   language: string,
-  phrases: { en: string; translated: string }[],
+  phrases: { en: string; translated: string; role?: string }[],
 ): Promise<Buffer> {
-  const translationsText = phrases.map(p => `"${p.en}" → "${p.translated}"`).join('\n')
-
-  const prompt = `You are editing an advertising image. Your ONLY task: replace the listed text with translations. Do NOT change anything else.
-
-CRITICAL RULES:
-- Do NOT add any people, faces, bodies, or figures that are not already in the image
-- Do NOT add any new objects, decorations, backgrounds, or visual elements
-- Do NOT remove or modify any existing visual elements
-- Keep the background EXACTLY as it is — if it is plain white, it must remain plain white
-- If the original has no people, the result must have no people
-- Only modify the specific text areas listed below
-
-For each text replacement:
-1. Erase the original text completely (no ghost letters, no remnants)
-2. Render the translation in the same position, same font style, same size, same color
-
-TARGET LANGUAGE: ${language}
-${language === 'AR' || language === 'HE' ? '⚠️ Text direction: right-to-left.' : ''}
-
-TEXT REPLACEMENTS (original → translation):
-${translationsText}
-
-- Replace EVERY occurrence of each listed text
-- Zero original-language letters may remain in replaced areas
-- Do NOT translate anything not listed above`
-
-  const ext = mimeType === 'image/png' ? 'image.png' : 'image.jpg'
-  const imageFile = await toFile(imgBuffer, ext, { type: mimeType })
-
-  const response = await openai.images.edit({
-    model: 'gpt-image-1',
-    image: imageFile,
-    prompt,
-    size: 'auto',
-  } as any)
-
-  const b64 = response.data?.[0]?.b64_json
-  if (!b64) throw new Error('gpt-image-1 returned no image data')
-
-  return Buffer.from(b64, 'base64')
+  const cleanBuffer = await eraseText(imgBuffer, mimeType)
+  return addTranslations(imgBuffer, cleanBuffer, mimeType, language, phrases)
 }
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -593,7 +631,15 @@ export async function runLocalizationJob(
 
         const langFolderId = await createDriveFolder(lang, folder.id)
 
-        const langPhrases = translation.phrases.map((p: any) => ({ en: p.en, translated: p.translated }))
+        const analysisTexts: Record<string, string> = {}
+        for (const t of (analysis?.texts || [])) {
+          analysisTexts[t.text] = t.role_in_composition || t.type || ''
+        }
+        const langPhrases = translation.phrases.map((p: any) => ({
+          en: p.en,
+          translated: p.translated,
+          role: analysisTexts[p.en] || '',
+        }))
 
         let uploaded = 0
         let failed = 0
@@ -606,25 +652,9 @@ export async function runLocalizationJob(
 
             let finalBuffer = imgBuffer
             try {
-              finalBuffer = await localizeImageWithOpenAI(imgBuffer, mime, lang, langPhrases)
-
-              // QA review — if fail, retry once
-              try {
-                const localizedDataUrl = `data:${mime};base64,${finalBuffer.toString('base64')}`
-                const qa = await reviewLocalizedImage(localizedDataUrl, lang, langPhrases)
-                if (qa.status === 'fail') {
-                  console.warn(`[loc] QA fail ${img.name}, retrying:`, qa.fix_prompt)
-                  try {
-                    finalBuffer = await localizeImageWithOpenAI(finalBuffer, mime, lang, langPhrases)
-                  } catch (retryErr: any) {
-                    console.warn(`[loc] OpenAI retry failed for ${img.name}:`, retryErr.message)
-                  }
-                }
-              } catch (reviewErr) {
-                console.warn(`[loc] Review failed:`, reviewErr)
-              }
-            } catch (openaiErr: any) {
-              console.warn(`[loc] gpt-image-1 failed for ${img.name}, uploading original:`, openaiErr.message)
+              finalBuffer = await localizeImage(imgBuffer, mime, lang, langPhrases)
+            } catch (locErr: any) {
+              console.warn(`[loc] Localization failed for ${img.name}, uploading original:`, locErr.message)
             }
 
             // Resize to correct dimensions
