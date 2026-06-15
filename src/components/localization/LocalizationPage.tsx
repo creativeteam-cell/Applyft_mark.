@@ -103,7 +103,8 @@ export function LocalizationPage() {
     if (!q || !selectedApp) { setSearchResults([]); return }
     const controller = new AbortController()
     setSearchLoading(true)
-    fetch(`/api/localization/search?app=${selectedApp}&q=${q}`, { signal: controller.signal })
+    const qPad = q.padStart(3, '0')
+    fetch(`/api/localization/search?app=${selectedApp}&q=${qPad}`, { signal: controller.signal })
       .then(r => r.json())
       .then(data => { if (!data.error) setSearchResults(data.folders || []) })
       .catch(() => {})
@@ -130,7 +131,8 @@ export function LocalizationPage() {
   }
 
   const q = search.trim()
-  const localFiltered = q ? folders.filter(f => f.name.includes(`_${q}_`)) : folders
+  const qPadded = q.padStart(3, '0')
+  const localFiltered = q ? folders.filter(f => f.name.includes(`_${qPadded}_`)) : folders
   const localIds = new Set(localFiltered.map(f => f.id))
   const extraFromDrive = searchResults.filter(f => !localIds.has(f.id))
   const merged = q ? [...localFiltered, ...extraFromDrive] : folders
@@ -238,7 +240,11 @@ export function LocalizationPage() {
             <span className="animate-spin text-xl">⟳</span>
             Loading folders...
           </div>
-        ) : filtered.length === 0 && !loading ? (
+        ) : filtered.length === 0 && searchLoading ? (
+          <div className="flex items-center justify-center py-32 text-gray-500 gap-2">
+            <span className="animate-spin">⟳</span> Searching Drive...
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="flex items-center justify-center py-32 text-gray-500 text-sm">
             {q ? `No folders matching "${q}"` : `No folders found for ${selectedApp}`}
           </div>
