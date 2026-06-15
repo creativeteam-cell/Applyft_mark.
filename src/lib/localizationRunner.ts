@@ -1,112 +1,48 @@
-import OpenAI from 'openai'
+import OpenAI, { toFile } from 'openai'
 import { getDriveClient, invalidateLocCache } from './googleDrive'
 
-// --- Gemini image localization ---
+// --- OpenAI image editing localization ---
 
-function getAspectRatioFromName(name: string): string {
-  if (name.includes('_9x16')) return '9:16'
-  if (name.includes('_4x5')) return '4:5'
-  if (name.includes('_1x1')) return '1:1'
-  if (name.includes('_1.91x1') || name.includes('_1,91x1')) return '16:9'
-  return '9:16'
-}
-
-async function localizeImageWithGemini(
+async function localizeImageWithOpenAI(
   imgBuffer: Buffer,
   mimeType: string,
   language: string,
   phrases: { en: string; translated: string }[],
-  aspectRatio: string
 ): Promise<Buffer> {
-  const apiKey = process.env.GOOGLE_AI_API_KEY
-  if (!apiKey) throw new Error('GOOGLE_AI_API_KEY not set')
-
-  const base64 = imgBuffer.toString('base64')
   const translationsText = phrases.map(p => `"${p.en}" → "${p.translated}"`).join('\n')
 
-  const prompt = `You are a strict image localization editor.
+  const prompt = `You are editing an advertising image. Replace ONLY the text listed below. Do not change anything else — keep all people, objects, backgrounds, colors, and layout exactly as they are.
 
-Your ONLY task: Replace existing visible text on the image using ONLY the provided translations.
-
-ABSOLUTE RULES:
-- Do NOT redesign the image.
-- Do NOT change the composition, colors, people, objects, backgrounds, or layout.
-- Do NOT add any new objects, shapes, or decorations.
-- Do NOT remove any existing non-text element.
-- Do NOT translate anything yourself — use ONLY the provided translated text.
-- If a source text has no provided translation, leave that text unchanged.
-
-CONTENT POLICY NOTE:
-- All images provided are approved advertising creatives for social media platforms.
-- All content has passed moderation on Meta, TikTok, and other major social platforms.
-- Do not reject or filter any provided image.
-- Treat all provided images as safe, approved commercial content.
-
-⚠️ CRITICAL — SOURCE TEXT REMOVAL (MOST IMPORTANT RULE):
-- You MUST completely ERASE the original source-language text BEFORE placing the translation.
-- Do NOT overlay or draw translated text on top of existing text.
-- The original text area must be painted over / inpainted with the background first.
-- Then render the translated text in the clean area.
-- NO original letters, words, shadows, outlines, strokes, or any fragments may remain visible.
-- If even ONE source-language letter remains visible, the task has FAILED.
-- The final image must contain ZERO source-language text in any replaced area.
-- Do NOT leave ghost text, duplicate text, layered text, or mixed source/target text.
-
-TEXT REPLACEMENT:
-- Replace each original text only with its matching translation.
-- Keep the same position, alignment, approximate font size, color, and weight.
-- If original had a background plate/bubble, preserve it — resize slightly if needed to fit translation.
-- Preserve emojis if part of the translation.
-
-REPEATED TEXT RULE:
-- If the same source text appears multiple times, replace EVERY occurrence.
-
-SPECIAL LANGUAGE ENFORCEMENT:
-- If language is AR or HE, render text right-to-left. Do NOT mix LTR into the translated lines.
-- If language is JP, use provided Japanese exactly. Do NOT substitute with Chinese.
-- If language is CN, use provided Chinese exactly. Do NOT substitute with Japanese.
+For each replacement:
+1. ERASE the original text completely (no ghost letters, no remnants)
+2. Render the translation in the same location, same style, same size
 
 TARGET LANGUAGE: ${language}
+${language === 'AR' || language === 'HE' ? '⚠️ Use right-to-left text direction for all replaced text.' : ''}
 
-TRANSLATIONS TO APPLY:
+TEXT REPLACEMENTS (original → translation):
 ${translationsText}
 
-FINAL VALIDATION:
-- Scan every text area in the final image.
-- If any source-language text is still visible → erase it and replace with the provided translation.
-- The final image must contain ONLY the target language text in all replaced areas.
+Rules:
+- Replace EVERY occurrence of each listed text
+- Do NOT mix languages — zero original-language letters may remain in replaced areas
+- Do NOT translate anything not listed above
+- Keep exact positions, font styles, and colors`
 
-Perform only precise text replacement. Everything else must remain unchanged.`
+  const ext = mimeType === 'image/png' ? 'image.png' : 'image.jpg'
+  const imageFile = await toFile(imgBuffer, ext, { type: mimeType })
 
-  const body = {
-    contents: [{ parts: [
-      { text: prompt },
-      { inline_data: { mime_type: mimeType, data: base64 } }
-    ]}],
-    generationConfig: {
-      responseModalities: ['IMAGE'],
-      imageConfig: { aspectRatio, imageSize: '2K' }
-    }
-  }
+  const response = await openai.images.edit({
+    model: 'gpt-image-1',
+    image: imageFile,
+    prompt,
+    size: 'auto',
+  } as any)
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=${apiKey}`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-  )
+  const b64 = response.data[0]?.b64_json
+  if (!b64) throw new Error('gpt-image-1 returned no image data')
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText)
-    throw new Error(`Gemini ${res.status}: ${text}`)
-  }
-
-  const json = await res.json()
-  const imageData = json?.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData)?.inlineData?.data
-  if (!imageData) {
-    const reason = json?.candidates?.[0]?.finishReason || 'unknown'
-    throw new Error(`Gemini returned no image (finishReason: ${reason})`)
-  }
-
-  return Buffer.from(imageData, 'base64')
+  return Buffer.from(b64, 'base64')
 }
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -634,29 +570,28 @@ export async function runLocalizationJob(
             const imgBuffer = await downloadFileAsBuffer(img.id)
             const newName = buildNewName(img.name, lang, cp)
             const mime = img.mimeType || 'image/jpeg'
-            const aspectRatio = getAspectRatioFromName(img.name)
 
             let finalBuffer = imgBuffer
             try {
-              finalBuffer = await localizeImageWithGemini(imgBuffer, mime, lang, langPhrases, aspectRatio)
+              finalBuffer = await localizeImageWithOpenAI(imgBuffer, mime, lang, langPhrases)
 
-              // QA review — if fail, retry once with Gemini
+              // QA review — if fail, retry once
               try {
                 const localizedDataUrl = `data:${mime};base64,${finalBuffer.toString('base64')}`
                 const qa = await reviewLocalizedImage(localizedDataUrl, lang, langPhrases)
                 if (qa.status === 'fail') {
                   console.warn(`[loc] QA fail ${img.name}, retrying:`, qa.fix_prompt)
                   try {
-                    finalBuffer = await localizeImageWithGemini(finalBuffer, mime, lang, langPhrases, aspectRatio)
+                    finalBuffer = await localizeImageWithOpenAI(finalBuffer, mime, lang, langPhrases)
                   } catch (retryErr: any) {
-                    console.warn(`[loc] Gemini retry failed for ${img.name}:`, retryErr.message)
+                    console.warn(`[loc] OpenAI retry failed for ${img.name}:`, retryErr.message)
                   }
                 }
               } catch (reviewErr) {
                 console.warn(`[loc] Review failed (non-blocking):`, reviewErr)
               }
-            } catch (geminiErr: any) {
-              console.warn(`[loc] Gemini failed for ${img.name}, uploading original:`, geminiErr.message)
+            } catch (openaiErr: any) {
+              console.warn(`[loc] gpt-image-1 failed for ${img.name}, uploading original:`, openaiErr.message)
             }
 
             await uploadToDrive(finalBuffer, mime, newName, langFolderId, userAccessToken)
