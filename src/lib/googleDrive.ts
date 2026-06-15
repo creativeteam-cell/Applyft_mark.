@@ -187,7 +187,13 @@ export interface LocalizationFolder {
   languages: string[]
 }
 
+const locCache = new Map<string, { data: LocalizationFolder[]; expiresAt: number }>()
+const LOC_CACHE_TTL = 10 * 60 * 1000
+
 export async function getLocalizationFoldersForApp(appCode: string): Promise<LocalizationFolder[]> {
+  const cached = locCache.get(appCode)
+  if (cached && cached.expiresAt > Date.now()) return cached.data
+
   const appFolder = await findAppFolder(appCode)
   if (!appFolder?.id) return []
 
@@ -218,9 +224,12 @@ export async function getLocalizationFoldersForApp(appCode: string): Promise<Loc
     })
   )
 
-  return nested
+  const result = nested
     .flat()
     .filter((f): f is LocalizationFolder & { createdTime: string } => f !== null)
     .sort((a, b) => b.createdTime.localeCompare(a.createdTime))
     .map(({ createdTime: _ct, ...rest }) => rest)
+
+  locCache.set(appCode, { data: result, expiresAt: Date.now() + LOC_CACHE_TTL })
+  return result
 }

@@ -45,6 +45,8 @@ export function LocalizationPage() {
   const [folders, setFolders] = useState<LocalizationFolder[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [searchResults, setSearchResults] = useState<LocalizationFolder[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
 
   // Load apps + marketers, restore selection from localStorage (synced with dashboard)
   useEffect(() => {
@@ -72,12 +74,13 @@ export function LocalizationPage() {
       })
   }, [])
 
-  // Fetch folders when app changes
+  // Fetch all folders when app changes
   useEffect(() => {
     if (!selectedApp) return
     setLoading(true)
     setError(null)
     setFolders([])
+    setSearchResults([])
     fetch(`/api/localization?app=${selectedApp}`)
       .then(r => r.json())
       .then(data => {
@@ -87,6 +90,20 @@ export function LocalizationPage() {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [selectedApp])
+
+  // Drive-wide search when query changes
+  useEffect(() => {
+    const q = search.trim()
+    if (!q || !selectedApp) { setSearchResults([]); return }
+    const controller = new AbortController()
+    setSearchLoading(true)
+    fetch(`/api/localization/search?app=${selectedApp}&q=${q}`, { signal: controller.signal })
+      .then(r => r.json())
+      .then(data => { if (!data.error) setSearchResults(data.folders || []) })
+      .catch(() => {})
+      .finally(() => setSearchLoading(false))
+    return () => controller.abort()
+  }, [search, selectedApp])
 
   function handleAppChange(code: string) {
     localStorage.setItem('cs_selected_app', code)
@@ -107,7 +124,10 @@ export function LocalizationPage() {
   }
 
   const q = search.trim()
-  const filtered = q ? folders.filter(f => f.name.includes(q)) : folders
+  const localFiltered = q ? folders.filter(f => f.name.includes(q)) : folders
+  const localIds = new Set(localFiltered.map(f => f.id))
+  const extraFromDrive = searchResults.filter(f => !localIds.has(f.id))
+  const filtered = q ? [...localFiltered, ...extraFromDrive] : folders
 
   const panelHeight = 104 // 56px header + ~104px panel (2 rows)
   const contentTop = 56 + panelHeight
@@ -137,18 +157,23 @@ export function LocalizationPage() {
 
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-500 uppercase tracking-widest font-mono">№</span>
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value.replace(/\D/g, '').slice(0, 3))}
-              placeholder="001"
-              maxLength={3}
-              className="w-16 px-2 py-1.5 rounded-lg text-xs font-mono text-center outline-none"
-              style={{
-                background: 'var(--surface)',
-                border: `1px solid ${search ? 'var(--accent)' : 'var(--border)'}`,
-                color: 'var(--text)',
-              }}
-            />
+            <div className="relative">
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                placeholder="001"
+                maxLength={3}
+                className="w-16 px-2 py-1.5 rounded-lg text-xs font-mono text-center outline-none"
+                style={{
+                  background: 'var(--surface)',
+                  border: `1px solid ${search ? 'var(--accent)' : 'var(--border)'}`,
+                  color: 'var(--text)',
+                }}
+              />
+              {searchLoading && (
+                <span className="absolute -right-4 top-1/2 -translate-y-1/2 text-gray-500 animate-spin text-xs">⟳</span>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
