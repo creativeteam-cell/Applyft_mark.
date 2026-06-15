@@ -1,6 +1,5 @@
 import OpenAI from 'openai'
-import { Readable } from 'stream'
-import { getAuthClient, getDriveClient, invalidateLocCache } from './googleDrive'
+import { getDriveClient, invalidateLocCache } from './googleDrive'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -73,14 +72,10 @@ async function createDriveFolder(name: string, parentId: string): Promise<string
 }
 
 async function uploadToDrive(buffer: Buffer, mimeType: string, name: string, parentId: string, userToken?: string): Promise<void> {
-  // Use user's OAuth token (from session) to upload — avoids service account quota issue.
-  // Fall back to service account token if user token not provided.
-  let accessToken: string | null = userToken || null
-  if (!accessToken) {
-    const auth = getAuthClient()
-    accessToken = await auth.getAccessToken()
-  }
-  if (!accessToken) throw new Error('Failed to get access token')
+  // Use user's OAuth token to upload — avoids service account storage quota issue.
+  // If user token is missing, throw explicitly (don't silently fall back to service account).
+  if (!userToken) throw new Error('No user OAuth token available — cannot upload to Drive')
+  const accessToken = userToken
 
   const boundary = 'locboundary314159265'
   const metadata = JSON.stringify({ name, parents: [parentId] })

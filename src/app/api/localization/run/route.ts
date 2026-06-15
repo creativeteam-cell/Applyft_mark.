@@ -23,7 +23,9 @@ export async function POST(req: NextRequest) {
     return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400 })
   }
 
+  // Same approach as drive/save/route.ts — read accessToken directly from session
   const userAccessToken = (session as any).accessToken as string | undefined
+
   const encoder = new TextEncoder()
 
   const stream = new ReadableStream({
