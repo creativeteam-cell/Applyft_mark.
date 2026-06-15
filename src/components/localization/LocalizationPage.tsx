@@ -34,6 +34,12 @@ const LANGUAGES = [
   { code: 'TW', label: 'Taiwan' },
 ]
 
+// Extracts the numeric part from folder name, e.g. "ST_S_052_a" → 52
+function folderNumber(name: string): number {
+  const match = name.match(/(\d+)/)
+  return match ? parseInt(match[1], 10) : 0
+}
+
 export function LocalizationPage() {
   const [apps, setApps] = useState<App[]>([])
   const [marketers, setMarketers] = useState<Marketer[]>([])
@@ -127,7 +133,8 @@ export function LocalizationPage() {
   const localFiltered = q ? folders.filter(f => f.name.includes(`_${q}_`)) : folders
   const localIds = new Set(localFiltered.map(f => f.id))
   const extraFromDrive = searchResults.filter(f => !localIds.has(f.id))
-  const filtered = q ? [...localFiltered, ...extraFromDrive] : folders
+  const merged = q ? [...localFiltered, ...extraFromDrive] : folders
+  const filtered = [...merged].sort((a, b) => folderNumber(b.name) - folderNumber(a.name))
 
   const panelHeight = 104 // 56px header + ~104px panel (2 rows)
   const contentTop = 56 + panelHeight
