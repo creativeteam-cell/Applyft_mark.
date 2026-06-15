@@ -4,7 +4,7 @@ import { getDriveClient, invalidateLocCache } from './googleDrive'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
-// ─── Size map ────────────────────────────────────────────────────────────────
+// --- Size map ---
 
 const SIZE_MAP: Record<string, { width: number; height: number }> = {
   '1.91x1': { width: 1200, height: 628 },
@@ -13,7 +13,7 @@ const SIZE_MAP: Record<string, { width: number; height: number }> = {
   '1x1':    { width: 1200, height: 1200 },
 }
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// --- Types ---
 
 export type FolderStatus =
   | 'pending'
@@ -37,7 +37,7 @@ export interface JobSnapshot {
   folders: FolderProgress[]
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// --- Helpers ---
 
 async function listSubfolders(folderId: string) {
   const drive = getDriveClient()
@@ -64,7 +64,7 @@ async function listImages(folderId: string) {
 async function downloadFileAsBuffer(fileId: string): Promise<Buffer> {
   const drive = getDriveClient()
   const res = await drive.files.get(
-    { fileId, alt: 'media', supportsAllDrives: true } as any,
+    { fileId, alt: 'media' } as any,
     { responseType: 'arraybuffer' }
   ) as any
   return Buffer.from(res.data)
@@ -98,7 +98,7 @@ function buildNewName(originalName: string, lang: string, cp: string): string {
   return cp ? `${base}_${cp}_${lang}${ext}` : `${base}_${lang}${ext}`
 }
 
-// ─── GPT Analyzer 1 ──────────────────────────────────────────────────────────
+// --- GPT Analyzer 1 ---
 
 async function analyzeImage(imageBase64DataUrl: string): Promise<any> {
   const response = await openai.chat.completions.create({
@@ -138,9 +138,9 @@ Output schema:
 
 Rules:
 - Include ALL visible text, even small UI labels
-- contact_name: if it's a real name keep as-is; if generic label (Mom, BFF, Husband) → translate
+- contact_name: if it is a real name keep as-is; if generic label (Mom, BFF, Husband) translate
 - Do NOT invent texts not visible in the image
-- timestamps, emojis → importance "low"
+- timestamps, emojis -> importance low
 - Response must start with { and end with }`,
       },
       {
@@ -161,7 +161,7 @@ Rules:
   return JSON.parse(clean.slice(start, end + 1))
 }
 
-// ─── GPT Translator ──────────────────────────────────────────────────────────
+// --- GPT Translator ---
 
 async function translateTexts(analysis: any, targetLanguages: string[]): Promise<any> {
   const LANG_MAP: Record<string, string> = {
@@ -188,14 +188,14 @@ Image analysis: ${JSON.stringify(analysis)}
 
 Rules:
 - Translate texts with importance high, medium, low
-- NEVER translate proper_nouns — keep them exactly as-is
+- NEVER translate proper_nouns -- keep them exactly as-is
 - contact_name: localize only generic labels (Mom, BFF, Husband), keep real names
 - Preserve emojis and timestamps unchanged
-- Match visual length as closely as possible (±20%)
+- Match visual length as closely as possible (+/-20%)
 - Use informal conversational tone (close friend style)
-- In languages with formal/informal forms → use informal
+- In languages with formal/informal forms use informal
 - Gender agreement: use context.speaker_gender and context.target_audience
-- Mood affects style: urgency→short direct; fear→tension; curiosity→teaser; etc.
+- Mood affects style: urgency->short direct; fear->tension; curiosity->teaser; etc.
 
 CRITICAL: translations array length MUST equal number of requested languages.
 Every requested language code MUST appear exactly once.
@@ -229,7 +229,7 @@ Response must start with { and end with }`,
   return JSON.parse(clean.slice(start, end + 1))
 }
 
-// ─── GPT Analyzer 2 — verify ─────────────────────────────────────────────────
+// --- GPT Analyzer 2 --- verify ---
 
 async function verifyCreative(imageBase64DataUrl: string, expectedPhrases: { en: string; translated: string }[]): Promise<{ ok: boolean; issues: string[] }> {
   if (expectedPhrases.length === 0) return { ok: true, issues: [] }
@@ -242,7 +242,7 @@ async function verifyCreative(imageBase64DataUrl: string, expectedPhrases: { en:
         content: `You are a quality control reviewer for localized ad creatives.
 Return ONLY valid raw JSON: { "ok": true|false, "issues": ["..."] }
 Check: Are translated texts visible? Any layout breaks or missing text?
-If all correct → ok: true, issues: []. Response must start with { and end with }`,
+If all correct -> ok: true, issues: []. Response must start with { and end with }`,
       },
       {
         role: 'user',
@@ -250,7 +250,7 @@ If all correct → ok: true, issues: []. Response must start with { and end with
           { type: 'image_url', image_url: { url: imageBase64DataUrl, detail: 'low' } },
           {
             type: 'text',
-            text: `Expected translated texts:\n${expectedPhrases.map(p => `- "${p.en}" → "${p.translated}"`).join('\n')}\n\nDoes this localized creative look correct?`,
+            text: `Expected translated texts:\n${expectedPhrases.map(p => `- "${p.en}" -> "${p.translated}"`).join('\n')}\n\nDoes this localized creative look correct?`,
           },
         ],
       },
@@ -267,7 +267,7 @@ If all correct → ok: true, issues: []. Response must start with { and end with
   }
 }
 
-// ─── Drive helpers ────────────────────────────────────────────────────────────
+// --- Drive helpers ---
 
 async function createDriveFolder(name: string, parentId: string): Promise<string> {
   const drive = getDriveClient()
@@ -279,18 +279,23 @@ async function createDriveFolder(name: string, parentId: string): Promise<string
   return res.data.id!
 }
 
+// FIX: Readable.from(buffer) iterates Buffer as individual bytes (numbers).
+// Instead, push the whole buffer as one chunk into a Readable stream.
 async function uploadToDrive(buffer: Buffer, mimeType: string, name: string, parentId: string): Promise<void> {
   const drive = getDriveClient()
   const { Readable } = await import('stream')
+  const bodyStream = new Readable({ read() {} })
+  bodyStream.push(buffer)
+  bodyStream.push(null)
   await drive.files.create({
     supportsAllDrives: true,
     requestBody: { name, parents: [parentId] },
-    media: { mimeType, body: Readable.from(buffer) },
+    media: { mimeType, body: bodyStream },
     fields: 'id',
   } as any)
 }
 
-// ─── Main runner — uses callback instead of global Map ───────────────────────
+// --- Main runner ---
 
 export async function runLocalizationJob(
   folders: { id: string; name: string }[],
@@ -300,7 +305,6 @@ export async function runLocalizationJob(
   onUpdate: (snapshot: JobSnapshot) => void,
 ): Promise<void> {
 
-  // Local mutable state
   const state: FolderProgress[] = folders.map(f => ({
     folderId: f.id,
     folderName: f.name,
@@ -321,7 +325,7 @@ export async function runLocalizationJob(
 
   for (const folder of folders) {
     try {
-      // ── Analyzing ──
+      // -- Analyzing --
       patchFolder(folder.id, { status: 'analyzing' })
       emit()
 
@@ -348,10 +352,11 @@ export async function runLocalizationJob(
       }
 
       const repBuffer = await downloadFileAsBuffer(representative.id)
-      const repBase64 = await bufferToBase64DataUrl(repBuffer)
+      const repMime = representative.name.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg'
+      const repBase64 = await bufferToBase64DataUrl(repBuffer, repMime)
       const analysis = await analyzeImage(repBase64)
 
-      // ── Translating ──
+      // -- Translating --
       patchFolder(folder.id, { status: 'translating' })
       emit()
 
@@ -359,7 +364,7 @@ export async function runLocalizationJob(
       const translations: { language: string; phrases: { id: string; en: string; translated: string; type: string }[] }[] =
         translationResult.translations || []
 
-      // ── Uploading ──
+      // -- Uploading --
       patchFolder(folder.id, { status: 'uploading' })
       emit()
 
@@ -369,6 +374,7 @@ export async function runLocalizationJob(
         const lang = translation.language
         const langFolderId = await createDriveFolder(lang, folder.id)
 
+        let uploadErrors = 0
         for (const img of allImages) {
           try {
             const imgBuffer = await downloadFileAsBuffer(img.id)
@@ -376,19 +382,29 @@ export async function runLocalizationJob(
             const dims = sizeKey ? SIZE_MAP[sizeKey] : null
 
             let finalBuffer: Buffer
+            let finalMime: string
             if (dims) {
               finalBuffer = await sharp(imgBuffer)
                 .resize(dims.width, dims.height, { fit: 'fill' })
                 .jpeg({ quality: 92 })
                 .toBuffer()
+              finalMime = 'image/jpeg'
+              const newName = buildNewName(img.name, lang, cp).replace(/\.[^.]+$/, '.jpg')
+              await uploadToDrive(finalBuffer, finalMime, newName, langFolderId)
             } else {
               finalBuffer = imgBuffer
+              finalMime = img.mimeType || 'image/jpeg'
+              const newName = buildNewName(img.name, lang, cp)
+              await uploadToDrive(finalBuffer, finalMime, newName, langFolderId)
             }
-
-            const newName = buildNewName(img.name, lang, cp)
-            await uploadToDrive(finalBuffer, 'image/jpeg', newName, langFolderId)
-          } catch (imgErr) {
-            console.error(`Failed to process image ${img.name} for lang ${lang}:`, imgErr)
+          } catch (imgErr: any) {
+            uploadErrors++
+            console.error(`Failed to process ${img.name} for ${lang}:`, imgErr?.message || imgErr)
+            // surface first error to UI
+            if (uploadErrors === 1) {
+              patchFolder(folder.id, { error: `Upload error (${lang}/${img.name}): ${imgErr?.message || String(imgErr)}` })
+              emit()
+            }
           }
         }
 
@@ -397,7 +413,7 @@ export async function runLocalizationJob(
         emit()
       }
 
-      // ── Verifying ──
+      // -- Verifying --
       patchFolder(folder.id, { status: 'verifying' })
       emit()
 
