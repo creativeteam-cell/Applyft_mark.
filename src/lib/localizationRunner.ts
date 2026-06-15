@@ -57,52 +57,33 @@ async function geminiRequest(parts: any[], mimeType: string): Promise<Buffer> {
   return Buffer.from(data, 'base64')
 }
 
-// Pass 1: erase all text from image
-async function eraseText(imgBuffer: Buffer, mimeType: string): Promise<Buffer> {
-  return geminiRequest([
-    {
-      text: `Remove ALL visible text from this image. Fill each text area with the natural background behind it (color, texture, pattern). Do NOT add anything new. Do NOT change any non-text element — preserve all people, objects, colors, layout exactly. Return the image with zero text.`,
-    },
-    { inline_data: { mime_type: mimeType, data: imgBuffer.toString('base64') } },
-  ], mimeType)
-}
-
-// Pass 2: draw translations onto clean image, using original as position reference
-async function addTranslations(
-  originalBuffer: Buffer,
-  cleanBuffer: Buffer,
-  mimeType: string,
+function buildGeminiPrompt(
   language: string,
   phrases: { en: string; translated: string; role?: string }[],
-): Promise<Buffer> {
+  fixPrompt?: string,
+): string {
   const translationsText = phrases
     .map(p => `"${p.en}"${p.role ? ` [${p.role}]` : ''} → "${p.translated}"`)
     .join('\n')
 
-  return geminiRequest([
-    {
-      text: `You have two images:
-IMAGE 1 = original image with English text (use as position/style reference only)
-IMAGE 2 = same image with all text erased (this is your canvas to draw on)
+  return `You are a strict image localization editor.
 
-Your task: draw the translated text onto IMAGE 2, placing each translation in the same position and same visual style as its English original in IMAGE 1.
-
-TARGET LANGUAGE: ${language}
-${language === 'AR' || language === 'HE' ? '⚠️ Use right-to-left text direction.' : ''}
-
-TRANSLATIONS (English original → ${language} translation):
-${translationsText}
+Your ONLY task: replace every listed English text with its translation. Do NOT change anything else.
 
 RULES:
-- Draw on IMAGE 2 only — do not modify IMAGE 1
-- Match position, alignment, font size, color, and weight from IMAGE 1
-- Do NOT add any extra elements, people, or decorations
-- Do NOT leave any English text on the result
-- Output only the final IMAGE 2 with translations applied`,
-    },
-    { inline_data: { mime_type: mimeType, data: originalBuffer.toString('base64') } },
-    { inline_data: { mime_type: mimeType, data: cleanBuffer.toString('base64') } },
-  ], mimeType)
+- Completely erase each original text before placing the translation (no ghost letters, no remnants)
+- Keep the same position, font size, color, weight, and alignment
+- Do NOT add people, objects, or decorations not already in the image
+- Do NOT modify background, colors, or layout
+- Replace EVERY occurrence of each listed text
+- Zero English letters may remain in replaced areas
+${language === 'AR' || language === 'HE' ? '- Use right-to-left text direction for all replaced text' : ''}
+
+TARGET LANGUAGE: ${language}
+
+TRANSLATIONS:
+${translationsText}
+${fixPrompt ? `\nPREVIOUS ATTEMPT HAD ISSUES — FIX THESE SPECIFICALLY:\n${fixPrompt}` : ''}`
 }
 
 async function localizeImage(
@@ -111,8 +92,27 @@ async function localizeImage(
   language: string,
   phrases: { en: string; translated: string; role?: string }[],
 ): Promise<Buffer> {
-  const cleanBuffer = await eraseText(imgBuffer, mimeType)
-  return addTranslations(imgBuffer, cleanBuffer, mimeType, language, phrases)
+  // Attempt 1
+  const prompt1 = buildGeminiPrompt(language, phrases)
+  const result1 = await geminiRequest([
+    { text: prompt1 },
+    { inline_data: { mime_type: mimeType, data: imgBuffer.toString('base64') } },
+  ], mimeType)
+
+  // GPT-4o review
+  const dataUrl = `data:${mimeType};base64,${result1.toString('base64')}`
+  const qa = await reviewLocalizedImage(dataUrl, language, phrases).catch(() => ({ status: 'ok' as const, fix_prompt: '' }))
+
+  if (qa.status === 'ok') return result1
+
+  console.warn(`[loc] QA fail, retrying with fix_prompt:`, qa.fix_prompt)
+
+  // Attempt 2 — retry Gemini with fix_prompt
+  const prompt2 = buildGeminiPrompt(language, phrases, qa.fix_prompt)
+  return geminiRequest([
+    { text: prompt2 },
+    { inline_data: { mime_type: mimeType, data: imgBuffer.toString('base64') } },
+  ], mimeType).catch(() => result1) // if retry fails, return attempt 1
 }
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
