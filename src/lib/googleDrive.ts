@@ -21,13 +21,23 @@ export function getDriveClient() {
 
 async function listFolders(folderId: string) {
   const drive = getDriveClient()
-  const res = await drive.files.list({
-    supportsAllDrives: true,
-    includeItemsFromAllDrives: true,
-    q: `'${folderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
-    fields: 'files(id, name, createdTime)',
-  })
-  return res.data.files || []
+  const allFiles: any[] = []
+  let pageToken: string | undefined
+
+  do {
+    const res: any = await drive.files.list({
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+      q: `'${folderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+      fields: 'nextPageToken, files(id, name, createdTime)',
+      pageSize: 1000,
+      ...(pageToken ? { pageToken } : {}),
+    })
+    allFiles.push(...(res.data.files || []))
+    pageToken = res.data.nextPageToken
+  } while (pageToken)
+
+  return allFiles
 }
 
 async function listFiles(folderId: string) {

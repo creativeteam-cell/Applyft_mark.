@@ -99,7 +99,7 @@ export function CreativesGrid({ appCode, page, onPageChange, refreshKey = 0 }: C
     }
     const controller = new AbortController()
     setSearchLoading(true)
-    fetch(`/api/creatives/search?app=${appCode}&q=${q}`, { signal: controller.signal })
+    fetch(`/api/creatives/search?app=${appCode}&q=${q.padStart(3, '0')}`, { signal: controller.signal })
       .then(r => r.json())
       .then(data => { if (!data.error) setSearchResults(data.creatives || []) })
       .catch(() => {})
@@ -113,7 +113,8 @@ export function CreativesGrid({ appCode, page, onPageChange, refreshKey = 0 }: C
 
   // Local filter (instant) + merge with Drive search results (deduped)
   const q = search.trim()
-  const localFiltered = q ? creatives.filter(c => c.variantFolder.includes(q)) : creatives
+  const qPadded = q.padStart(3, '0')
+  const localFiltered = q ? creatives.filter(c => c.variantFolder.includes(qPadded)) : creatives
   const localIds = new Set(localFiltered.map(c => c.id))
   const extraFromDrive = searchResults.filter(c => !localIds.has(c.id))
   const filtered = q ? [...localFiltered, ...extraFromDrive] : creatives

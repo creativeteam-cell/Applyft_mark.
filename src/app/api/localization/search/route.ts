@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   try {
     // Uses 10-min cache — no extra Drive calls when warm
     const all = await getLocalizationFoldersForApp(appCode)
-    const folders = all.filter(f => f.name.includes(`_${q}_`))
+    const folders = all.filter(f => f.name.includes(q))
     return NextResponse.json({ folders })
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })

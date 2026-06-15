@@ -132,7 +132,7 @@ export function LocalizationPage() {
 
   const q = search.trim()
   const qPadded = q.padStart(3, '0')
-  const localFiltered = q ? folders.filter(f => f.name.includes(`_${qPadded}_`)) : folders
+  const localFiltered = q ? folders.filter(f => f.name.includes(qPadded)) : folders
   const localIds = new Set(localFiltered.map(f => f.id))
   const extraFromDrive = searchResults.filter(f => !localIds.has(f.id))
   const merged = q ? [...localFiltered, ...extraFromDrive] : folders
