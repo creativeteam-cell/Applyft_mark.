@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 interface App { code: string; name: string; active: boolean }
 interface Marketer { code: string; name: string }
@@ -261,10 +261,27 @@ export function LocalizationPage() {
 }
 
 function FolderRow({ folder }: { folder: LocalizationFolder }) {
+  const [hovered, setHovered] = useState(false)
+  const [fileId, setFileId] = useState<string | null | 'loading' | 'none'>('loading')
+  const fetchedRef = useRef(false)
+
+  function handleMouseEnter() {
+    setHovered(true)
+    if (!fetchedRef.current) {
+      fetchedRef.current = true
+      fetch(`/api/localization/preview?folderId=${folder.id}`)
+        .then(r => r.json())
+        .then(data => setFileId(data.fileId || 'none'))
+        .catch(() => setFileId('none'))
+    }
+  }
+
   return (
     <div
-      className="flex items-center justify-between px-5 py-3 rounded-xl"
+      className="relative flex items-center justify-between px-5 py-3 rounded-xl"
       style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={() => setHovered(false)}
     >
       {/* Folder name — link to Drive */}
       <a
@@ -297,6 +314,32 @@ function FolderRow({ folder }: { folder: LocalizationFolder }) {
           ))
         )}
       </div>
+
+      {/* Hover preview popup */}
+      {hovered && fileId !== 'none' && (
+        <div
+          className="absolute left-0 z-50 rounded-xl overflow-hidden shadow-2xl pointer-events-none"
+          style={{
+            bottom: 'calc(100% + 6px)',
+            width: 160,
+            aspectRatio: '4/5',
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+          }}
+        >
+          {fileId === 'loading' ? (
+            <div className="w-full h-full flex items-center justify-center">
+              <span className="text-gray-500 animate-spin text-lg">⟳</span>
+            </div>
+          ) : (
+            <img
+              src={`/api/image?id=${fileId}`}
+              alt={folder.name}
+              className="w-full h-full object-cover"
+            />
+          )}
+        </div>
+      )}
     </div>
   )
 }
