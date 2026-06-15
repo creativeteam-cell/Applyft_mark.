@@ -29,7 +29,7 @@ export interface JobSnapshot {
   folders: FolderProgress[]
 }
 
-// --- Drive helpers ---
+// --- Drive list helpers ---
 
 async function listSubfolders(folderId: string) {
   const drive = getDriveClient()
@@ -73,12 +73,11 @@ async function createDriveFolder(name: string, parentId: string): Promise<string
 }
 
 async function uploadToDrive(buffer: Buffer, mimeType: string, name: string, parentId: string): Promise<void> {
-  // googleapis wraps media uploads in a way that loses supportsAllDrives in the upload URL,
+  // googleapis wraps media uploads so supportsAllDrives is lost from the upload URL,
   // causing 'Service Accounts do not have storage quota' on Shared Drives.
-  // Fix: raw multipart upload via fetch with supportsAllDrives=true explicitly in the URL.
+  // Fix: raw multipart upload via fetch with supportsAllDrives=true in the URL.
   const auth = getAuthClient()
-  const tokenRes = await auth.getAccessToken()
-  const accessToken = tokenRes?.token
+  const accessToken = await auth.getAccessToken()
   if (!accessToken) throw new Error('Failed to get access token')
 
   const boundary = 'locboundary314159265'
@@ -139,15 +138,17 @@ async function analyzeImage(imageBase64DataUrl: string): Promise<any> {
     messages: [
       {
         role: 'system',
-        content: `You are a commercial image analysis engine for ad creative localization.
-Return ONLY valid raw JSON. No markdown. No explanations.
-Output schema:
-{
-  "texts": [{ "id": "text_1", "text": "...", "type": "headline|body|cta|other", "importance": "high|medium|low" }],
-  "context": { "category": "...", "mood": "...", "speaker_gender": "male|female|unknown", "target_audience": "..." },
-  "proper_nouns": []
-}
-Response must start with { and end with }`,
+        content: [
+          'You are a commercial image analysis engine for ad creative localization.',
+          'Return ONLY valid raw JSON. No markdown. No explanations.',
+          'Output schema:',
+          '{',
+          '  "texts": [{ "id": "text_1", "text": "...", "type": "headline|body|cta|other", "importance": "high|medium|low" }],',
+          '  "context": { "category": "...", "mood": "...", "speaker_gender": "male|female|unknown", "target_audience": "..." },',
+          '  "proper_nouns": []',
+          '}',
+          'Response must start with { and end with }',
+        ].join('\n'),
       },
       {
         role: 'user',
@@ -181,23 +182,25 @@ async function translateTexts(analysis: any, targetLanguages: string[]): Promise
     messages: [
       {
         role: 'system',
-        content: `You are a strict commercial translation engine for ad creatives.
-Return ONLY valid raw JSON. No markdown. No explanations.
-Target languages: ${langNames}
-Image analysis: ${JSON.stringify(analysis)}
-Rules:
-- Translate all texts (high/medium/low importance)
-- NEVER translate proper_nouns
-- Preserve emojis and timestamps
-- Informal conversational tone
-- CRITICAL: translations array must contain exactly one entry per language code.
-Output schema:
-{
-  "translations": [
-    { "language": "SP", "phrases": [{ "id": "text_1", "en": "...", "translated": "...", "type": "headline" }] }
-  ]
-}
-Response must start with { and end with }`,
+        content: [
+          'You are a strict commercial translation engine for ad creatives.',
+          'Return ONLY valid raw JSON. No markdown. No explanations.',
+          `Target languages: ${langNames}`,
+          `Image analysis: ${JSON.stringify(analysis)}`,
+          'Rules:',
+          '- Translate all texts',
+          '- NEVER translate proper_nouns',
+          '- Preserve emojis and timestamps',
+          '- Informal conversational tone',
+          '- CRITICAL: translations array must have exactly one entry per language code.',
+          'Output schema:',
+          '{',
+          '  "translations": [',
+          '    { "language": "SP", "phrases": [{ "id": "text_1", "en": "...", "translated": "...", "type": "headline" }] }',
+          '  ]',
+          '}',
+          'Response must start with { and end with }',
+        ].join('\n'),
       },
       { role: 'user', content: `Translate into: ${targetLanguages.join(', ')}` },
     ],
@@ -220,9 +223,7 @@ async function verifyCreative(
     messages: [
       {
         role: 'system',
-        content: `Quality control for localized ad creatives.
-Return ONLY valid raw JSON: { "ok": true|false, "issues": ["..."] }
-Response must start with { and end with }`,
+        content: 'Quality control for localized ad creatives. Return ONLY valid raw JSON: { "ok": true|false, "issues": ["..."] }. Response must start with { and end with }',
       },
       {
         role: 'user',
@@ -280,16 +281,25 @@ export async function runLocalizationJob(
       emit()
 
       const subfolders = await listSubfolders(folder.id)
-      const enFolder = subfolders.find(f => f.name.toUpperCase() === 'EN')
-      if (!enFolder) {
-        patch(folder.id, { status: 'error', error: 'No EN folder found' })
+      // Track which language folders already exist so we can skip them
+      const existingLangs = new Set(subfolders.map(f => f.name.toUpperCase()))
+
+      // If EN is a target language, use any non-EN folder as source (EN does not exist yet).
+      // Otherwise use EN as source.
+      const enIsTarget = targetLanguages.map(l => l.toUpperCase()).includes('EN')
+      const sourceFolder = enIsTarget
+        ? subfolders.find(f => f.name.toUpperCase() !== 'EN')
+        : subfolders.find(f => f.name.toUpperCase() === 'EN')
+
+      if (!sourceFolder) {
+        patch(folder.id, { status: 'error', error: enIsTarget ? 'No source folder found (need any non-EN)' : 'No EN folder found' })
         emit()
         continue
       }
 
-      const allImages = await listImages(enFolder.id)
+      const allImages = await listImages(sourceFolder.id)
       if (allImages.length === 0) {
-        patch(folder.id, { status: 'error', error: 'No images in EN folder' })
+        patch(folder.id, { status: 'error', error: `No images in ${sourceFolder.name} folder` })
         emit()
         continue
       }
@@ -314,6 +324,15 @@ export async function runLocalizationJob(
 
       for (const translation of translations) {
         const lang = translation.language
+
+        // Skip if this language folder already exists
+        if (existingLangs.has(lang.toUpperCase())) {
+          completedLangs.push(lang)
+          patch(folder.id, { completedLangs: [...completedLangs], uploadInfo: `${lang}: skipped (exists)` })
+          emit()
+          continue
+        }
+
         const langFolderId = await createDriveFolder(lang, folder.id)
 
         let uploaded = 0
