@@ -1,5 +1,6 @@
 'use client'
 
+// v2.1
 import { useEffect, useRef, useState, useCallback } from 'react'
 
 interface App { code: string; name: string; active: boolean }
