@@ -21,6 +21,7 @@ interface FolderProgress {
   status: FolderStatus
   error?: string
   completedLangs?: string[]
+  uploadInfo?: string
 }
 
 interface JobState {
@@ -486,8 +487,13 @@ function FolderRow({ folder, checked, onToggle, progress }: {
               {progress!.completedLangs.join(' ')}
             </span>
           )}
-          {progress!.status === 'error' && progress!.error && (
-            <span className="text-xs text-red-400 cursor-help" title={progress!.error}>!</span>
+          {progress!.uploadInfo && (
+            <span className="text-xs text-gray-400 font-mono">{progress!.uploadInfo}</span>
+          )}
+          {progress!.error && (
+            <span className="text-xs text-red-400 font-mono cursor-help max-w-xs truncate" title={progress!.error}>
+              ! {progress!.error}
+            </span>
           )}
         </div>
       )}
@@ -532,6 +538,7 @@ function FolderRow({ folder, checked, onToggle, progress }: {
               <span className="text-sm text-gray-500">Not created yet</span>
             </div>
           ) : (
+           
             <img
               src={'/api/image?id=' + fileId}
               alt={folder.name}

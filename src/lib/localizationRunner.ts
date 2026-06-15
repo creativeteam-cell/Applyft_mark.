@@ -1,17 +1,7 @@
 import OpenAI from 'openai'
-import sharp from 'sharp'
 import { getDriveClient, invalidateLocCache } from './googleDrive'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-
-// --- Size map ---
-
-const SIZE_MAP: Record<string, { width: number; height: number }> = {
-  '1.91x1': { width: 1200, height: 628 },
-  '9x16':   { width: 1080, height: 1920 },
-  '4x5':    { width: 1200, height: 1500 },
-  '1x1':    { width: 1200, height: 1200 },
-}
 
 // --- Types ---
 
@@ -30,6 +20,7 @@ export interface FolderProgress {
   status: FolderStatus
   error?: string
   completedLangs?: string[]
+  uploadInfo?: string
 }
 
 export interface JobSnapshot {
@@ -37,7 +28,7 @@ export interface JobSnapshot {
   folders: FolderProgress[]
 }
 
-// --- Helpers ---
+// --- Drive helpers ---
 
 async function listSubfolders(folderId: string) {
   const drive = getDriveClient()
@@ -67,12 +58,33 @@ async function downloadFileAsBuffer(fileId: string): Promise<Buffer> {
     { fileId, alt: 'media' } as any,
     { responseType: 'arraybuffer' }
   ) as any
-  return Buffer.from(res.data)
+  return Buffer.from(res.data as ArrayBuffer)
 }
 
-async function bufferToBase64DataUrl(buffer: Buffer, mimeType = 'image/jpeg'): Promise<string> {
-  return `data:${mimeType};base64,${buffer.toString('base64')}`
+async function createDriveFolder(name: string, parentId: string): Promise<string> {
+  const drive = getDriveClient()
+  const res = await drive.files.create({
+    supportsAllDrives: true,
+    requestBody: { name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] },
+    fields: 'id',
+  } as any) as any
+  return res.data.id!
 }
+
+async function uploadToDrive(buffer: Buffer, mimeType: string, name: string, parentId: string): Promise<void> {
+  const drive = getDriveClient()
+  const { Readable } = await import('stream')
+  // Readable.from([buffer]) yields the buffer as a single chunk (not byte-by-byte)
+  const bodyStream = Readable.from([buffer])
+  await drive.files.create({
+    supportsAllDrives: true,
+    requestBody: { name, parents: [parentId] },
+    media: { mimeType, body: bodyStream },
+    fields: 'id',
+  } as any)
+}
+
+// --- Naming ---
 
 function pickRepresentative(images: { id: string; name: string }[]): { id: string; name: string } | null {
   return (
@@ -83,18 +95,14 @@ function pickRepresentative(images: { id: string; name: string }[]): { id: strin
   )
 }
 
-function extractSize(name: string): string | null {
-  const match = name.match(/_(1[.,]91x1|9x16|4x5|1x1)[_.]/)
-  return match ? match[1].replace(',', '.') : null
-}
-
 function buildNewName(originalName: string, lang: string, cp: string): string {
   const extMatch = originalName.match(/(\.[^.]+)$/)
   const ext = extMatch ? extMatch[1] : '.jpg'
   let base = originalName.replace(/\.[^.]+$/, '')
+  // strip trailing 2-letter lang code e.g. _EN
   base = base.replace(/_[A-Z]{2}$/, '')
-  const cpPattern = /_(TMK|KZA|AHB|ASR|SMV|DDT|VTL|YKH|DKR|ASM|NBL|RSK|KIS|MMM)$/i
-  base = base.replace(cpPattern, '')
+  // strip known CP suffixes
+  base = base.replace(/_(TMK|KZA|AHB|ASR|SMV|DDT|VTL|YKH|DKR|ASM|NBL|RSK|KIS|MMM)$/i, '')
   return cp ? `${base}_${cp}_${lang}${ext}` : `${base}_${lang}${ext}`
 }
 
@@ -107,58 +115,28 @@ async function analyzeImage(imageBase64DataUrl: string): Promise<any> {
       {
         role: 'system',
         content: `You are a commercial image analysis engine for ad creative localization.
-
 Return ONLY valid raw JSON. No markdown. No explanations.
-
-Analyze the image and extract:
-1. All visible text elements with their roles
-2. Context, mood, audience for translation guidance
-3. Proper nouns that must NOT be translated
-
 Output schema:
 {
-  "texts": [
-    {
-      "id": "text_1",
-      "text": "original text",
-      "type": "headline|subheadline|body|cta|notification|chat_message|ui_label|contact_name|badge|other",
-      "importance": "high|medium|low"
-    }
-  ],
-  "context": {
-    "category": "...",
-    "mood": "fear|anxiety|curiosity|motivation|urgency|trust|sadness|neutral",
-    "commercial_intent": "...",
-    "speaker_gender": "male|female|unknown",
-    "target_audience": "...",
-    "visual_summary": "..."
-  },
-  "proper_nouns": ["list", "of", "untranslatable", "names"]
+  "texts": [{ "id": "text_1", "text": "...", "type": "headline|body|cta|other", "importance": "high|medium|low" }],
+  "context": { "category": "...", "mood": "...", "speaker_gender": "male|female|unknown", "target_audience": "..." },
+  "proper_nouns": []
 }
-
-Rules:
-- Include ALL visible text, even small UI labels
-- contact_name: if it is a real name keep as-is; if generic label (Mom, BFF, Husband) translate
-- Do NOT invent texts not visible in the image
-- timestamps, emojis -> importance low
-- Response must start with { and end with }`,
+Response must start with { and end with }`,
       },
       {
         role: 'user',
         content: [
           { type: 'image_url', image_url: { url: imageBase64DataUrl, detail: 'high' } },
-          { type: 'text', text: 'Analyze this ad creative and extract all text elements.' },
+          { type: 'text', text: 'Extract all text elements from this ad creative.' },
         ],
       },
     ],
     max_tokens: 1500,
   })
-
   const raw = response.choices[0].message.content || '{}'
   const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
-  const start = clean.indexOf('{')
-  const end = clean.lastIndexOf('}')
-  return JSON.parse(clean.slice(start, end + 1))
+  return JSON.parse(clean.slice(clean.indexOf('{'), clean.lastIndexOf('}') + 1))
 }
 
 // --- GPT Translator ---
@@ -171,7 +149,6 @@ async function translateTexts(analysis: any, targetLanguages: string[]): Promise
     CZ: 'Czech', ND: 'Dutch', HI: 'Hindi', PL: 'Polish',
     TW: 'Traditional Chinese (Taiwan)', BG: 'Bulgarian',
   }
-
   const langNames = targetLanguages.map(c => `${c} = ${LANG_MAP[c] || c}`).join(', ')
 
   const response = await openai.chat.completions.create({
@@ -180,69 +157,47 @@ async function translateTexts(analysis: any, targetLanguages: string[]): Promise
       {
         role: 'system',
         content: `You are a strict commercial translation engine for ad creatives.
-
 Return ONLY valid raw JSON. No markdown. No explanations.
-
 Target languages: ${langNames}
 Image analysis: ${JSON.stringify(analysis)}
-
 Rules:
-- Translate texts with importance high, medium, low
-- NEVER translate proper_nouns -- keep them exactly as-is
-- contact_name: localize only generic labels (Mom, BFF, Husband), keep real names
-- Preserve emojis and timestamps unchanged
-- Match visual length as closely as possible (+/-20%)
-- Use informal conversational tone (close friend style)
-- In languages with formal/informal forms use informal
-- Gender agreement: use context.speaker_gender and context.target_audience
-- Mood affects style: urgency->short direct; fear->tension; curiosity->teaser; etc.
-
-CRITICAL: translations array length MUST equal number of requested languages.
-Every requested language code MUST appear exactly once.
-
+- Translate all texts (high/medium/low importance)
+- NEVER translate proper_nouns
+- Preserve emojis and timestamps
+- Informal conversational tone
+- CRITICAL: translations array must contain exactly one entry per language code.
 Output schema:
 {
   "translations": [
-    {
-      "language": "JP",
-      "phrases": [
-        { "id": "text_1", "en": "original text", "translated": "translated text", "type": "headline" }
-      ]
-    }
+    { "language": "SP", "phrases": [{ "id": "text_1", "en": "...", "translated": "...", "type": "headline" }] }
   ]
 }
-
 Response must start with { and end with }`,
       },
-      {
-        role: 'user',
-        content: `Translate into: ${targetLanguages.join(', ')}`,
-      },
+      { role: 'user', content: `Translate into: ${targetLanguages.join(', ')}` },
     ],
     max_tokens: 3000,
   })
-
   const raw = response.choices[0].message.content || '{}'
   const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
-  const start = clean.indexOf('{')
-  const end = clean.lastIndexOf('}')
-  return JSON.parse(clean.slice(start, end + 1))
+  return JSON.parse(clean.slice(clean.indexOf('{'), clean.lastIndexOf('}') + 1))
 }
 
-// --- GPT Analyzer 2 --- verify ---
+// --- GPT Analyzer 2 -- verify ---
 
-async function verifyCreative(imageBase64DataUrl: string, expectedPhrases: { en: string; translated: string }[]): Promise<{ ok: boolean; issues: string[] }> {
+async function verifyCreative(
+  imageBase64DataUrl: string,
+  expectedPhrases: { en: string; translated: string }[]
+): Promise<{ ok: boolean; issues: string[] }> {
   if (expectedPhrases.length === 0) return { ok: true, issues: [] }
-
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [
       {
         role: 'system',
-        content: `You are a quality control reviewer for localized ad creatives.
+        content: `Quality control for localized ad creatives.
 Return ONLY valid raw JSON: { "ok": true|false, "issues": ["..."] }
-Check: Are translated texts visible? Any layout breaks or missing text?
-If all correct -> ok: true, issues: []. Response must start with { and end with }`,
+Response must start with { and end with }`,
       },
       {
         role: 'user',
@@ -250,14 +205,13 @@ If all correct -> ok: true, issues: []. Response must start with { and end with 
           { type: 'image_url', image_url: { url: imageBase64DataUrl, detail: 'low' } },
           {
             type: 'text',
-            text: `Expected translated texts:\n${expectedPhrases.map(p => `- "${p.en}" -> "${p.translated}"`).join('\n')}\n\nDoes this localized creative look correct?`,
+            text: `Expected texts:\n${expectedPhrases.map(p => `"${p.en}" -> "${p.translated}"`).join('\n')}\nAre they correctly visible?`,
           },
         ],
       },
     ],
     max_tokens: 300,
   })
-
   try {
     const raw = response.choices[0].message.content || '{}'
     const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
@@ -265,34 +219,6 @@ If all correct -> ok: true, issues: []. Response must start with { and end with 
   } catch {
     return { ok: true, issues: [] }
   }
-}
-
-// --- Drive helpers ---
-
-async function createDriveFolder(name: string, parentId: string): Promise<string> {
-  const drive = getDriveClient()
-  const res = await drive.files.create({
-    supportsAllDrives: true,
-    requestBody: { name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] },
-    fields: 'id',
-  } as any) as any
-  return res.data.id!
-}
-
-// FIX: Readable.from(buffer) iterates Buffer as individual bytes (numbers).
-// Instead, push the whole buffer as one chunk into a Readable stream.
-async function uploadToDrive(buffer: Buffer, mimeType: string, name: string, parentId: string): Promise<void> {
-  const drive = getDriveClient()
-  const { Readable } = await import('stream')
-  const bodyStream = new Readable({ read() {} })
-  bodyStream.push(buffer)
-  bodyStream.push(null)
-  await drive.files.create({
-    supportsAllDrives: true,
-    requestBody: { name, parents: [parentId] },
-    media: { mimeType, body: bodyStream },
-    fields: 'id',
-  } as any)
 }
 
 // --- Main runner ---
@@ -316,56 +242,51 @@ export async function runLocalizationJob(
     onUpdate({ status, folders: state.map(f => ({ ...f })) })
   }
 
-  function patchFolder(folderId: string, patch: Partial<FolderProgress>) {
-    const idx = state.findIndex(f => f.folderId === folderId)
-    if (idx >= 0) state[idx] = { ...state[idx], ...patch }
+  function patch(folderId: string, p: Partial<FolderProgress>) {
+    const i = state.findIndex(f => f.folderId === folderId)
+    if (i >= 0) state[i] = { ...state[i], ...p }
   }
 
   emit('running')
 
   for (const folder of folders) {
     try {
-      // -- Analyzing --
-      patchFolder(folder.id, { status: 'analyzing' })
+      // -- Find EN folder --
+      patch(folder.id, { status: 'analyzing' })
       emit()
 
       const subfolders = await listSubfolders(folder.id)
       const enFolder = subfolders.find(f => f.name.toUpperCase() === 'EN')
       if (!enFolder) {
-        patchFolder(folder.id, { status: 'error', error: 'No EN folder found' })
+        patch(folder.id, { status: 'error', error: 'No EN folder found' })
         emit()
         continue
       }
 
       const allImages = await listImages(enFolder.id)
       if (allImages.length === 0) {
-        patchFolder(folder.id, { status: 'error', error: 'No images in EN folder' })
+        patch(folder.id, { status: 'error', error: 'No images in EN folder' })
         emit()
         continue
       }
 
-      const representative = pickRepresentative(allImages)
-      if (!representative) {
-        patchFolder(folder.id, { status: 'error', error: 'Could not pick representative image' })
-        emit()
-        continue
-      }
-
+      // -- Analyze representative image --
+      const representative = pickRepresentative(allImages)!
       const repBuffer = await downloadFileAsBuffer(representative.id)
       const repMime = representative.name.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg'
-      const repBase64 = await bufferToBase64DataUrl(repBuffer, repMime)
+      const repBase64 = `data:${repMime};base64,${repBuffer.toString('base64')}`
       const analysis = await analyzeImage(repBase64)
 
-      // -- Translating --
-      patchFolder(folder.id, { status: 'translating' })
+      // -- Translate --
+      patch(folder.id, { status: 'translating' })
       emit()
 
       const translationResult = await translateTexts(analysis, targetLanguages)
-      const translations: { language: string; phrases: { id: string; en: string; translated: string; type: string }[] }[] =
+      const translations: { language: string; phrases: { id: string; en: string; translated: string }[] }[] =
         translationResult.translations || []
 
-      // -- Uploading --
-      patchFolder(folder.id, { status: 'uploading' })
+      // -- Upload --
+      patch(folder.id, { status: 'uploading', uploadInfo: `0/${allImages.length} images` })
       emit()
 
       const completedLangs: string[] = []
@@ -374,75 +295,61 @@ export async function runLocalizationJob(
         const lang = translation.language
         const langFolderId = await createDriveFolder(lang, folder.id)
 
-        let uploadErrors = 0
+        let uploaded = 0
+        let failed = 0
         for (const img of allImages) {
           try {
             const imgBuffer = await downloadFileAsBuffer(img.id)
-            const sizeKey = extractSize(img.name)
-            const dims = sizeKey ? SIZE_MAP[sizeKey] : null
-
-            let finalBuffer: Buffer
-            let finalMime: string
-            if (dims) {
-              finalBuffer = await sharp(imgBuffer)
-                .resize(dims.width, dims.height, { fit: 'fill' })
-                .jpeg({ quality: 92 })
-                .toBuffer()
-              finalMime = 'image/jpeg'
-              const newName = buildNewName(img.name, lang, cp).replace(/\.[^.]+$/, '.jpg')
-              await uploadToDrive(finalBuffer, finalMime, newName, langFolderId)
-            } else {
-              finalBuffer = imgBuffer
-              finalMime = img.mimeType || 'image/jpeg'
-              const newName = buildNewName(img.name, lang, cp)
-              await uploadToDrive(finalBuffer, finalMime, newName, langFolderId)
-            }
+            const newName = buildNewName(img.name, lang, cp)
+            const mime = img.mimeType || 'image/jpeg'
+            await uploadToDrive(imgBuffer, mime, newName, langFolderId)
+            uploaded++
+            patch(folder.id, { uploadInfo: `${lang}: ${uploaded}/${allImages.length}` })
+            emit()
           } catch (imgErr: any) {
-            uploadErrors++
-            console.error(`Failed to process ${img.name} for ${lang}:`, imgErr?.message || imgErr)
-            // surface first error to UI
-            if (uploadErrors === 1) {
-              patchFolder(folder.id, { error: `Upload error (${lang}/${img.name}): ${imgErr?.message || String(imgErr)}` })
-              emit()
-            }
+            failed++
+            const msg = imgErr?.message || String(imgErr)
+            console.error(`[loc] ${img.name} -> ${lang} failed:`, msg)
+            patch(folder.id, { error: `${lang}/${img.name}: ${msg}` })
+            emit()
           }
         }
 
         completedLangs.push(lang)
-        patchFolder(folder.id, { completedLangs: [...completedLangs] })
+        patch(folder.id, {
+          completedLangs: [...completedLangs],
+          uploadInfo: `${lang}: ${uploaded} ok${failed ? `, ${failed} failed` : ''}`,
+        })
         emit()
       }
 
-      // -- Verifying --
-      patchFolder(folder.id, { status: 'verifying' })
+      // -- Verify (non-blocking) --
+      patch(folder.id, { status: 'verifying' })
       emit()
 
       try {
-        const firstTranslation = translations[0]
-        if (firstTranslation) {
-          const verifyBuffer = await sharp(repBuffer)
-            .resize(600, 750, { fit: 'fill' })
-            .jpeg({ quality: 70 })
-            .toBuffer()
-          const verifyBase64 = await bufferToBase64DataUrl(verifyBuffer)
-          await verifyCreative(verifyBase64, firstTranslation.phrases.slice(0, 3).map((p: any) => ({ en: p.en, translated: p.translated })))
+        const firstTr = translations[0]
+        if (firstTr && repBuffer.length > 0) {
+          const verifyBase64 = `data:${repMime};base64,${repBuffer.toString('base64')}`
+          await verifyCreative(
+            verifyBase64,
+            firstTr.phrases.slice(0, 3).map(p => ({ en: p.en, translated: p.translated }))
+          )
         }
       } catch (verifyErr) {
-        console.warn('Verification step failed (non-blocking):', verifyErr)
+        console.warn('[loc] Verify failed (non-blocking):', verifyErr)
       }
 
-      patchFolder(folder.id, { status: 'done' })
+      patch(folder.id, { status: 'done' })
       emit()
 
     } catch (err: any) {
-      console.error(`Folder ${folder.name} failed:`, err)
-      patchFolder(folder.id, { status: 'error', error: err.message || 'Unknown error' })
+      console.error(`[loc] Folder ${folder.name} failed:`, err)
+      patch(folder.id, { status: 'error', error: err.message || 'Unknown error' })
       emit()
     }
   }
 
   invalidateLocCache(appCode)
-
-  const anyError = state.some(f => f.status === 'error')
-  emit(anyError ? 'error' : 'done')
+  emit(state.some(f => f.status === 'error') ? 'error' : 'done')
 }
