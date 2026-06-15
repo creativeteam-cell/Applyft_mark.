@@ -319,12 +319,23 @@ export function LocalizationPage() {
             </select>
           </div>
 
-          {activeJob && activeJob.status === 'running' && (
-            <div className="ml-auto flex items-center gap-2 text-xs text-gray-400 font-mono">
-              <span className="animate-spin">~</span>
-              {activeJob.folders?.filter(f => f.status === 'done').length ?? 0}/{activeJob.folders?.length ?? 0} done
-            </div>
-          )}
+          <div className="ml-auto flex items-center gap-2">
+            {activeJob && activeJob.status === 'running' && (
+              <span className="text-xs text-gray-400 font-mono flex items-center gap-2">
+                <span className="animate-spin">~</span>
+                {activeJob.folders?.filter(f => f.status === 'done').length ?? 0}/{activeJob.folders?.length ?? 0} done
+              </span>
+            )}
+            <button
+              onClick={fetchFolders}
+              disabled={loading}
+              title="Refresh folders"
+              className="w-7 h-7 flex items-center justify-center rounded-lg transition-all disabled:opacity-40"
+              style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
+            >
+              <span className={loading ? 'animate-spin inline-block' : ''} style={{ fontSize: 14 }}>⟳</span>
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center gap-2 px-8 pb-2.5 flex-wrap">
