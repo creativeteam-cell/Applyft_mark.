@@ -622,55 +622,74 @@ export async function runLocalizationJob(
         continue
       }
 
-      const representative = pickRepresentative(allImages)!
-      const repBuffer = await downloadFileAsBuffer(representative.id)
-      const repMime = representative.name.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg'
-      const repBase64 = `data:${repMime};base64,${repBuffer.toString('base64')}`
-      const analysis = await analyzeImage(repBase64)
-
-      patch(folder.id, { status: 'translating' })
-      emit()
-
-      const translationResult = await translateTexts(analysis, targetLanguages)
-      const translations: { language: string; phrases: { id: string; en: string; translated: string }[] }[] =
-        translationResult.translations || []
-
       patch(folder.id, { status: 'uploading', uploadInfo: `0/${allImages.length} images` })
       emit()
 
       const completedLangs: string[] = []
 
-      for (const translation of translations) {
-        const lang = translation.language
+      // Create language folders upfront (skip existing)
+      const langFolderMap: Record<string, string> = {}
+      for (const lang of targetLanguages) {
+        if (existingLangs.has(lang.toUpperCase())) continue
+        langFolderMap[lang] = await createDriveFolder(lang, folder.id)
+      }
 
-        // Skip if this language folder already exists
-        if (existingLangs.has(lang.toUpperCase())) {
-          completedLangs.push(lang)
-          patch(folder.id, { completedLangs: [...completedLangs], uploadInfo: `${lang}: skipped (exists)` })
-          emit()
+      let totalUploaded = 0
+
+      for (const img of allImages) {
+        // Per-image: analyze → translate → localize for each language
+        const imgBuffer = await downloadFileAsBuffer(img.id)
+        const mime = img.mimeType || 'image/jpeg'
+        const imgBase64 = `data:${mime};base64,${imgBuffer.toString('base64')}`
+
+        patch(folder.id, { status: 'analyzing', uploadInfo: `Analyzing ${img.name}…` })
+        emit()
+
+        let analysis: any
+        try {
+          analysis = await analyzeImage(imgBase64)
+        } catch (err: any) {
+          console.warn(`[loc] analyzeImage failed for ${img.name}:`, err.message)
           continue
         }
 
-        const langFolderId = await createDriveFolder(lang, folder.id)
+        patch(folder.id, { status: 'translating', uploadInfo: `Translating ${img.name}…` })
+        emit()
 
-        const analysisTexts: Record<string, string> = {}
-        for (const t of (analysis?.texts || [])) {
-          analysisTexts[t.text] = t.role_in_composition || t.type || ''
+        let translationResult: any
+        try {
+          translationResult = await translateTexts(analysis, targetLanguages)
+        } catch (err: any) {
+          console.warn(`[loc] translateTexts failed for ${img.name}:`, err.message)
+          continue
         }
-        const langPhrases = translation.phrases.map((p: any) => ({
-          en: p.en,
-          translated: p.translated,
-          role: analysisTexts[p.en] || '',
-        }))
 
-        let uploaded = 0
-        let failed = 0
+        const translations: { language: string; phrases: { id: string; en: string; translated: string }[] }[] =
+          translationResult.translations || []
 
-        for (const img of allImages) {
+        patch(folder.id, { status: 'uploading' })
+        emit()
+
+        for (const translation of translations) {
+          const lang = translation.language
+
+          if (existingLangs.has(lang.toUpperCase())) continue
+
+          const langFolderId = langFolderMap[lang]
+          if (!langFolderId) continue
+
+          const analysisTexts: Record<string, string> = {}
+          for (const t of (analysis?.texts || [])) {
+            analysisTexts[t.text] = t.role_in_composition || t.type || ''
+          }
+          const langPhrases = translation.phrases.map((p: any) => ({
+            en: p.en,
+            translated: p.translated,
+            role: analysisTexts[p.en] || '',
+          }))
+
           try {
-            const imgBuffer = await downloadFileAsBuffer(img.id)
             const newName = buildNewName(img.name, lang, cp)
-            const mime = img.mimeType || 'image/jpeg'
 
             let finalBuffer = imgBuffer
             try {
@@ -680,10 +699,9 @@ export async function runLocalizationJob(
                 emit()
               })
             } catch (locErr: any) {
-              console.warn(`[loc] Localization failed for ${img.name}, uploading original:`, locErr.message)
+              console.warn(`[loc] Localization failed for ${img.name}:`, locErr.message)
             }
 
-            // Resize to correct dimensions
             const targetSize = getSizeFromName(img.name)
             if (targetSize) {
               try {
@@ -694,11 +712,10 @@ export async function runLocalizationJob(
             }
 
             await uploadToDrive(finalBuffer, 'image/jpeg', newName, langFolderId, userAccessToken)
-            uploaded++
-            patch(folder.id, { uploadInfo: `${lang}: ${uploaded}/${allImages.length}` })
+            totalUploaded++
+            patch(folder.id, { uploadInfo: `${lang}: ${img.name} ✓ (${totalUploaded} total)` })
             emit()
           } catch (imgErr: any) {
-            failed++
             const msg = imgErr?.message || String(imgErr)
             console.error(`[loc] ${img.name} -> ${lang} failed:`, msg)
             patch(folder.id, { error: `${lang}/${img.name}: ${msg}` })
@@ -706,12 +723,23 @@ export async function runLocalizationJob(
           }
         }
 
-        completedLangs.push(lang)
-        patch(folder.id, {
-          completedLangs: [...completedLangs],
-          uploadInfo: `${lang}: ${uploaded} ok${failed ? `, ${failed} failed` : ''}`,
-        })
-        emit()
+        // Mark langs complete after last image
+        if (img === allImages[allImages.length - 1]) {
+          for (const lang of targetLanguages) {
+            if (!existingLangs.has(lang.toUpperCase())) completedLangs.push(lang)
+          }
+          patch(folder.id, { completedLangs: [...completedLangs] })
+          emit()
+        }
+      }
+
+      // Handle skipped langs
+      for (const lang of targetLanguages) {
+        if (existingLangs.has(lang.toUpperCase())) {
+          completedLangs.push(lang)
+          patch(folder.id, { completedLangs: [...completedLangs], uploadInfo: `${lang}: skipped (exists)` })
+          emit()
+        }
       }
 
       patch(folder.id, { status: 'done' })
