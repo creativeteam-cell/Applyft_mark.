@@ -191,7 +191,9 @@ async function listImages(folderId: string) {
     q: `'${folderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
     fields: 'files(id, name, mimeType)',
   }) as any
-  return (res.data.files || []) as { id: string; name: string; mimeType: string }[]
+  const ALLOWED_EXT = /\.(jpe?g|png|webp|gif)$/i
+  return ((res.data.files || []) as { id: string; name: string; mimeType: string }[])
+    .filter(f => ALLOWED_EXT.test(f.name))
 }
 
 async function downloadFileAsBuffer(fileId: string): Promise<Buffer> {
@@ -586,7 +588,7 @@ export async function runLocalizationJob(
   cp: string,
   appCode: string,
   onUpdate: (snapshot: JobSnapshot) => void,
-  userAccessToken?: string,
+  getAccessToken?: () => Promise<string | undefined>,
 ): Promise<void> {
 
   const state: FolderProgress[] = folders.map(f => ({
@@ -770,6 +772,7 @@ export async function runLocalizationJob(
               }
             }
 
+            const userAccessToken = await getAccessToken?.()
             await uploadToDrive(finalBuffer, 'image/jpeg', newName, langFolderId, userAccessToken)
             totalUploaded++
             patch(folder.id, { uploadInfo: `${lang}: ${img.name} ✓ (${totalUploaded} total)` })
