@@ -1,6 +1,6 @@
 'use client'
 
-// v2.1
+// v2.2
 import { useEffect, useRef, useState, useCallback } from 'react'
 
 interface App { code: string; name: string; active: boolean }
@@ -13,6 +13,12 @@ interface LocalizationFolder {
   driveUrl: string
   languages: string[]
 }
+
+// Module-level cache — survives tab switches, cleared on manual refresh
+const _cache: {
+  meta: { apps: App[]; marketers: Marketer[]; languages: Language[] } | null
+  folders: Record<string, LocalizationFolder[]>
+} = { meta: null, folders: {} }
 
 type FolderStatus = 'pending' | 'analyzing' | 'translating' | 'uploading' | 'verifying' | 'done' | 'error'
 
@@ -83,28 +89,55 @@ export function LocalizationPage() {
     })
   }
 
-  const fetchFolders = useCallback(() => {
+  const fetchFolders = useCallback((force = false) => {
     if (!selectedApp) return
+    if (!force && _cache.folders[selectedApp]) {
+      setFolders(_cache.folders[selectedApp])
+      return
+    }
     setLoading(true)
     setError(null)
     fetch(`/api/localization?app=${selectedApp}`)
       .then(r => r.json())
       .then(data => {
         if (data.error) throw new Error(data.error)
-        setFolders(data.folders || [])
+        const result = data.folders || []
+        _cache.folders[selectedApp] = result
+        setFolders(result)
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [selectedApp])
 
   useEffect(() => {
+    if (_cache.meta) {
+      const { apps: cachedApps, marketers: cachedMarketers, languages: cachedLanguages } = _cache.meta
+      setApps(cachedApps)
+      setMarketers(cachedMarketers)
+      setLanguages(cachedLanguages)
+
+      const savedApp = localStorage.getItem('cs_selected_app')
+      const savedMarketer = localStorage.getItem('cs_selected_marketer')
+      if (savedApp && cachedApps.find((a: App) => a.code === savedApp)) {
+        setSelectedApp(savedApp)
+      } else if (cachedApps.length > 0) {
+        setSelectedApp(cachedApps[0].code)
+      }
+      if (savedMarketer) setSelectedMarketer(savedMarketer)
+      else if (cachedMarketers.length > 0) setSelectedMarketer(cachedMarketers[0].code)
+      return
+    }
+
     fetch('/api/apps')
       .then(r => r.json())
       .then(data => {
         const activeApps = (data.apps || data).filter((a: App) => a.active)
+        const marketersData = data.marketers || []
+        const languagesData = data.languages || []
+        _cache.meta = { apps: activeApps, marketers: marketersData, languages: languagesData }
         setApps(activeApps)
-        setMarketers(data.marketers || [])
-        setLanguages(data.languages || [])
+        setMarketers(marketersData)
+        setLanguages(languagesData)
 
         const savedApp = localStorage.getItem('cs_selected_app')
         const savedMarketer = localStorage.getItem('cs_selected_marketer')
@@ -117,8 +150,8 @@ export function LocalizationPage() {
 
         if (savedMarketer) {
           setSelectedMarketer(savedMarketer)
-        } else if (data.marketers?.length > 0) {
-          setSelectedMarketer(data.marketers[0].code)
+        } else if (marketersData.length > 0) {
+          setSelectedMarketer(marketersData[0].code)
         }
       })
   }, [])
@@ -328,7 +361,7 @@ export function LocalizationPage() {
               </span>
             )}
             <button
-              onClick={fetchFolders}
+              onClick={() => { delete _cache.folders[selectedApp]; fetchFolders(true) }}
               disabled={loading}
               title="Refresh folders"
               className="w-7 h-7 flex items-center justify-center rounded-lg transition-all disabled:opacity-40"

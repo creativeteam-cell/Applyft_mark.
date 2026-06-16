@@ -86,11 +86,14 @@ ${translationsText}
 ${fixPrompt ? `\nPREVIOUS ATTEMPT HAD ISSUES — FIX THESE SPECIFICALLY:\n${fixPrompt}` : ''}`
 }
 
+const RETRY_DELAY_MS = 4000 // pause between Gemini retries
+
 async function localizeImage(
   imgBuffer: Buffer,
   mimeType: string,
   language: string,
   phrases: { en: string; translated: string; role?: string }[],
+  onAttempt?: (attempt: number, status: 'ok' | 'fail' | 'retry') => void,
 ): Promise<Buffer> {
   let lastResult: Buffer | null = null
   let lastFixPrompt = ''
@@ -106,27 +109,29 @@ async function localizeImage(
       ], mimeType)
     } catch (err: any) {
       console.warn(`[loc] Gemini attempt ${attempt} failed:`, err.message)
-      continue // skip to next attempt
+      if (attempt < 3) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
+      continue
     }
 
     lastResult = result
 
-    // Review — if review itself throws, log and retry Gemini anyway
+    // Review — if review itself throws, treat as fail and retry
     let qa: { status: 'ok' | 'fail'; fix_prompt: string }
     try {
       const dataUrl = `data:${mimeType};base64,${result.toString('base64')}`
       qa = await reviewLocalizedImage(dataUrl, language, phrases)
     } catch (err: any) {
       console.warn(`[loc] GPT review attempt ${attempt} failed:`, err.message)
-      // Don't exit — treat as fail so we retry Gemini
       qa = { status: 'fail', fix_prompt: 'Some text may still be in the wrong language. Check all text elements carefully and replace any untranslated text.' }
     }
 
     console.log(`[loc] Attempt ${attempt} QA: ${qa.status}`, qa.fix_prompt || '')
+    onAttempt?.(attempt, qa.status === 'ok' ? 'ok' : attempt < 3 ? 'retry' : 'fail')
 
     if (qa.status === 'ok') return result
 
     lastFixPrompt = qa.fix_prompt
+    if (attempt < 3) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
   }
 
   return lastResult!
@@ -669,7 +674,11 @@ export async function runLocalizationJob(
 
             let finalBuffer = imgBuffer
             try {
-              finalBuffer = await localizeImage(imgBuffer, mime, lang, langPhrases)
+              finalBuffer = await localizeImage(imgBuffer, mime, lang, langPhrases, (attempt, status) => {
+                const icon = status === 'ok' ? '✓' : status === 'retry' ? '↻' : '✗'
+                patch(folder.id, { uploadInfo: `${lang}: ${img.name} — attempt ${attempt}/3 ${icon}` })
+                emit()
+              })
             } catch (locErr: any) {
               console.warn(`[loc] Localization failed for ${img.name}, uploading original:`, locErr.message)
             }
