@@ -70,6 +70,8 @@ function buildGeminiPrompt(
     })
     .join('\n')
 
+  const isRTL = ['AR', 'HE', 'FA', 'UR'].includes(language.toUpperCase())
+
   return `You are a strict image localization editor.
 
 Your ONLY task: replace every listed English text with its translation. Do NOT change anything else.
@@ -82,7 +84,13 @@ RULES:
 - Replace EVERY occurrence of each listed text
 - Zero English letters may remain in replaced areas
 - Match text style exactly: ALL CAPS original → ALL CAPS translation; Title Case → Title Case; sentence case → sentence case
-${language === 'AR' || language === 'HE' ? '- Use right-to-left text direction for all replaced text' : ''}
+${isRTL ? `
+⚠️ CRITICAL — RIGHT-TO-LEFT LANGUAGE (${language}):
+- ALL text must flow RIGHT → LEFT
+- Each line of text starts at the RIGHT edge and ends at the LEFT
+- Do NOT mirror the English layout — the anchor point is the RIGHT side, not the left
+- Numbers and punctuation follow RTL conventions
+- Every single text element must use RTL direction — no exceptions` : ''}
 
 TARGET LANGUAGE: ${language}
 
@@ -553,6 +561,7 @@ Check IMAGE 2 against IMAGE 1 and verify ALL of the following:
 3. No mixed languages or invented text
 4. Text style matches the original: if original is ALL CAPS → translation must be ALL CAPS; if original is Title Case → use Title Case; if original is sentence case → use sentence case
 5. No phrases are skipped — every single item in the list must appear translated in IMAGE 2
+${['AR', 'HE', 'FA', 'UR'].includes(language.toUpperCase()) ? `6. RTL direction — ALL text must flow right-to-left. Flag any text that appears left-anchored or left-to-right as a critical error` : ''}
 
 Important:
 - Brand names, logos, and proper nouns may remain unchanged — do not flag these
