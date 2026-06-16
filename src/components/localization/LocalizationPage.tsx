@@ -36,6 +36,23 @@ interface JobState {
   folders: FolderProgress[]
 }
 
+// Module-level job store — SSE survives tab switches
+const _job: {
+  state: JobState | null
+  localizing: boolean
+  abort: AbortController | null
+  listeners: Set<() => void>
+  notify: () => void
+  subscribe: (fn: () => void) => () => void
+} = {
+  state: null,
+  localizing: false,
+  abort: null,
+  listeners: new Set(),
+  notify() { this.listeners.forEach(fn => fn()) },
+  subscribe(fn) { this.listeners.add(fn); return () => { this.listeners.delete(fn) } },
+}
+
 function folderNumber(name: string): number {
   const match = name.match(/(\d+)/)
   return match ? parseInt(match[1], 10) : 0
@@ -77,9 +94,16 @@ export function LocalizationPage() {
   const [searchLoading, setSearchLoading] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
-  const [activeJob, setActiveJob] = useState<JobState | null>(null)
-  const [localizing, setLocalizing] = useState(false)
-  const abortRef = useRef<AbortController | null>(null)
+  const [activeJob, setActiveJob] = useState<JobState | null>(() => _job.state)
+  const [localizing, setLocalizing] = useState(() => _job.localizing)
+
+  // Subscribe to job store — component gets updates even after remounting
+  useEffect(() => {
+    return _job.subscribe(() => {
+      setActiveJob(_job.state)
+      setLocalizing(_job.localizing)
+    })
+  }, [])
 
   function toggleSelect(id: string) {
     setSelected(prev => {
@@ -175,10 +199,6 @@ export function LocalizationPage() {
     return () => controller.abort()
   }, [search, selectedApp])
 
-  useEffect(() => {
-    return () => { abortRef.current?.abort() }
-  }, [])
-
   function handleAppChange(code: string) {
     localStorage.setItem('cs_selected_app', code)
     setSelectedApp(code)
@@ -208,7 +228,10 @@ export function LocalizationPage() {
       .filter(f => selected.has(f.id))
       .map(f => ({ id: f.id, name: f.name }))
 
-    setActiveJob({
+    _job.abort?.abort()
+    const controller = new AbortController()
+    _job.abort = controller
+    _job.state = {
       status: 'running',
       folders: selectedFolders.map(f => ({
         folderId: f.id,
@@ -216,12 +239,10 @@ export function LocalizationPage() {
         status: 'pending' as const,
         completedLangs: [],
       })),
-    })
-    setLocalizing(true)
-
-    abortRef.current?.abort()
-    const controller = new AbortController()
-    abortRef.current = controller
+    }
+    _job.localizing = true
+    _job.notify()
+    setSelected(new Set())
 
     try {
       const res = await fetch('/api/localization/run', {
@@ -257,11 +278,13 @@ export function LocalizationPage() {
           if (!line.startsWith('data: ')) continue
           try {
             const snapshot = JSON.parse(line.slice(6))
-            setActiveJob(snapshot)
+            _job.state = snapshot
+            _job.notify()
 
             if (snapshot.status === 'done' || snapshot.status === 'error') {
-              setLocalizing(false)
-              setSelected(new Set())
+              _job.localizing = false
+              _job.abort = null
+              _job.notify()
               setTimeout(() => fetchFolders(), 1500)
 
               if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
@@ -280,7 +303,9 @@ export function LocalizationPage() {
       }
     } catch (err: any) {
       if (err.name === 'AbortError') return
-      setLocalizing(false)
+      _job.localizing = false
+      _job.abort = null
+      _job.notify()
       alert('Localization failed: ' + err.message)
     }
   }

@@ -98,7 +98,7 @@ async function localizeImage(
   let lastResult: Buffer | null = null
   let lastFixPrompt = ''
 
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= 5; attempt++) {
     const prompt = buildGeminiPrompt(language, phrases, lastFixPrompt || undefined)
 
     let result: Buffer | null = null
@@ -126,12 +126,12 @@ async function localizeImage(
     }
 
     console.log(`[loc] Attempt ${attempt} QA: ${qa.status}`, qa.fix_prompt || '')
-    onAttempt?.(attempt, qa.status === 'ok' ? 'ok' : attempt < 3 ? 'retry' : 'fail')
+    onAttempt?.(attempt, qa.status === 'ok' ? 'ok' : attempt < 5 ? 'retry' : 'fail')
 
     if (qa.status === 'ok') return result
 
     lastFixPrompt = qa.fix_prompt
-    if (attempt < 3) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
+    if (attempt < 5) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
   }
 
   return lastResult!
@@ -634,68 +634,113 @@ export async function runLocalizationJob(
         langFolderMap[lang] = await createDriveFolder(lang, folder.id)
       }
 
-      let totalUploaded = 0
+      // Step 1: Analyze all images, collect per-image texts and buffers
+      type ImageData = {
+        img: typeof allImages[0]
+        buffer: Buffer
+        mime: string
+        texts: Set<string>       // texts found in this image
+        roles: Record<string, string>  // text → role
+      }
+
+      const imageDataList: ImageData[] = []
+      const allTextsMap = new Map<string, { text: string; role: string }>() // unified text pool
+
+      patch(folder.id, { status: 'analyzing', uploadInfo: `Analyzing ${allImages.length} images…` })
+      emit()
 
       for (const img of allImages) {
-        // Per-image: analyze → translate → localize for each language
-        const imgBuffer = await downloadFileAsBuffer(img.id)
+        const buffer = await downloadFileAsBuffer(img.id)
         const mime = img.mimeType || 'image/jpeg'
-        const imgBase64 = `data:${mime};base64,${imgBuffer.toString('base64')}`
+        const base64 = `data:${mime};base64,${buffer.toString('base64')}`
 
-        patch(folder.id, { status: 'analyzing', uploadInfo: `Analyzing ${img.name}…` })
+        patch(folder.id, { uploadInfo: `Analyzing ${img.name}…` })
         emit()
 
         let analysis: any
         try {
-          analysis = await analyzeImage(imgBase64)
+          analysis = await analyzeImage(base64)
         } catch (err: any) {
           console.warn(`[loc] analyzeImage failed for ${img.name}:`, err.message)
+          imageDataList.push({ img, buffer, mime, texts: new Set(), roles: {} })
           continue
         }
 
-        patch(folder.id, { status: 'translating', uploadInfo: `Translating ${img.name}…` })
-        emit()
-
-        let translationResult: any
-        try {
-          translationResult = await translateTexts(analysis, targetLanguages)
-        } catch (err: any) {
-          console.warn(`[loc] translateTexts failed for ${img.name}:`, err.message)
-          continue
+        const texts = new Set<string>()
+        const roles: Record<string, string> = {}
+        for (const t of (analysis?.texts || [])) {
+          texts.add(t.text)
+          roles[t.text] = t.role_in_composition || t.type || ''
+          if (!allTextsMap.has(t.text)) {
+            allTextsMap.set(t.text, { text: t.text, role: roles[t.text] })
+          }
         }
+        imageDataList.push({ img, buffer, mime, texts, roles })
+      }
 
-        const translations: { language: string; phrases: { id: string; en: string; translated: string }[] }[] =
-          translationResult.translations || []
+      // Step 2: Translate once using the unified text pool
+      patch(folder.id, { status: 'translating', uploadInfo: `Translating ${allTextsMap.size} unique texts…` })
+      emit()
 
-        patch(folder.id, { status: 'uploading' })
+      const mergedAnalysis = { texts: Array.from(allTextsMap.values()).map(t => ({ text: t.text, role_in_composition: t.role })) }
+      let translationResult: any
+      try {
+        translationResult = await translateTexts(mergedAnalysis, targetLanguages)
+      } catch (err: any) {
+        console.warn(`[loc] translateTexts failed:`, err.message)
+        patch(folder.id, { status: 'error', error: `Translation failed: ${err.message}` })
         emit()
+        continue
+      }
 
-        for (const translation of translations) {
-          const lang = translation.language
+      const translations: { language: string; phrases: { id: string; en: string; translated: string }[] }[] =
+        translationResult.translations || []
 
+      // Build lang → phrase lookup map (en → translated)
+      const langDicts: Record<string, Record<string, { translated: string; role: string }>> = {}
+      for (const t of translations) {
+        langDicts[t.language] = {}
+        for (const p of t.phrases) {
+          langDicts[t.language][p.en] = {
+            translated: p.translated,
+            role: allTextsMap.get(p.en)?.role || '',
+          }
+        }
+      }
+
+      // Step 3: Localize each image using per-image text subset from shared dict
+      patch(folder.id, { status: 'uploading' })
+      emit()
+
+      let totalUploaded = 0
+
+      for (const { img, buffer, mime, texts, roles } of imageDataList) {
+        for (const lang of targetLanguages) {
           if (existingLangs.has(lang.toUpperCase())) continue
 
           const langFolderId = langFolderMap[lang]
           if (!langFolderId) continue
 
-          const analysisTexts: Record<string, string> = {}
-          for (const t of (analysis?.texts || [])) {
-            analysisTexts[t.text] = t.role_in_composition || t.type || ''
-          }
-          const langPhrases = translation.phrases.map((p: any) => ({
-            en: p.en,
-            translated: p.translated,
-            role: analysisTexts[p.en] || '',
-          }))
+          const dict = langDicts[lang] || {}
+          // Only phrases that actually appear in this image
+          const langPhrases = Array.from(texts)
+            .filter(en => dict[en])
+            .map(en => ({
+              en,
+              translated: dict[en].translated,
+              role: roles[en] || dict[en].role,
+            }))
+
+          if (langPhrases.length === 0) continue
 
           try {
             const newName = buildNewName(img.name, lang, cp)
 
-            let finalBuffer = imgBuffer
+            let finalBuffer = buffer
             try {
-              finalBuffer = await localizeImage(imgBuffer, mime, lang, langPhrases, (attempt, status) => {
+              finalBuffer = await localizeImage(buffer, mime, lang, langPhrases, (attempt, status) => {
                 const icon = status === 'ok' ? '✓' : status === 'retry' ? '↻' : '✗'
-                patch(folder.id, { uploadInfo: `${lang}: ${img.name} — attempt ${attempt}/3 ${icon}` })
+                patch(folder.id, { uploadInfo: `${lang}: ${img.name} — attempt ${attempt}/5 ${icon}` })
                 emit()
               })
             } catch (locErr: any) {
@@ -722,16 +767,13 @@ export async function runLocalizationJob(
             emit()
           }
         }
-
-        // Mark langs complete after last image
-        if (img === allImages[allImages.length - 1]) {
-          for (const lang of targetLanguages) {
-            if (!existingLangs.has(lang.toUpperCase())) completedLangs.push(lang)
-          }
-          patch(folder.id, { completedLangs: [...completedLangs] })
-          emit()
-        }
       }
+
+      for (const lang of targetLanguages) {
+        if (!existingLangs.has(lang.toUpperCase())) completedLangs.push(lang)
+      }
+      patch(folder.id, { completedLangs: [...completedLangs] })
+      emit()
 
       // Handle skipped langs
       for (const lang of targetLanguages) {
