@@ -661,7 +661,7 @@ export async function runLocalizationJob(
         let uploaded = 0
         let failed = 0
 
-        await Promise.all(allImages.map(async (img) => {
+        for (const img of allImages) {
           try {
             const imgBuffer = await downloadFileAsBuffer(img.id)
             const newName = buildNewName(img.name, lang, cp)
@@ -695,7 +695,7 @@ export async function runLocalizationJob(
             patch(folder.id, { error: `${lang}/${img.name}: ${msg}` })
             emit()
           }
-        }))
+        }
 
         completedLangs.push(lang)
         patch(folder.id, {
