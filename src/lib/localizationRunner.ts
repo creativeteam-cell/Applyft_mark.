@@ -97,19 +97,30 @@ async function localizeImage(
 
   for (let attempt = 1; attempt <= 3; attempt++) {
     const prompt = buildGeminiPrompt(language, phrases, lastFixPrompt || undefined)
-    const result = await geminiRequest([
-      { text: prompt },
-      { inline_data: { mime_type: mimeType, data: imgBuffer.toString('base64') } },
-    ], mimeType).catch(err => {
-      console.warn(`[loc] Gemini attempt ${attempt} failed:`, err.message)
-      return lastResult
-    })
 
-    if (!result) continue
+    let result: Buffer | null = null
+    try {
+      result = await geminiRequest([
+        { text: prompt },
+        { inline_data: { mime_type: mimeType, data: imgBuffer.toString('base64') } },
+      ], mimeType)
+    } catch (err: any) {
+      console.warn(`[loc] Gemini attempt ${attempt} failed:`, err.message)
+      continue // skip to next attempt
+    }
+
     lastResult = result
 
-    const dataUrl = `data:${mimeType};base64,${result.toString('base64')}`
-    const qa = await reviewLocalizedImage(dataUrl, language, phrases).catch(() => ({ status: 'ok' as const, fix_prompt: '' }))
+    // Review — if review itself throws, log and retry Gemini anyway
+    let qa: { status: 'ok' | 'fail'; fix_prompt: string }
+    try {
+      const dataUrl = `data:${mimeType};base64,${result.toString('base64')}`
+      qa = await reviewLocalizedImage(dataUrl, language, phrases)
+    } catch (err: any) {
+      console.warn(`[loc] GPT review attempt ${attempt} failed:`, err.message)
+      // Don't exit — treat as fail so we retry Gemini
+      qa = { status: 'fail', fix_prompt: 'Some text may still be in the wrong language. Check all text elements carefully and replace any untranslated text.' }
+    }
 
     console.log(`[loc] Attempt ${attempt} QA: ${qa.status}`, qa.fix_prompt || '')
 
@@ -505,7 +516,7 @@ async function reviewLocalizedImage(
       {
         role: 'user',
         content: [
-          { type: 'image_url', image_url: { url: localizedImageBase64DataUrl, detail: 'low' } },
+          { type: 'image_url', image_url: { url: localizedImageBase64DataUrl, detail: 'high' } },
           {
             type: 'text',
             text: `You are a strict QA checker for localized advertising images.
