@@ -592,6 +592,48 @@ If issues found:
   }
 }
 
+// --- Extract translations from existing translated image (OCR reuse) ---
+
+async function extractTranslationsFromExisting(
+  sourceDataUrl: string,
+  translatedDataUrl: string,
+  language: string,
+): Promise<{ en: string; translated: string }[]> {
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image_url', image_url: { url: sourceDataUrl, detail: 'high' } },
+        { type: 'image_url', image_url: { url: translatedDataUrl, detail: 'high' } },
+        {
+          type: 'text',
+          text: `IMAGE 1 is the English original. IMAGE 2 is its ${language} translation.
+
+Extract all text translation pairs. For every text visible in IMAGE 1, find its corresponding translation in IMAGE 2.
+
+Rules:
+- Include every translated text element
+- Skip brand names, logos, URLs that were not translated
+- Match carefully by position and context
+
+Respond ONLY with a raw JSON array, no markdown, no backticks:
+[{"en": "English text", "translated": "${language} translation"}, ...]`,
+        },
+      ],
+    }],
+    max_tokens: 1000,
+  })
+  try {
+    const raw = response.choices[0].message.content || '[]'
+    const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
+    const arr = JSON.parse(clean.slice(clean.indexOf('['), clean.lastIndexOf(']') + 1))
+    return Array.isArray(arr) ? arr : []
+  } catch {
+    return []
+  }
+}
+
 // --- Main runner ---
 
 export async function runLocalizationJob(
@@ -629,15 +671,17 @@ export async function runLocalizationJob(
       const subfolders = await listSubfolders(folder.id)
       const existingLangFolders = new Map(subfolders.map(f => [f.name.toUpperCase(), f.id]))
 
-      // If EN is a target language, use any non-EN folder as source (EN does not exist yet).
-      // Otherwise use EN as source.
+      // Source priority: EN folder → any other subfolder
       const enIsTarget = targetLanguages.map(l => l.toUpperCase()).includes('EN')
+      const targetLangSet = new Set(targetLanguages.map(l => l.toUpperCase()))
       const sourceFolder = enIsTarget
         ? subfolders.find(f => f.name.toUpperCase() !== 'EN')
         : subfolders.find(f => f.name.toUpperCase() === 'EN')
+          ?? subfolders.find(f => !targetLangSet.has(f.name.toUpperCase()))
+          ?? subfolders[0]
 
       if (!sourceFolder) {
-        patch(folder.id, { status: 'error', error: enIsTarget ? 'No source folder found (need any non-EN)' : 'No EN folder found' })
+        patch(folder.id, { status: 'error', error: 'No source folder found' })
         emit()
         continue
       }
@@ -655,34 +699,55 @@ export async function runLocalizationJob(
       const completedLangs: string[] = []
 
       // For each language: reuse existing folder or create new one
-      // Also build a set of already-uploaded filenames per language to skip them
+      // Store existing files as Map<name, id> so we can download them if needed
       const langFolderMap: Record<string, string> = {}
-      const langExistingFiles: Record<string, Set<string>> = {}
+      const langExistingFiles: Record<string, Map<string, string>> = {} // name → id
 
       for (const lang of targetLanguages) {
         const existingFolderId = existingLangFolders.get(lang.toUpperCase())
         if (existingFolderId) {
-          // Folder exists — check which files are already inside
           langFolderMap[lang] = existingFolderId
           const existingFiles = await listImages(existingFolderId)
-          langExistingFiles[lang] = new Set(existingFiles.map(f => f.name))
+          langExistingFiles[lang] = new Map(existingFiles.map(f => [f.name, f.id]))
         } else {
           langFolderMap[lang] = await createDriveFolder(lang, folder.id)
-          langExistingFiles[lang] = new Set()
+          langExistingFiles[lang] = new Map()
         }
       }
 
-      // Step 1: Analyze all images, collect per-image texts and buffers
+      // Pre-check: compute missing files per lang
+      const langMissing: Record<string, typeof allImages> = {}
+      let anyMissing = false
+      for (const lang of targetLanguages) {
+        const existing = langExistingFiles[lang]
+        const missing = allImages.filter(img => !existing.has(buildNewName(img.name, lang, cp)))
+        langMissing[lang] = missing
+        if (missing.length > 0) anyMissing = true
+      }
+
+      if (!anyMissing) {
+        patch(folder.id, { status: 'done', uploadInfo: 'All files already exist' })
+        emit()
+        continue
+      }
+
+      // Separate langs by strategy:
+      // - needFresh: no existing files → full analyze+translate
+      // - canReuse: has some existing → OCR-extract translations from existing image
+      const langsNeedFresh = targetLanguages.filter(l => langMissing[l].length > 0 && langExistingFiles[l].size === 0)
+      const langsCanReuse = targetLanguages.filter(l => langMissing[l].length > 0 && langExistingFiles[l].size > 0)
+
+      // Step 1: Analyze all source images (needed for needFresh langs + for per-image phrase filtering)
       type ImageData = {
         img: typeof allImages[0]
         buffer: Buffer
         mime: string
-        texts: Set<string>       // texts found in this image
-        roles: Record<string, string>  // text → role
+        texts: Set<string>
+        roles: Record<string, string>
       }
 
       const imageDataList: ImageData[] = []
-      const allTextsMap = new Map<string, { text: string; role: string }>() // unified text pool
+      const allTextsMap = new Map<string, { text: string; role: string }>()
 
       patch(folder.id, { status: 'analyzing', uploadInfo: `Analyzing ${allImages.length} images…` })
       emit()
@@ -716,32 +781,71 @@ export async function runLocalizationJob(
         imageDataList.push({ img, buffer, mime, texts, roles })
       }
 
-      // Step 2: Translate once using the unified text pool
-      patch(folder.id, { status: 'translating', uploadInfo: `Translating ${allTextsMap.size} unique texts…` })
-      emit()
+      // Step 2: Build langDicts
+      const langDicts: Record<string, Record<string, { translated: string; role: string }>> = {}
 
-      const mergedAnalysis = { texts: Array.from(allTextsMap.values()).map(t => ({ text: t.text, role_in_composition: t.role })) }
-      let translationResult: any
-      try {
-        translationResult = await translateTexts(mergedAnalysis, targetLanguages)
-      } catch (err: any) {
-        console.warn(`[loc] translateTexts failed:`, err.message)
-        patch(folder.id, { status: 'error', error: `Translation failed: ${err.message}` })
+      // 2a: Fresh translate for langs with no existing files
+      if (langsNeedFresh.length > 0) {
+        patch(folder.id, { status: 'translating', uploadInfo: `Translating for ${langsNeedFresh.join(', ')}…` })
         emit()
-        continue
+
+        const mergedAnalysis = { texts: Array.from(allTextsMap.values()).map(t => ({ text: t.text, role_in_composition: t.role })) }
+        try {
+          const translationResult = await translateTexts(mergedAnalysis, langsNeedFresh)
+          for (const t of (translationResult.translations || [])) {
+            langDicts[t.language] = {}
+            for (const p of t.phrases) {
+              langDicts[t.language][p.en] = { translated: p.translated, role: allTextsMap.get(p.en)?.role || '' }
+            }
+          }
+        } catch (err: any) {
+          console.warn(`[loc] translateTexts failed:`, err.message)
+          patch(folder.id, { status: 'error', error: `Translation failed: ${err.message}` })
+          emit()
+          continue
+        }
       }
 
-      const translations: { language: string; phrases: { id: string; en: string; translated: string }[] }[] =
-        translationResult.translations || []
+      // 2b: Reuse translations via OCR from existing translated images
+      for (const lang of langsCanReuse) {
+        patch(folder.id, { status: 'analyzing', uploadInfo: `Extracting existing ${lang} translations…` })
+        emit()
 
-      // Build lang → phrase lookup map (en → translated)
-      const langDicts: Record<string, Record<string, { translated: string; role: string }>> = {}
-      for (const t of translations) {
-        langDicts[t.language] = {}
-        for (const p of t.phrases) {
-          langDicts[t.language][p.en] = {
-            translated: p.translated,
-            role: allTextsMap.get(p.en)?.role || '',
+        // Pick the first existing translated file and its source counterpart
+        const existingMap = langExistingFiles[lang]
+        const [existingName, existingId] = Array.from(existingMap.entries())[0]
+
+        // Find corresponding source image
+        const sourceImg = imageDataList.find(d => buildNewName(d.img.name, lang, cp) === existingName)
+
+        if (sourceImg) {
+          try {
+            const sourceMime = sourceImg.mime
+            const sourceDataUrl = `data:${sourceMime};base64,${sourceImg.buffer.toString('base64')}`
+            const translatedBuffer = await downloadFileAsBuffer(existingId)
+            const translatedDataUrl = `data:image/jpeg;base64,${translatedBuffer.toString('base64')}`
+
+            const pairs = await extractTranslationsFromExisting(sourceDataUrl, translatedDataUrl, lang)
+            langDicts[lang] = {}
+            for (const p of pairs) {
+              if (p.en && p.translated) {
+                langDicts[lang][p.en] = { translated: p.translated, role: allTextsMap.get(p.en)?.role || '' }
+              }
+            }
+            console.log(`[loc] Reused ${pairs.length} translations for ${lang} from existing image`)
+          } catch (err: any) {
+            console.warn(`[loc] OCR reuse failed for ${lang}, falling back to fresh translate:`, err.message)
+            // Fallback: fresh translate for this lang
+            try {
+              const mergedAnalysis = { texts: Array.from(allTextsMap.values()).map(t => ({ text: t.text, role_in_composition: t.role })) }
+              const translationResult = await translateTexts(mergedAnalysis, [lang])
+              for (const t of (translationResult.translations || [])) {
+                langDicts[t.language] = {}
+                for (const p of t.phrases) {
+                  langDicts[t.language][p.en] = { translated: p.translated, role: allTextsMap.get(p.en)?.role || '' }
+                }
+              }
+            } catch {}
           }
         }
       }
@@ -757,7 +861,7 @@ export async function runLocalizationJob(
         if (!langFolderId) continue
 
         const dict = langDicts[lang] || {}
-        const existingFiles = langExistingFiles[lang] || new Set()
+        const existingFiles = langExistingFiles[lang] || new Map()
 
         for (const { img, buffer, mime, texts, roles } of imageDataList) {
           const newName = buildNewName(img.name, lang, cp)
