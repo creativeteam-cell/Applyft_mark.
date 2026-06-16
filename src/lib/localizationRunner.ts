@@ -78,19 +78,21 @@ Your ONLY task: replace every listed English text with its translation. Do NOT c
 
 RULES:
 - Completely erase each original text before placing the translation (no ghost letters, no remnants)
-- Keep the same position, font size, color, weight, and alignment
+- Keep the same font size, color, weight, and alignment style
 - Do NOT add people, objects, or decorations not already in the image
-- Do NOT modify background, colors, or layout
+- Do NOT modify background or colors
 - Replace EVERY occurrence of each listed text
 - Zero English letters may remain in replaced areas
 - Match text style exactly: ALL CAPS original → ALL CAPS translation; Title Case → Title Case; sentence case → sentence case
+- Match font weight exactly: if original text is bold → translation must be bold; if original is regular weight → translation must be regular weight; never change weight
 ${isRTL ? `
 ⚠️ CRITICAL — RIGHT-TO-LEFT LANGUAGE (${language}):
 - ALL text must flow RIGHT → LEFT
 - Each line of text starts at the RIGHT edge and ends at the LEFT
 - Do NOT mirror the English layout — the anchor point is the RIGHT side, not the left
 - Numbers and punctuation follow RTL conventions
-- Every single text element must use RTL direction — no exceptions` : ''}
+- Every single text element must use RTL direction — no exceptions
+- LAYOUT FLIP: if a line in the original has [icon LEFT] + [text RIGHT], in the RTL version it must become [text LEFT] + [icon RIGHT] — icons/emojis act as line markers and must move to the opposite side of the text` : ''}
 
 TARGET LANGUAGE: ${language}
 
@@ -559,9 +561,10 @@ Check IMAGE 2 against IMAGE 1 and verify ALL of the following:
 1. Every listed phrase is fully replaced — no original English letters remain in those areas
 2. Every translation is visible, readable, and correctly placed
 3. No mixed languages or invented text
-4. Text style matches the original: if original is ALL CAPS → translation must be ALL CAPS; if original is Title Case → use Title Case; if original is sentence case → use sentence case
+4. Text style matches the original: ALL CAPS, Title Case, sentence case, AND font weight (bold/regular) must match exactly
 5. No phrases are skipped — every single item in the list must appear translated in IMAGE 2
-${['AR', 'HE', 'FA', 'UR'].includes(language.toUpperCase()) ? `6. RTL direction — ALL text must flow right-to-left. Flag any text that appears left-anchored or left-to-right as a critical error` : ''}
+${['AR', 'HE', 'FA', 'UR'].includes(language.toUpperCase()) ? `6. RTL direction — ALL text must flow right-to-left. Flag any text that appears left-anchored or left-to-right as a critical error
+7. Icon/emoji flip — if original has [icon LEFT + text RIGHT], the localized version must have [text LEFT + icon RIGHT]. Icons must move to the opposite side of the text for RTL` : ''}
 
 Important:
 - Brand names, logos, and proper nouns may remain unchanged — do not flag these
