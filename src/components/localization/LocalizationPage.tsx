@@ -498,34 +498,53 @@ function FolderRow({ folder, checked, onToggle, progress }: {
   progress?: FolderProgress
 }) {
   const [hovered, setHovered] = useState(false)
-  const [fileId, setFileId] = useState<string | null | 'loading' | 'none'>('loading')
-  const fetchedRef = useRef(false)
+  const [fileId, setFileId] = useState<string | 'loading' | 'none'>('loading')
 
-  function handleMouseEnter() {
-    setHovered(true)
-    if (!fetchedRef.current) {
-      fetchedRef.current = true
-      fetch('/api/localization/preview?folderId=' + folder.id)
-        .then(r => r.json())
-        .then(data => setFileId(data.fileId || 'none'))
-        .catch(() => setFileId('none'))
-    }
-  }
+  useEffect(() => {
+    fetch('/api/localization/preview?folderId=' + folder.id)
+      .then(r => r.json())
+      .then(data => setFileId(data.fileId || 'none'))
+      .catch(() => setFileId('none'))
+  }, [folder.id])
 
   const isActive = progress && progress.status !== 'pending'
   const spinning = progress && ['analyzing', 'translating', 'uploading', 'verifying'].includes(progress.status)
 
   return (
     <div
-      className="relative flex items-center gap-3 px-5 py-3 rounded-xl"
+      className="relative flex items-center gap-3 px-4 rounded-xl"
       style={{
+        minHeight: 56,
         background: checked ? 'rgba(99,102,241,0.07)' : 'var(--surface)',
         border: '1px solid ' + (checked ? 'rgba(99,102,241,0.35)' : 'var(--border)'),
       }}
-      onMouseEnter={handleMouseEnter}
+      onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
       <Checkbox checked={checked} onChange={onToggle} />
+
+      {/* Inline thumbnail */}
+      <div
+        className="flex-shrink-0 rounded-lg overflow-hidden"
+        style={{ width: 36, height: 46, background: 'var(--border)' }}
+      >
+        {fileId === 'loading' ? (
+          <div className="w-full h-full flex items-center justify-center">
+            <span className="text-gray-600 text-xs animate-pulse">·</span>
+          </div>
+        ) : fileId === 'none' ? (
+          <div className="w-full h-full flex items-center justify-center">
+            <span className="text-gray-600 text-xs">?</span>
+          </div>
+        ) : (
+          <img
+            src={'/api/image?id=' + fileId}
+            alt={folder.name}
+            loading="lazy"
+            className="w-full h-full object-cover"
+          />
+        )}
+      </div>
 
       <a
         href={folder.driveUrl}
@@ -612,6 +631,7 @@ function FolderRow({ folder, checked, onToggle, progress }: {
             <img
               src={'/api/image?id=' + fileId}
               alt={folder.name}
+              loading="lazy"
               className="w-full h-full object-cover"
             />
           )}

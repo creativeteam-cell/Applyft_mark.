@@ -730,14 +730,15 @@ export async function runLocalizationJob(
 
       let totalUploaded = 0
 
-      for (const { img, buffer, mime, texts, roles } of imageDataList) {
-        for (const lang of targetLanguages) {
-          if (existingLangs.has(lang.toUpperCase())) continue
+      for (const lang of targetLanguages) {
+        if (existingLangs.has(lang.toUpperCase())) continue
 
-          const langFolderId = langFolderMap[lang]
-          if (!langFolderId) continue
+        const langFolderId = langFolderMap[lang]
+        if (!langFolderId) continue
 
-          const dict = langDicts[lang] || {}
+        const dict = langDicts[lang] || {}
+
+        for (const { img, buffer, mime, texts, roles } of imageDataList) {
           // Only phrases that actually appear in this image
           const langPhrases = Array.from(texts)
             .filter(en => dict[en])
@@ -784,10 +785,14 @@ export async function runLocalizationJob(
             emit()
           }
         }
+
+        completedLangs.push(lang)
+        patch(folder.id, { completedLangs: [...completedLangs], uploadInfo: `${lang} ✓ (${imageDataList.length} images)` })
+        emit()
       }
 
       for (const lang of targetLanguages) {
-        if (!existingLangs.has(lang.toUpperCase())) completedLangs.push(lang)
+        if (existingLangs.has(lang.toUpperCase())) completedLangs.push(lang)
       }
       patch(folder.id, { completedLangs: [...completedLangs] })
       emit()
