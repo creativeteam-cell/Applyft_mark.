@@ -84,7 +84,7 @@ RULES:
 - Replace EVERY occurrence of each listed text
 - Zero English letters may remain in replaced areas
 - Match text style exactly: ALL CAPS original → ALL CAPS translation; Title Case → Title Case; sentence case → sentence case
-- Match font weight exactly: if original text is bold → translation must be bold; if original is regular weight → translation must be regular weight; never change weight
+- FONT WEIGHT: copy the exact weight from the original — if original is regular/normal weight, translation MUST be regular/normal (NOT bold, NOT semi-bold); if original is bold, translation must be bold; never decide font weight yourself
 ${isRTL ? `
 ⚠️ CRITICAL — RIGHT-TO-LEFT LANGUAGE (${language}):
 - ALL text must flow RIGHT → LEFT
@@ -561,7 +561,7 @@ Check IMAGE 2 against IMAGE 1 and verify ALL of the following:
 1. Every listed phrase is fully replaced — no original English letters remain in those areas
 2. Every translation is visible, readable, and correctly placed
 3. No mixed languages or invented text
-4. Text style matches the original: ALL CAPS, Title Case, sentence case, AND font weight (bold/regular) must match exactly
+4. Text style matches the original: ALL CAPS, Title Case, sentence case, AND font weight must match exactly — if original text is regular weight, translated text must NOT be bold; flag any weight mismatch as an error
 5. No phrases are skipped — every single item in the list must appear translated in IMAGE 2
 ${['AR', 'HE', 'FA', 'UR'].includes(language.toUpperCase()) ? `6. RTL direction — ALL text must flow right-to-left. Flag any text that appears left-anchored or left-to-right as a critical error
 7. Icon/emoji flip — if original has [icon LEFT + text RIGHT], the localized version must have [text LEFT + icon RIGHT]. Icons must move to the opposite side of the text for RTL` : ''}
@@ -627,8 +627,7 @@ export async function runLocalizationJob(
       emit()
 
       const subfolders = await listSubfolders(folder.id)
-      // Track which language folders already exist so we can skip them
-      const existingLangs = new Set(subfolders.map(f => f.name.toUpperCase()))
+      const existingLangFolders = new Map(subfolders.map(f => [f.name.toUpperCase(), f.id]))
 
       // If EN is a target language, use any non-EN folder as source (EN does not exist yet).
       // Otherwise use EN as source.
@@ -655,11 +654,22 @@ export async function runLocalizationJob(
 
       const completedLangs: string[] = []
 
-      // Create language folders upfront (skip existing)
+      // For each language: reuse existing folder or create new one
+      // Also build a set of already-uploaded filenames per language to skip them
       const langFolderMap: Record<string, string> = {}
+      const langExistingFiles: Record<string, Set<string>> = {}
+
       for (const lang of targetLanguages) {
-        if (existingLangs.has(lang.toUpperCase())) continue
-        langFolderMap[lang] = await createDriveFolder(lang, folder.id)
+        const existingFolderId = existingLangFolders.get(lang.toUpperCase())
+        if (existingFolderId) {
+          // Folder exists — check which files are already inside
+          langFolderMap[lang] = existingFolderId
+          const existingFiles = await listImages(existingFolderId)
+          langExistingFiles[lang] = new Set(existingFiles.map(f => f.name))
+        } else {
+          langFolderMap[lang] = await createDriveFolder(lang, folder.id)
+          langExistingFiles[lang] = new Set()
+        }
       }
 
       // Step 1: Analyze all images, collect per-image texts and buffers
@@ -743,14 +753,22 @@ export async function runLocalizationJob(
       let totalUploaded = 0
 
       for (const lang of targetLanguages) {
-        if (existingLangs.has(lang.toUpperCase())) continue
-
         const langFolderId = langFolderMap[lang]
         if (!langFolderId) continue
 
         const dict = langDicts[lang] || {}
+        const existingFiles = langExistingFiles[lang] || new Set()
 
         for (const { img, buffer, mime, texts, roles } of imageDataList) {
+          const newName = buildNewName(img.name, lang, cp)
+
+          // Skip if this specific file already exists in the lang folder
+          if (existingFiles.has(newName)) {
+            patch(folder.id, { uploadInfo: `${lang}: ${img.name} — skipped (exists)` })
+            emit()
+            continue
+          }
+
           // Only phrases that actually appear in this image
           const langPhrases = Array.from(texts)
             .filter(en => dict[en])
@@ -763,7 +781,6 @@ export async function runLocalizationJob(
           if (langPhrases.length === 0) continue
 
           try {
-            const newName = buildNewName(img.name, lang, cp)
 
             let finalBuffer = buffer
             try {
@@ -801,21 +818,6 @@ export async function runLocalizationJob(
         completedLangs.push(lang)
         patch(folder.id, { completedLangs: [...completedLangs], uploadInfo: `${lang} ✓ (${imageDataList.length} images)` })
         emit()
-      }
-
-      for (const lang of targetLanguages) {
-        if (existingLangs.has(lang.toUpperCase())) completedLangs.push(lang)
-      }
-      patch(folder.id, { completedLangs: [...completedLangs] })
-      emit()
-
-      // Handle skipped langs
-      for (const lang of targetLanguages) {
-        if (existingLangs.has(lang.toUpperCase())) {
-          completedLangs.push(lang)
-          patch(folder.id, { completedLangs: [...completedLangs], uploadInfo: `${lang}: skipped (exists)` })
-          emit()
-        }
       }
 
       patch(folder.id, { status: 'done' })
