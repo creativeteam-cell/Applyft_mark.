@@ -63,7 +63,11 @@ function buildGeminiPrompt(
   fixPrompt?: string,
 ): string {
   const translationsText = phrases
-    .map(p => `"${p.en}"${p.role ? ` [${p.role}]` : ''} → "${p.translated}"`)
+    .map(p => {
+      const isAllCaps = p.en === p.en.toUpperCase() && /[A-Z]/.test(p.en)
+      const capsNote = isAllCaps ? ' [ALL CAPS REQUIRED]' : ''
+      return `"${p.en}"${p.role ? ` [${p.role}]` : ''}${capsNote} → "${p.translated}"`
+    })
     .join('\n')
 
   return `You are a strict image localization editor.
@@ -77,6 +81,7 @@ RULES:
 - Do NOT modify background, colors, or layout
 - Replace EVERY occurrence of each listed text
 - Zero English letters may remain in replaced areas
+- Match text style exactly: ALL CAPS original → ALL CAPS translation; Title Case → Title Case; sentence case → sentence case
 ${language === 'AR' || language === 'HE' ? '- Use right-to-left text direction for all replaced text' : ''}
 
 TARGET LANGUAGE: ${language}
@@ -97,6 +102,7 @@ async function localizeImage(
 ): Promise<Buffer> {
   let lastResult: Buffer | null = null
   let lastFixPrompt = ''
+  const originalDataUrl = `data:${mimeType};base64,${imgBuffer.toString('base64')}`
 
   for (let attempt = 1; attempt <= 5; attempt++) {
     const prompt = buildGeminiPrompt(language, phrases, lastFixPrompt || undefined)
@@ -109,17 +115,17 @@ async function localizeImage(
       ], mimeType)
     } catch (err: any) {
       console.warn(`[loc] Gemini attempt ${attempt} failed:`, err.message)
-      if (attempt < 3) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
+      if (attempt < 5) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
       continue
     }
 
     lastResult = result
 
-    // Review — if review itself throws, treat as fail and retry
+    // Review with original + localized — if review throws, treat as fail and retry
     let qa: { status: 'ok' | 'fail'; fix_prompt: string }
     try {
-      const dataUrl = `data:${mimeType};base64,${result.toString('base64')}`
-      qa = await reviewLocalizedImage(dataUrl, language, phrases)
+      const localizedDataUrl = `data:${mimeType};base64,${result.toString('base64')}`
+      qa = await reviewLocalizedImage(originalDataUrl, localizedDataUrl, language, phrases)
     } catch (err: any) {
       console.warn(`[loc] GPT review attempt ${attempt} failed:`, err.message)
       qa = { status: 'fail', fix_prompt: 'Some text may still be in the wrong language. Check all text elements carefully and replace any untranslated text.' }
@@ -509,38 +515,46 @@ VALIDATION:
 // --- GPT QA review (post-Gemini) ---
 
 async function reviewLocalizedImage(
+  originalImageBase64DataUrl: string,
   localizedImageBase64DataUrl: string,
   language: string,
   phrases: { en: string; translated: string }[]
 ): Promise<{ status: 'ok' | 'fail'; fix_prompt: string }> {
   if (phrases.length === 0) return { status: 'ok', fix_prompt: '' }
-  const expectedText = phrases.map(p => `"${p.en}" → "${p.translated}"`).join('\n')
+  const expectedText = phrases.map(p => {
+    const isAllCaps = p.en === p.en.toUpperCase() && /[A-Z]/.test(p.en)
+    return `"${p.en}" → "${p.translated}"${isAllCaps ? ' [MUST BE ALL CAPS]' : ''}`
+  }).join('\n')
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [
       {
         role: 'user',
         content: [
+          { type: 'image_url', image_url: { url: originalImageBase64DataUrl, detail: 'high' } },
           { type: 'image_url', image_url: { url: localizedImageBase64DataUrl, detail: 'high' } },
           {
             type: 'text',
             text: `You are a strict QA checker for localized advertising images.
 
-Your job: verify that text replacement was done correctly on the image.
+IMAGE 1 = original (English source)
+IMAGE 2 = localized result to verify
 
 Target language: ${language}
 
 Expected replacements:
 ${expectedText}
 
-Check the image and verify:
-1. All original source text is fully removed — no ghost text, fragments, or remnants
-2. All provided translations are correctly visible and readable
-3. No mixed languages, corrupted letters, or invented text
+Check IMAGE 2 against IMAGE 1 and verify ALL of the following:
+1. Every listed phrase is fully replaced — no original English letters remain in those areas
+2. Every translation is visible, readable, and correctly placed
+3. No mixed languages or invented text
+4. Text style matches the original: if original is ALL CAPS → translation must be ALL CAPS; if original is Title Case → use Title Case; if original is sentence case → use sentence case
+5. No phrases are skipped — every single item in the list must appear translated in IMAGE 2
 
 Important:
 - Brand names, logos, and proper nouns may remain unchanged — do not flag these
-- Only flag real visible problems
+- Be specific in fix_prompt: name exactly which text is wrong and what the correct fix is
 
 Respond ONLY with raw JSON, no markdown, no backticks, no explanation:
 
@@ -548,12 +562,12 @@ If everything is correct:
 {"status": "ok", "fix_prompt": ""}
 
 If issues found:
-{"status": "fail", "fix_prompt": "Describe exactly what is wrong and what text needs to be fixed"}`,
+{"status": "fail", "fix_prompt": "List exactly what is wrong: which text, what issue (missing/wrong case/remnants/wrong language)"}`,
           },
         ],
       },
     ],
-    max_tokens: 500,
+    max_tokens: 800,
   })
   try {
     const raw = response.choices[0].message.content || '{}'
