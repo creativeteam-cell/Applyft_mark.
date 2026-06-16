@@ -92,27 +92,33 @@ async function localizeImage(
   language: string,
   phrases: { en: string; translated: string; role?: string }[],
 ): Promise<Buffer> {
-  // Attempt 1
-  const prompt1 = buildGeminiPrompt(language, phrases)
-  const result1 = await geminiRequest([
-    { text: prompt1 },
-    { inline_data: { mime_type: mimeType, data: imgBuffer.toString('base64') } },
-  ], mimeType)
+  let lastResult: Buffer | null = null
+  let lastFixPrompt = ''
 
-  // GPT-4o review
-  const dataUrl = `data:${mimeType};base64,${result1.toString('base64')}`
-  const qa = await reviewLocalizedImage(dataUrl, language, phrases).catch(() => ({ status: 'ok' as const, fix_prompt: '' }))
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const prompt = buildGeminiPrompt(language, phrases, lastFixPrompt || undefined)
+    const result = await geminiRequest([
+      { text: prompt },
+      { inline_data: { mime_type: mimeType, data: imgBuffer.toString('base64') } },
+    ], mimeType).catch(err => {
+      console.warn(`[loc] Gemini attempt ${attempt} failed:`, err.message)
+      return lastResult
+    })
 
-  if (qa.status === 'ok') return result1
+    if (!result) continue
+    lastResult = result
 
-  console.warn(`[loc] QA fail, retrying with fix_prompt:`, qa.fix_prompt)
+    const dataUrl = `data:${mimeType};base64,${result.toString('base64')}`
+    const qa = await reviewLocalizedImage(dataUrl, language, phrases).catch(() => ({ status: 'ok' as const, fix_prompt: '' }))
 
-  // Attempt 2 — retry Gemini with fix_prompt
-  const prompt2 = buildGeminiPrompt(language, phrases, qa.fix_prompt)
-  return geminiRequest([
-    { text: prompt2 },
-    { inline_data: { mime_type: mimeType, data: imgBuffer.toString('base64') } },
-  ], mimeType).catch(() => result1) // if retry fails, return attempt 1
+    console.log(`[loc] Attempt ${attempt} QA: ${qa.status}`, qa.fix_prompt || '')
+
+    if (qa.status === 'ok') return result
+
+    lastFixPrompt = qa.fix_prompt
+  }
+
+  return lastResult!
 }
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
