@@ -41,6 +41,7 @@ const _job: {
   state: JobState | null
   localizing: boolean
   abort: AbortController | null
+  totalLangs: number
   listeners: Set<() => void>
   notify: () => void
   subscribe: (fn: () => void) => () => void
@@ -48,6 +49,7 @@ const _job: {
   state: null,
   localizing: false,
   abort: null,
+  totalLangs: 0,
   listeners: new Set(),
   notify() { this.listeners.forEach(fn => fn()) },
   subscribe(fn) { this.listeners.add(fn); return () => { this.listeners.delete(fn) } },
@@ -228,9 +230,14 @@ export function LocalizationPage() {
       .filter(f => selected.has(f.id))
       .map(f => ({ id: f.id, name: f.name }))
 
+    const allLangs = Array.from(selectedLangs)
+    // 1 language per batch — safest for Vercel Free (60s limit)
+    const batches = allLangs.map(lang => [lang])
+
     _job.abort?.abort()
     const controller = new AbortController()
     _job.abort = controller
+    _job.totalLangs = allLangs.length
     _job.state = {
       status: 'running',
       folders: selectedFolders.map(f => ({
@@ -244,60 +251,92 @@ export function LocalizationPage() {
     _job.notify()
     setSelected(new Set())
 
+    // Track accumulated completedLangs across batches
+    const accumulated: Record<string, string[]> = {}
+    for (const f of selectedFolders) accumulated[f.id] = []
+
     try {
-      const res = await fetch('/api/localization/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          folders: selectedFolders,
-          languages: Array.from(selectedLangs),
-          cp: selectedMarketer,
-          appCode: selectedApp,
-        }),
-        signal: controller.signal,
-      })
+      for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+        if (controller.signal.aborted) break
+        const batchLangs = batches[batchIdx]
+        const isLastBatch = batchIdx === batches.length - 1
 
-      if (!res.ok || !res.body) {
-        const err = await res.json().catch(() => ({ error: 'Failed to start' }))
-        throw new Error(err.error || 'Failed to start')
-      }
+        const res = await fetch('/api/localization/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            folders: selectedFolders,
+            languages: batchLangs,
+            cp: selectedMarketer,
+            appCode: selectedApp,
+          }),
+          signal: controller.signal,
+        })
 
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
+        if (!res.ok || !res.body) {
+          const err = await res.json().catch(() => ({ error: 'Failed to start' }))
+          throw new Error(err.error || 'Failed to start')
+        }
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
 
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
 
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          try {
-            const snapshot = JSON.parse(line.slice(6))
-            _job.state = snapshot
-            _job.notify()
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() ?? ''
 
-            if (snapshot.status === 'done' || snapshot.status === 'error') {
-              _job.localizing = false
-              _job.abort = null
-              _job.notify()
-              setTimeout(() => fetchFolders(), 1500)
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+            try {
+              const snapshot = JSON.parse(line.slice(6)) as JobState
 
-              if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-                const doneCount = (snapshot.folders as FolderProgress[]).filter(f => f.status === 'done').length
-                const errCount = (snapshot.folders as FolderProgress[]).filter(f => f.status === 'error').length
-                const msg = snapshot.status === 'done'
-                  ? '✅ Localization done! ' + doneCount + ' folder' + (doneCount !== 1 ? 's' : '') + ' processed.'
-                  : '⚠️ Finished with ' + errCount + ' error' + (errCount !== 1 ? 's' : '') + '. ' + doneCount + ' ok.'
-                new Notification('Applyft Mark', { body: msg, icon: '/favicon.ico' })
+              // Merge accumulated langs from previous batches into snapshot
+              const mergedFolders = snapshot.folders.map(f => ({
+                ...f,
+                completedLangs: [
+                  ...(accumulated[f.folderId] || []),
+                  ...(f.completedLangs || []),
+                ],
+              }))
+
+              // When this batch finishes, save its completed langs for next batch
+              if (snapshot.status === 'done' || snapshot.status === 'error') {
+                for (const mf of mergedFolders) {
+                  accumulated[mf.folderId] = mf.completedLangs || []
+                }
               }
+
+              // Keep overall status 'running' until the very last batch finishes
+              const overallStatus = !isLastBatch && (snapshot.status === 'done' || snapshot.status === 'error')
+                ? 'running' as const
+                : snapshot.status
+
+              _job.state = { status: overallStatus, folders: mergedFolders }
+              _job.notify()
+
+              if ((snapshot.status === 'done' || snapshot.status === 'error') && isLastBatch) {
+                _job.localizing = false
+                _job.abort = null
+                _job.notify()
+                setTimeout(() => fetchFolders(), 1500)
+
+                if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+                  const doneCount = mergedFolders.filter(f => f.status === 'done').length
+                  const errCount = mergedFolders.filter(f => f.status === 'error').length
+                  const msg = snapshot.status === 'done'
+                    ? '✅ Localization done! ' + doneCount + ' folder' + (doneCount !== 1 ? 's' : '') + ' processed.'
+                    : '⚠️ Finished with ' + errCount + ' error' + (errCount !== 1 ? 's' : '') + '. ' + doneCount + ' ok.'
+                  new Notification('Applyft Mark', { body: msg, icon: '/favicon.ico' })
+                }
+              }
+            } catch {
+              // malformed JSON chunk
             }
-          } catch {
-            // malformed JSON chunk
           }
         }
       }
@@ -382,7 +421,8 @@ export function LocalizationPage() {
             {activeJob && activeJob.status === 'running' && (
               <span className="text-xs text-gray-400 font-mono flex items-center gap-2">
                 <span className="animate-spin">~</span>
-                {activeJob.folders?.filter(f => f.status === 'done').length ?? 0}/{activeJob.folders?.length ?? 0} done
+                {activeJob.folders?.reduce((s, f) => s + (f.completedLangs?.length || 0), 0) ?? 0}
+                /{(activeJob.folders?.length ?? 0) * _job.totalLangs} langs
               </span>
             )}
             <button
