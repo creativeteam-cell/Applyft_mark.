@@ -122,6 +122,15 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
     setError(null)
 
     try {
+      // Compress all image inputs to avoid 413 Request Entity Too Large
+      const [compressedReference, compressedLogo, compressedAssets] = await Promise.all([
+        reference ? compressImage(reference, 1500) : Promise.resolve(undefined),
+        logoBase64 ? compressImage(logoBase64, 800) : Promise.resolve(undefined),
+        assets?.length
+          ? Promise.all(assets.map(async a => ({ ...a, base64: await compressImage(a.base64, 1200) })))
+          : Promise.resolve(undefined),
+      ])
+
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -130,12 +139,12 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
           selectedPain,
           selectedHook: selectedHook !== 'none' ? selectedHook : undefined,
           userText: prompt,
-          referenceBase64: reference,
+          referenceBase64: compressedReference,
           fixNote: fix,
           previousImageBase64: prevImage,
           customPrompt: customPrompt,
-          logoBase64: logoBase64 || undefined,
-          assets: assets?.length ? assets : undefined,
+          logoBase64: compressedLogo || undefined,
+          assets: compressedAssets?.length ? compressedAssets : undefined,
         }),
       })
 
