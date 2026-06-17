@@ -149,10 +149,11 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
 
       let finalImage = data.imageBase64
       try {
+        const compressedForResize = await compressImage(data.imageBase64, 2000)
         const resizeRes = await fetch('/api/resize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageBase64: data.imageBase64, size: '4x5' }),
+          body: JSON.stringify({ imageBase64: compressedForResize, size: '4x5' }),
         })
         const resizeData = await resizeRes.json()
         if (resizeData.imageBase64) finalImage = resizeData.imageBase64
@@ -202,10 +203,11 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
           const data = await res.json()
           if (!data.error && data.imageBase64) {
             try {
+              const compressedForResize = await compressImage(data.imageBase64, 2000)
               const resizeRes = await fetch('/api/resize', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imageBase64: data.imageBase64, size }),
+                body: JSON.stringify({ imageBase64: compressedForResize, size }),
               })
               const resizeData = await resizeRes.json()
               results[size] = resizeData.imageBase64 || data.imageBase64
@@ -330,10 +332,11 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
           if (!data.error && data.imageBase64) {
             let finalImage = data.imageBase64
             try {
+              const compressedForResize = await compressImage(data.imageBase64, 2000)
               const resizeRes = await fetch('/api/resize', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imageBase64: data.imageBase64, size }),
+                body: JSON.stringify({ imageBase64: compressedForResize, size }),
               })
               const resizeData = await resizeRes.json()
               if (resizeData.imageBase64) finalImage = resizeData.imageBase64
@@ -369,14 +372,9 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          appCode,
-          selectedPain,
-          selectedHook: selectedHook !== 'none' ? selectedHook : undefined,
-          userText: prompt,
-          fixNote: sizeFixNote,
-          previousImageBase64: compressed,
-          logoBase64: logoBase64 || undefined,
+          recomposeBase64: compressed,
           targetSize: size,
+          fixNote: sizeFixNote,
         }),
       })
 
@@ -385,10 +383,11 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
 
       let finalImage = data.imageBase64
       try {
+        const compressedForResize = await compressImage(data.imageBase64, 2000)
         const resizeRes = await fetch('/api/resize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageBase64: data.imageBase64, size }),
+          body: JSON.stringify({ imageBase64: compressedForResize, size }),
         })
         const resizeData = await resizeRes.json()
         if (resizeData.imageBase64) finalImage = resizeData.imageBase64

@@ -8,7 +8,10 @@ const nextConfig = {
   },
   experimental: {
     serverComponentsExternalPackages: ['sharp'],
+    serverActions: {
+      bodySizeLimit: '20mb',
+    },
   },
 }
- 
+
 module.exports = nextConfig
