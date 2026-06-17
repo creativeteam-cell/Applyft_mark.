@@ -231,42 +231,43 @@ export function LocalizationPage() {
       .map(f => ({ id: f.id, name: f.name }))
 
     const allLangs = Array.from(selectedLangs)
-    // 1 language per batch — safest for Vercel Free (60s limit)
-    const batches = allLangs.map(lang => [lang])
+
+    // 1 folder × 1 language per request — handles many folders + many langs
+    // Order: lang-outer, folder-inner (all folders for lang1, then lang2, ...)
+    const pairs: { folder: { id: string; name: string }; lang: string }[] = []
+    for (const lang of allLangs) {
+      for (const folder of selectedFolders) {
+        pairs.push({ folder, lang })
+      }
+    }
+
+    // Master state: one entry per selected folder, accumulates completedLangs across pairs
+    const masterFolders = new Map<string, FolderProgress>()
+    for (const f of selectedFolders) {
+      masterFolders.set(f.id, { folderId: f.id, folderName: f.name, status: 'pending', completedLangs: [] })
+    }
 
     _job.abort?.abort()
     const controller = new AbortController()
     _job.abort = controller
     _job.totalLangs = allLangs.length
-    _job.state = {
-      status: 'running',
-      folders: selectedFolders.map(f => ({
-        folderId: f.id,
-        folderName: f.name,
-        status: 'pending' as const,
-        completedLangs: [],
-      })),
-    }
+    _job.state = { status: 'running', folders: Array.from(masterFolders.values()) }
     _job.localizing = true
     _job.notify()
     setSelected(new Set())
 
-    // Track accumulated completedLangs across batches
-    const accumulated: Record<string, string[]> = {}
-    for (const f of selectedFolders) accumulated[f.id] = []
-
     try {
-      for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+      for (let pairIdx = 0; pairIdx < pairs.length; pairIdx++) {
         if (controller.signal.aborted) break
-        const batchLangs = batches[batchIdx]
-        const isLastBatch = batchIdx === batches.length - 1
+        const { folder: batchFolder, lang: batchLang } = pairs[pairIdx]
+        const isLastPair = pairIdx === pairs.length - 1
 
         const res = await fetch('/api/localization/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            folders: selectedFolders,
-            languages: batchLangs,
+            folders: [batchFolder],
+            languages: [batchLang],
             cp: selectedMarketer,
             appCode: selectedApp,
           }),
@@ -295,42 +296,35 @@ export function LocalizationPage() {
             try {
               const snapshot = JSON.parse(line.slice(6)) as JobState
 
-              // Merge accumulated langs from previous batches into snapshot
-              const mergedFolders = snapshot.folders.map(f => ({
-                ...f,
-                completedLangs: [
-                  ...(accumulated[f.folderId] || []),
-                  ...(f.completedLangs || []),
-                ],
-              }))
-
-              // When this batch finishes, save its completed langs for next batch
-              if (snapshot.status === 'done' || snapshot.status === 'error') {
-                for (const mf of mergedFolders) {
-                  accumulated[mf.folderId] = mf.completedLangs || []
-                }
+              // Update master state for this batch's folder only
+              const serverFolder = snapshot.folders[0]
+              if (serverFolder) {
+                const prev = masterFolders.get(serverFolder.folderId)
+                const prevLangs = prev?.completedLangs || []
+                const newLangs = (serverFolder.completedLangs || []).filter(l => !prevLangs.includes(l))
+                masterFolders.set(serverFolder.folderId, {
+                  ...serverFolder,
+                  completedLangs: [...prevLangs, ...newLangs],
+                })
               }
 
-              // Keep overall status 'running' until the very last batch finishes
-              const overallStatus = !isLastBatch && (snapshot.status === 'done' || snapshot.status === 'error')
+              const overallStatus = !isLastPair && (snapshot.status === 'done' || snapshot.status === 'error')
                 ? 'running' as const
                 : snapshot.status
 
-              _job.state = { status: overallStatus, folders: mergedFolders }
+              _job.state = { status: overallStatus, folders: Array.from(masterFolders.values()) }
               _job.notify()
 
-              if ((snapshot.status === 'done' || snapshot.status === 'error') && isLastBatch) {
+              if ((snapshot.status === 'done' || snapshot.status === 'error') && isLastPair) {
                 _job.localizing = false
                 _job.abort = null
                 _job.notify()
                 setTimeout(() => fetchFolders(), 1500)
 
                 if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-                  const doneCount = mergedFolders.filter(f => f.status === 'done').length
-                  const errCount = mergedFolders.filter(f => f.status === 'error').length
-                  const msg = snapshot.status === 'done'
-                    ? '✅ Localization done! ' + doneCount + ' folder' + (doneCount !== 1 ? 's' : '') + ' processed.'
-                    : '⚠️ Finished with ' + errCount + ' error' + (errCount !== 1 ? 's' : '') + '. ' + doneCount + ' ok.'
+                  const allFolders = Array.from(masterFolders.values())
+                  const doneCount = allFolders.filter(f => (f.completedLangs?.length ?? 0) > 0).length
+                  const msg = '✅ Localization done! ' + doneCount + ' folder' + (doneCount !== 1 ? 's' : '') + ' processed.'
                   new Notification('Applyft Mark', { body: msg, icon: '/favicon.ico' })
                 }
               }
