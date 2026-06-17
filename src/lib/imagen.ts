@@ -42,8 +42,12 @@ ${TEXT_RULE}
 LAYOUT RULES (the ONLY thing you may change):
 - Reposition and rescale existing elements to fit naturally in a square format
 - Center the main subject and headline text horizontally and vertically
-- Ensure all text is fully visible within safe zones (at least 10% padding from all edges)
-- Maintain the same overall mood, style, colors, typography, and composition hierarchy`,
+- Maintain the same overall mood, style, colors, typography, and composition hierarchy
+
+SAFE ZONE — NON-NEGOTIABLE:
+- Every text element, button, and UI element MUST have at least 120px clearance from EVERY edge (top, bottom, left, right)
+- Nothing may touch or cross the safe zone boundary — not even partially
+- If in doubt, push elements further toward the center`,
 
   '9x16': `Recompose this exact ad creative for a tall vertical 9:16 aspect ratio.
 ${TEXT_RULE}
@@ -51,8 +55,12 @@ ${TEXT_RULE}
 LAYOUT RULES (the ONLY thing you may change):
 - Reposition and rescale existing elements to fit naturally in a tall vertical format
 - Stack elements vertically: main visual in upper portion, headline in the middle, CTA button near the bottom
-- Ensure all text is fully visible within safe zones (at least 10% padding from all edges)
-- Maintain the same overall mood, style, colors, typography, and composition hierarchy`,
+- Maintain the same overall mood, style, colors, typography, and composition hierarchy
+
+SAFE ZONE — NON-NEGOTIABLE:
+- Every text element, button, and UI element MUST have at least 120px clearance from EVERY edge (top, bottom, left, right)
+- Nothing may touch or cross the safe zone boundary — not even partially
+- If in doubt, push elements further toward the center`,
 
   '1.91x1': `Recompose this exact ad creative for a wide horizontal 1.91:1 aspect ratio.
 ${TEXT_RULE}
@@ -60,8 +68,12 @@ ${TEXT_RULE}
 LAYOUT RULES (the ONLY thing you may change):
 - Reposition and rescale existing elements to fit naturally in a wide horizontal format
 - Place main visual on one side, text hierarchy (headline + subheadline + CTA) on the other side
-- Ensure all text is fully visible within safe zones (at least 10% padding from all edges)
-- Maintain the same overall mood, style, colors, typography, and composition hierarchy`,
+- Maintain the same overall mood, style, colors, typography, and composition hierarchy
+
+SAFE ZONE — NON-NEGOTIABLE:
+- Every text element, button, and UI element MUST have at least 120px clearance from EVERY edge (top, bottom, left, right)
+- The top and bottom edges are especially critical — keep all content strictly in the vertical center
+- Nothing may touch or cross the safe zone boundary — not even partially`,
 }
 
 // Maps our size codes to Gemini imageConfig aspectRatio values
@@ -220,8 +232,12 @@ export async function generateImage(prompt: string, referenceBase64?: string, lo
   return withRetry(prompt + TEXT_FROM_REF_RULE + logoRule + hint + assetRule, referenceBase64, logoBase64, 3, size, assets)
 }
 
-export async function recomposeImage(imageBase64: string, targetSize: string): Promise<string> {
+export async function recomposeImage(imageBase64: string, targetSize: string, fixNote?: string): Promise<string> {
   const prompt = RECOMPOSE_PROMPTS[targetSize]
   if (!prompt) throw new Error(`Unknown target size: ${targetSize}`)
-  return withRetry(prompt, imageBase64, undefined, 3, targetSize)
+  const hint = SIZE_HINTS[targetSize] || ''
+  const fix = fixNote
+    ? `\n\nFIX INSTRUCTION — HIGHEST PRIORITY — override everything else if needed:\n${fixNote}\nApply this fix precisely and literally.`
+    : ''
+  return withRetry(prompt + hint + fix, imageBase64, undefined, 3, targetSize)
 }

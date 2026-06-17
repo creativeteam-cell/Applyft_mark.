@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
 
     // Режим рекомпозиции
     if (recomposeBase64 && targetSize) {
-      const imageBase64 = await recomposeImage(recomposeBase64, targetSize)
+      const imageBase64 = await recomposeImage(recomposeBase64, targetSize, fixNote)
       return NextResponse.json({ imageBase64 })
     }
 
