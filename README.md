@@ -1,4 +1,4 @@
-# Creative Studio — ApplyFT
+# Creative Studio — Applyft
 
 Internal AI-powered tool for generating, resizing, and localizing ad creatives across multiple formats.
 
