@@ -39,35 +39,51 @@ const RECOMPOSE_PROMPTS: Record<string, string> = {
   '1x1': `Recompose this exact ad creative for a square 1:1 aspect ratio.
 ${TEXT_RULE}
 
-LAYOUT RULES (the ONLY thing you may change):
-- Reposition and rescale existing elements to fit naturally in a square format
-- Center the main subject and headline text horizontally and vertically
+EXPANSION RULE — MOST IMPORTANT:
+- EXPAND the background/environment outward to fill the new canvas — do NOT crop or cut off any existing visual element
+- All people, objects, logos, text, and UI elements from the original must remain FULLY VISIBLE and intact
+- To fill the extra space: naturally extend the background scene (sky, room, street, blurred environment) in whatever direction is needed
+- Think of it as "outpainting" — you are adding more canvas around the existing content, not zooming in
+
+LAYOUT RULES:
+- Keep the main subject and all elements at roughly the same scale as the original
+- Center the composition naturally in the square format
 - Maintain the same overall mood, style, colors, typography, and composition hierarchy
 
 SAFE ZONE — NON-NEGOTIABLE:
 - Every text element, button, and UI element MUST have at least 120px clearance from EVERY edge (top, bottom, left, right)
-- Nothing may touch or cross the safe zone boundary — not even partially
-- If in doubt, push elements further toward the center`,
+- Nothing may touch or cross the safe zone boundary — not even partially`,
 
   '9x16': `Recompose this exact ad creative for a tall vertical 9:16 aspect ratio.
 ${TEXT_RULE}
 
-LAYOUT RULES (the ONLY thing you may change):
-- Reposition and rescale existing elements to fit naturally in a tall vertical format
-- Stack elements vertically: main visual in upper portion, headline in the middle, CTA button near the bottom
+EXPANSION RULE — MOST IMPORTANT:
+- EXPAND the background/environment outward to fill the new canvas — do NOT crop or cut off any existing visual element
+- All people, objects, logos, text, and UI elements from the original must remain FULLY VISIBLE and intact
+- To fill the extra vertical space: naturally extend the background scene above and/or below (sky, floor, environment)
+- Think of it as "outpainting" — you are adding more canvas around the existing content, not zooming in
+
+LAYOUT RULES:
+- Keep the main subject at roughly the same scale as the original
+- Stack elements naturally: visual scene fills the frame, text and CTA positioned with breathing room
 - Maintain the same overall mood, style, colors, typography, and composition hierarchy
 
 SAFE ZONE — NON-NEGOTIABLE:
 - Every text element, button, and UI element MUST have at least 120px clearance from EVERY edge (top, bottom, left, right)
-- Nothing may touch or cross the safe zone boundary — not even partially
-- If in doubt, push elements further toward the center`,
+- Nothing may touch or cross the safe zone boundary — not even partially`,
 
   '1.91x1': `Recompose this exact ad creative for a wide horizontal 1.91:1 aspect ratio.
 ${TEXT_RULE}
 
-LAYOUT RULES (the ONLY thing you may change):
-- Reposition and rescale existing elements to fit naturally in a wide horizontal format
-- Place main visual on one side, text hierarchy (headline + subheadline + CTA) on the other side
+EXPANSION RULE — MOST IMPORTANT:
+- EXPAND the background/environment outward to fill the new canvas — do NOT crop or cut off any existing visual element
+- All people, objects, logos, text, and UI elements from the original must remain FULLY VISIBLE and intact
+- To fill the extra horizontal space: naturally extend the background scene left and/or right (environment, background, blur)
+- Think of it as "outpainting" — you are adding more canvas around the existing content, not zooming in
+
+LAYOUT RULES:
+- Keep the main subject at roughly the same scale as the original
+- Use the extra horizontal space for background extension or to give text more room
 - Maintain the same overall mood, style, colors, typography, and composition hierarchy
 
 SAFE ZONE — NON-NEGOTIABLE:
