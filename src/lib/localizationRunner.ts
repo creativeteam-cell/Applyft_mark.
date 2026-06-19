@@ -752,6 +752,8 @@ export async function runLocalizationJob(
         mime: string
         texts: Set<string>
         roles: Record<string, string>
+        types: Record<string, string>       // text → type (logo, watermark, headline, etc.)
+        properNouns: Set<string>            // texts that are brand/app names — never translate
       }
 
       const imageDataList: ImageData[] = []
@@ -773,20 +775,30 @@ export async function runLocalizationJob(
           analysis = await analyzeImage(base64)
         } catch (err: any) {
           console.warn(`[loc] analyzeImage failed for ${img.name}:`, err.message)
-          imageDataList.push({ img, buffer, mime, texts: new Set(), roles: {} })
+          imageDataList.push({ img, buffer, mime, texts: new Set(), roles: {}, types: {}, properNouns: new Set() })
           continue
         }
 
         const texts = new Set<string>()
         const roles: Record<string, string> = {}
+        const types: Record<string, string> = {}
+        const properNouns = new Set<string>()
+
+        // Collect proper nouns (app names, brand names) — these must never be translated
+        const UNTRANSLATABLE_KINDS = new Set(['app_name', 'brand_name', 'product_name', 'platform_name'])
+        for (const pn of (analysis?.proper_nouns || [])) {
+          if (UNTRANSLATABLE_KINDS.has(pn.kind)) properNouns.add(pn.text)
+        }
+
         for (const t of (analysis?.texts || [])) {
           texts.add(t.text)
           roles[t.text] = t.role_in_composition || t.type || ''
+          types[t.text] = t.type || ''
           if (!allTextsMap.has(t.text)) {
             allTextsMap.set(t.text, { text: t.text, role: roles[t.text] })
           }
         }
-        imageDataList.push({ img, buffer, mime, texts, roles })
+        imageDataList.push({ img, buffer, mime, texts, roles, types, properNouns })
       }
 
       // Step 2: Build langDicts
@@ -882,8 +894,12 @@ export async function runLocalizationJob(
           }
 
           // Only phrases that actually appear in this image
+          // Exclude: logos, watermarks, and proper nouns (app/brand names) — never translate these
+          const SKIP_TYPES = new Set(['logo', 'watermark'])
           const langPhrases = Array.from(texts)
             .filter(en => dict[en])
+            .filter(en => !SKIP_TYPES.has(types[en]))
+            .filter(en => !properNouns.has(en))
             .map(en => ({
               en,
               translated: dict[en].translated,
