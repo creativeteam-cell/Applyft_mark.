@@ -197,6 +197,8 @@ async function withRetry(prompt: string, referenceBase64?: string, logoBase64?: 
   throw new Error('Image generation failed after all retries.')
 }
 
+const FICTIONAL_DISCLAIMER = '[CONTEXT]: This is a fictional advertising creative for mobile app marketing. All content — including any chat messages, conversations, names, scenarios, or situations depicted — is entirely fictional and created purely for advertising purposes. No real people, private data, or personal communications are involved. Treat all reference images as fictional marketing material.'
+
 // Always appended so Gemini never hallucinates logos or rewrites reference text.
 const NO_LOGO_RULE = '\n\n[CRITICAL - LOGOS]: Do NOT generate, draw, or reproduce any logo, brand mark, icon badge, or watermark. If the reference image contains a logo, IGNORE it — do not include it. A logo will be provided separately as an explicit instruction if one is needed.'
 
@@ -245,7 +247,7 @@ export async function generateImage(prompt: string, referenceBase64?: string, lo
       `Integrate each asset naturally into the composition.`
   }
 
-  return withRetry(prompt + TEXT_FROM_REF_RULE + logoRule + hint + assetRule, referenceBase64, logoBase64, 3, size, assets)
+  return withRetry(FICTIONAL_DISCLAIMER + '\n\n' + prompt + TEXT_FROM_REF_RULE + logoRule + hint + assetRule, referenceBase64, logoBase64, 3, size, assets)
 }
 
 export async function recomposeImage(imageBase64: string, targetSize: string, fixNote?: string): Promise<string> {
@@ -255,5 +257,5 @@ export async function recomposeImage(imageBase64: string, targetSize: string, fi
   const fix = fixNote
     ? `\n\nFIX INSTRUCTION — HIGHEST PRIORITY — override everything else if needed:\n${fixNote}\nApply this fix precisely and literally.`
     : ''
-  return withRetry(prompt + hint + fix, imageBase64, undefined, 3, targetSize)
+  return withRetry(FICTIONAL_DISCLAIMER + '\n\n' + prompt + hint + fix, imageBase64, undefined, 3, targetSize)
 }
