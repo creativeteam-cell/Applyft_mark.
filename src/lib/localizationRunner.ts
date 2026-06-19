@@ -883,7 +883,7 @@ export async function runLocalizationJob(
         const dict = langDicts[lang] || {}
         const existingFiles = langExistingFiles[lang] || new Map()
 
-        for (const { img, buffer, mime, texts, roles } of imageDataList) {
+        for (const { img, buffer, mime, texts, roles, types, properNouns } of imageDataList) {
           const newName = buildNewName(img.name, lang, cp)
 
           // Skip if this specific file already exists in the lang folder
