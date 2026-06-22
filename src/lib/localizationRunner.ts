@@ -91,6 +91,7 @@ RULES:
 - Keep the same font size, color, weight, and alignment style
 - Do NOT add people, objects, or decorations not already in the image
 - Do NOT modify background or colors
+- Do NOT remove, reduce, or change any blur, glow, shadow, or visual effect applied to ANY part of the image — blurred regions must remain exactly as blurred
 - Replace EVERY occurrence of each listed text
 - Zero English letters may remain in replaced areas
 - Match text style exactly: ALL CAPS original → ALL CAPS translation; Title Case → Title Case; sentence case → sentence case
