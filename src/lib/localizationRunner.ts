@@ -425,7 +425,7 @@ VALIDATION:
 
 // --- GPT Translator ---
 
-async function translateTexts(analysis: any, targetLanguages: string[]): Promise<any> {
+async function translateTexts(analysis: any, targetLanguages: string[], retryCount = 0): Promise<any> {
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [
@@ -543,8 +543,16 @@ VALIDATION:
       { role: 'user', content: `Translate into: ${targetLanguages.join(', ')}` },
     ],
     max_tokens: 4000,
-  }, { timeout: 90000 })
-  const raw = response.choices[0].message.content || '{}'
+  }, { timeout: 90000 }).catch(async (err: any) => {
+    if (retryCount < 3) {
+      const delay = 5000 * (retryCount + 1) // 5s, 10s, 15s
+      console.warn(`[gpt] translateTexts failed (${err.message}), retry ${retryCount + 1} in ${delay / 1000}s...`)
+      await new Promise(r => setTimeout(r, delay))
+      return translateTexts(analysis, targetLanguages, retryCount + 1)
+    }
+    throw err
+  })
+  const raw = (response as any).choices[0].message.content || '{}'
   const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
   return JSON.parse(clean.slice(clean.indexOf('{'), clean.lastIndexOf('}') + 1))
 }
