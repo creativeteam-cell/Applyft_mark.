@@ -543,7 +543,7 @@ VALIDATION:
       { role: 'user', content: `Translate into: ${targetLanguages.join(', ')}` },
     ],
     max_tokens: 4000,
-  })
+  }, { timeout: 90000 })
   const raw = response.choices[0].message.content || '{}'
   const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
   return JSON.parse(clean.slice(clean.indexOf('{'), clean.lastIndexOf('}') + 1))
@@ -607,7 +607,7 @@ If issues found:
       },
     ],
     max_tokens: 800,
-  })
+  }, { timeout: 60000 })
   try {
     const raw = response.choices[0].message.content || '{}'
     const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
