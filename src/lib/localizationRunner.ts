@@ -29,7 +29,7 @@ async function resizeToTarget(buffer: Buffer, width: number, height: number): Pr
 
 // --- Gemini two-pass localization ---
 
-async function geminiRequest(parts: any[], mimeType: string): Promise<Buffer> {
+async function geminiRequest(parts: any[], mimeType: string, retryCount = 0): Promise<Buffer> {
   const apiKey = process.env.GOOGLE_AI_API_KEY
   if (!apiKey) throw new Error('GOOGLE_AI_API_KEY not set')
 
@@ -44,6 +44,16 @@ async function geminiRequest(parts: any[], mimeType: string): Promise<Buffer> {
       }),
     }
   )
+
+  // Rate limit — exponential backoff and retry automatically
+  if (res.status === 429) {
+    if (retryCount >= 4) throw new Error('Gemini rate limit: too many retries')
+    const delay = Math.min(10000 * Math.pow(2, retryCount), 60000) // 10s, 20s, 40s, 60s
+    console.warn(`[gemini] 429 rate limit, waiting ${delay / 1000}s before retry ${retryCount + 1}...`)
+    await new Promise(r => setTimeout(r, delay))
+    return geminiRequest(parts, mimeType, retryCount + 1)
+  }
+
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText)
     throw new Error(`Gemini ${res.status}: ${text}`)

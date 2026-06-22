@@ -158,6 +158,10 @@ async function tryGenerate(prompt: string, referenceBase64?: string, logoBase64?
 
     clearTimeout(timeout)
 
+    if (response.status === 429) {
+      throw new Error('RATE_LIMIT')
+    }
+
     if (!response.ok) {
       const error = await response.json()
       throw new Error(`Imagen API error: ${JSON.stringify(error)}`)
@@ -177,7 +181,7 @@ async function tryGenerate(prompt: string, referenceBase64?: string, logoBase64?
 }
 
 async function withRetry(prompt: string, referenceBase64?: string, logoBase64?: string, maxAttempts = 3, size = '4x5', assets?: Asset[]): Promise<string> {
-  const retryableErrors = ['TIMEOUT', 'No image in response']
+  const retryableErrors = ['TIMEOUT', 'No image in response', 'RATE_LIMIT']
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -188,9 +192,14 @@ async function withRetry(prompt: string, referenceBase64?: string, logoBase64?: 
         if (e.message === 'TIMEOUT') {
           throw new Error('Image generation timed out. Gemini is under heavy load, please try again in a moment.')
         }
+        if (e.message === 'RATE_LIMIT') {
+          throw new Error('Gemini is busy (rate limit). Please try again in a moment.')
+        }
         throw e
       }
-      console.log(`Gemini attempt ${attempt} failed (${e.message}), retrying...`)
+      const retryDelay = e.message === 'RATE_LIMIT' ? 15000 : 2000
+      console.log(`Gemini attempt ${attempt} failed (${e.message}), retrying in ${retryDelay / 1000}s...`)
+      await new Promise(r => setTimeout(r, retryDelay))
     }
   }
 
