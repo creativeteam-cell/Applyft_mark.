@@ -94,6 +94,12 @@ RULES:
 - Do NOT remove, reduce, or change any blur, glow, shadow, or visual effect applied to ANY part of the image — blurred regions must remain exactly as blurred
 - Replace EVERY occurrence of each listed text
 - Zero English letters may remain in replaced areas
+
+⛔ ABSOLUTE RULE — NO BILINGUAL OUTPUT:
+It is STRICTLY FORBIDDEN to have both the original English text AND the translated text visible in the output image at the same time.
+Each English phrase must be COMPLETELY removed and replaced — not supplemented, not kept alongside, not left as a second line.
+If you place the translation, the English MUST be gone. Period. No exceptions.
+After you compose the output, scan every visible text element — if you see ANY English word from the translation list still present, erase it before finalizing.
 - Match text style exactly: ALL CAPS original → ALL CAPS translation; Title Case → Title Case; sentence case → sentence case
 - FONT WEIGHT: copy the exact weight from the original — if original is regular/normal weight, translation MUST be regular/normal (NOT bold, NOT semi-bold); if original is bold, translation must be bold; never decide font weight yourself
 ${isRTL ? `
