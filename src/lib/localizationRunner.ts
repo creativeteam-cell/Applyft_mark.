@@ -91,6 +91,7 @@ RULES:
 - Keep the same font size, color, weight, and alignment style
 - Do NOT add people, objects, or decorations not already in the image
 - Do NOT modify background or colors
+- TEXT BACKGROUND BOXES: if the original text has a colored background box, highlight, pill, or label behind it — resize that box to tightly fit the translated text. The box width/height must match the new text length, not the old one. Never leave a box that is too wide or too narrow for the translated text
 - Do NOT remove, reduce, or change any blur, glow, shadow, or visual effect applied to ANY part of the image — blurred regions must remain exactly as blurred
 - Replace EVERY occurrence of each listed text
 - Zero English letters may remain in replaced areas
