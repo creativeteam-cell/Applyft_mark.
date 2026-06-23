@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
       const sizeMap: Record<string, string> = { '4×5': '4x5', '1×1': '1x1', '9×16': '9x16', '1.91×1': '1.91x1' }
       const sizeCode = sizeMap[size] || '4x5'
       try {
-        imageBase64 = await generateImage(prompt, referenceBase64, undefined, sizeCode)
+        imageBase64 = await generateImage(prompt, referenceBase64, undefined, sizeCode, undefined, true)
       } catch (genErr: any) {
         console.error('[generator] generateImage failed:', genErr.message)
         const msg = genErr.message || 'Unknown error'

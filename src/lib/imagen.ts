@@ -245,7 +245,12 @@ const SIZE_HINTS: Record<string, string> = {
     'Place all content strictly in the vertical center — never near the top or bottom edges.',
 }
 
-export async function generateImage(prompt: string, referenceBase64?: string, logoBase64?: string, size = '4x5', assets?: Asset[]): Promise<string> {
+export async function generateImage(prompt: string, referenceBase64?: string, logoBase64?: string, size = '4x5', assets?: Asset[], rawMode = false): Promise<string> {
+  // rawMode: plain image generation (Generator tab) — no ad-specific rules, no text overlays
+  if (rawMode) {
+    return withRetry(FICTIONAL_DISCLAIMER + '\n\n' + prompt, referenceBase64, undefined, 3, size)
+  }
+
   const hint = SIZE_HINTS[size] || SIZE_HINTS['4x5']
   // Only add NO_LOGO_RULE when no logo is provided — otherwise it contradicts the logo placement instruction
   const logoRule = logoBase64 ? '' : NO_LOGO_RULE

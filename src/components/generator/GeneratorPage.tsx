@@ -465,24 +465,6 @@ export function GeneratorPage() {
           {/* MAIN AREA */}
           <div className="flex-1 overflow-y-auto p-6 min-w-0">
 
-            {/* Result */}
-            <div className="mb-8 rounded-xl flex items-center justify-center overflow-hidden"
-              style={{ minHeight: 280, background: 'var(--surface)', border: '1px solid var(--border)' }}>
-              {result ? (
-                <img src={result} alt="result" className="max-h-96 object-contain" />
-              ) : (
-                <div className="flex flex-col items-center gap-3">
-                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="0.8"
-                    style={{ color: 'rgba(255,255,255,0.1)' }}>
-                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-                  </svg>
-                  <p className="text-sm" style={{ color: 'rgba(255,255,255,0.2)' }}>
-                    {generating ? 'Generating...' : 'Result will appear here'}
-                  </p>
-                </div>
-              )}
-            </div>
-
             {/* Recent */}
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold">Recent</h2>
