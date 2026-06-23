@@ -1,0 +1,130 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth'
+import { generateImage } from '@/lib/imagen'
+import { getDriveClient } from '@/lib/googleDrive'
+import OpenAI from 'openai'
+import { Readable } from 'stream'
+
+export const maxDuration = 120
+
+const FOLDER_ID = process.env.GENERATOR_DRIVE_FOLDER_ID!
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+
+const DALLE_SIZES: Record<string, '1024x1024' | '1792x1024' | '1024x1792'> = {
+  '1×1':   '1024x1024',
+  '16×9':  '1792x1024',
+  '9×16':  '1024x1792',
+}
+
+async function generateWithDalle(prompt: string): Promise<string> {
+  const res = await openai.images.generate({
+    model: 'dall-e-3',
+    prompt,
+    n: 1,
+    size: '1024x1024',
+    response_format: 'b64_json',
+  })
+  const b64 = res.data[0].b64_json!
+  return `data:image/png;base64,${b64}`
+}
+
+async function saveToDrive(
+  imageBase64: string,
+  metadata: { prompt: string; engine: string; size: string; userName: string; userEmail: string; userImage: string },
+  userToken: string,
+): Promise<{ fileId: string; webViewLink: string }> {
+  const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '')
+  const mimeType = imageBase64.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg'
+  const ext = mimeType.includes('png') ? 'png' : 'jpg'
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  const safeName = metadata.userName.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 20)
+  const fileName = `GEN_${metadata.engine}_${metadata.size.replace('×', 'x')}_${safeName}_${ts}.${ext}`
+
+  const buf = Buffer.from(base64Data, 'base64')
+
+  // Use user OAuth token for upload
+  const uploadRes = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${userToken}`,
+        'Content-Type': 'multipart/related; boundary=boundary123',
+      },
+      body: Buffer.concat([
+        Buffer.from(
+          [
+            '--boundary123',
+            'Content-Type: application/json; charset=UTF-8',
+            '',
+            JSON.stringify({
+              name: fileName,
+              parents: [FOLDER_ID],
+              description: JSON.stringify(metadata),
+            }),
+            '',
+            '--boundary123',
+            `Content-Type: ${mimeType}`,
+            '',
+          ].join('\r\n')
+        ),
+        buf,
+        Buffer.from('\r\n--boundary123--'),
+      ]),
+    }
+  )
+
+  if (!uploadRes.ok) {
+    const err = await uploadRes.text()
+    throw new Error(`Drive upload failed: ${err}`)
+  }
+
+  const data = await uploadRes.json()
+  return { fileId: data.id, webViewLink: data.webViewLink }
+}
+
+export async function POST(req: NextRequest) {
+  const session = await getServerSession(authOptions)
+  if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { prompt, engine, size, referenceBase64, logoBase64 } = await req.json()
+  if (!prompt?.trim()) return NextResponse.json({ error: 'Prompt is required' }, { status: 400 })
+
+  try {
+    let imageBase64: string
+
+    if (engine === 'dalle') {
+      imageBase64 = await generateWithDalle(prompt)
+    } else {
+      // Gemini — map display size to internal code
+      const sizeMap: Record<string, string> = { '4×5': '4x5', '1×1': '1x1', '9×16': '9x16', '1.91×1': '1.91x1' }
+      const sizeCode = sizeMap[size] || '4x5'
+      imageBase64 = await generateImage(prompt, referenceBase64, logoBase64, sizeCode)
+    }
+
+    // Save to Drive if user token available
+    const userToken = (session as any).accessToken
+    let fileId: string | null = null
+    let webViewLink: string | null = null
+
+    if (userToken) {
+      const saved = await saveToDrive(imageBase64, {
+        prompt,
+        engine: engine === 'dalle' ? 'GPT' : 'Banana',
+        size,
+        userName: session.user.name || '',
+        userEmail: session.user.email || '',
+        userImage: session.user.image || '',
+      }, userToken)
+      fileId = saved.fileId
+      webViewLink = saved.webViewLink
+    }
+
+    return NextResponse.json({ imageBase64, fileId, webViewLink })
+  } catch (e: any) {
+    console.error('[generator/generate]', e)
+    return NextResponse.json({ error: e.message }, { status: 500 })
+  }
+}
