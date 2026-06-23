@@ -224,12 +224,11 @@ export function GeneratorPage() {
   const [prompt, setPrompt] = useState('')
   const [aiPrompt, setAiPrompt] = useState(false)
   const [reference, setReference] = useState<string | null>(null)
-  const [logo, setLogo] = useState<string | null>(null)
+  const [logo] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
   const [result, setResult] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const referenceRef = useRef<HTMLInputElement>(null)
-  const logoRef = useRef<HTMLInputElement>(null)
 
   const sizes = SIZES[engine]
   const currentEngine = ENGINES.find(e => e.id === engine)!
@@ -404,36 +403,6 @@ export function GeneratorPage() {
                 )}
                 <input ref={referenceRef} type="file" accept="image/*" className="hidden"
                   onChange={e => handleFileUpload(e, setReference)} />
-              </div>
-
-              {/* Logo */}
-              <div className="mb-5">
-                <div className="text-xs font-semibold uppercase tracking-wider mb-2"
-                  style={{ color: 'var(--text-muted)' }}>Logo</div>
-                {logo ? (
-                  <div className="relative group">
-                    <img src={logo} alt="logo" className="h-12 object-contain rounded-lg"
-                      style={{ background: 'rgba(255,255,255,0.05)', padding: 8 }} />
-                    <button onClick={() => setLogo(null)}
-                      className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                      style={{ background: 'rgba(0,0,0,0.75)' }}>
-                      <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
-                        <path d="M1 1l8 8M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
-                      </svg>
-                    </button>
-                  </div>
-                ) : (
-                  <button onClick={() => logoRef.current?.click()}
-                    className="w-full h-14 rounded-lg border-2 border-dashed flex items-center justify-center gap-2"
-                    style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                      <path d="M12 5v14M5 12h14"/>
-                    </svg>
-                    <span className="text-xs">Add logo</span>
-                  </button>
-                )}
-                <input ref={logoRef} type="file" accept="image/*" className="hidden"
-                  onChange={e => handleFileUpload(e, setLogo)} />
               </div>
 
               {/* Prompt */}

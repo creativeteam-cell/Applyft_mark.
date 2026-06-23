@@ -98,10 +98,18 @@ export async function POST(req: NextRequest) {
     if (engine === 'dalle') {
       imageBase64 = await generateWithDalle(prompt)
     } else {
-      // Gemini — map display size to internal code
       const sizeMap: Record<string, string> = { '4×5': '4x5', '1×1': '1x1', '9×16': '9x16', '1.91×1': '1.91x1' }
       const sizeCode = sizeMap[size] || '4x5'
-      imageBase64 = await generateImage(prompt, referenceBase64, logoBase64, sizeCode)
+      try {
+        imageBase64 = await generateImage(prompt, referenceBase64, undefined, sizeCode)
+      } catch (genErr: any) {
+        console.error('[generator] generateImage failed:', genErr.message)
+        const msg = genErr.message || 'Unknown error'
+        if (msg.includes('finishReason')) return NextResponse.json({ error: `Gemini blocked the request (content filter). Try rephrasing the prompt.` }, { status: 422 })
+        if (msg.includes('RATE_LIMIT') || msg.includes('rate limit')) return NextResponse.json({ error: 'Gemini is busy, please try again in a moment.' }, { status: 429 })
+        if (msg.includes('TIMEOUT') || msg.includes('timed out')) return NextResponse.json({ error: 'Generation timed out. Please try again.' }, { status: 504 })
+        return NextResponse.json({ error: `Generation failed: ${msg}` }, { status: 500 })
+      }
     }
 
     // Save to Drive if user token available
