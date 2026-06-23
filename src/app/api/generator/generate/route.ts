@@ -54,24 +54,9 @@ async function saveToDrive(
         'Content-Type': 'multipart/related; boundary=boundary123',
       },
       body: Buffer.concat([
-        Buffer.from(
-          [
-            '--boundary123',
-            'Content-Type: application/json; charset=UTF-8',
-            '',
-            JSON.stringify({
-              name: fileName,
-              parents: [FOLDER_ID],
-              description: JSON.stringify(metadata),
-            }),
-            '',
-            '--boundary123',
-            `Content-Type: ${mimeType}`,
-            '',
-          ].join('\r\n')
-        ),
+        Buffer.from(`--boundary123\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name: fileName, parents: [FOLDER_ID], description: JSON.stringify(metadata) })}\r\n--boundary123\r\nContent-Type: ${mimeType}\r\n\r\n`),
         buf,
-        Buffer.from('\r\n--boundary123--'),
+        Buffer.from(`\r\n--boundary123--`),
       ]),
     }
   )
