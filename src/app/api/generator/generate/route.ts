@@ -26,7 +26,7 @@ async function generateWithDalle(prompt: string): Promise<string> {
     size: '1024x1024',
     response_format: 'b64_json',
   })
-  const b64 = res.data[0].b64_json!
+  const b64 = res.data?.[0]?.b64_json!
   return `data:image/png;base64,${b64}`
 }
 
