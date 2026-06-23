@@ -16,6 +16,7 @@ interface HeaderProps {
 const NAV = [
   { label: 'Dashboard', href: '/dashboard' },
   { label: 'Localization', href: '/localization' },
+  { label: 'Generator', href: '/generator' },
   { label: 'Settings', href: '/settings' },
 ]
 
