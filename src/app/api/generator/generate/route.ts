@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
       } catch (genErr: any) {
         console.error('[generator] generateImage failed:', genErr.message)
         const msg = genErr.message || 'Unknown error'
-        if (msg.includes('finishReason')) return NextResponse.json({ error: `Gemini blocked the request (content filter). Try rephrasing the prompt.` }, { status: 422 })
+        if (msg.includes('finishReason') || msg.includes('No image in response')) return NextResponse.json({ error: `Gemini blocked the request (content filter). Try rephrasing the prompt. Details: ${msg}` }, { status: 422 })
         if (msg.includes('RATE_LIMIT') || msg.includes('rate limit')) return NextResponse.json({ error: 'Gemini is busy, please try again in a moment.' }, { status: 429 })
         if (msg.includes('TIMEOUT') || msg.includes('timed out')) return NextResponse.json({ error: 'Generation timed out. Please try again.' }, { status: 504 })
         return NextResponse.json({ error: `Generation failed: ${msg}` }, { status: 500 })

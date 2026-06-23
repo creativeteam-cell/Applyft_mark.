@@ -170,7 +170,10 @@ async function tryGenerate(prompt: string, referenceBase64?: string, logoBase64?
     const data = await response.json()
     const responseParts = data.candidates?.[0]?.content?.parts || []
     const imagePart = responseParts.find((p: any) => p.inlineData)
-    if (!imagePart) throw new Error('No image in response')
+    if (!imagePart) {
+      const finishReason = data.candidates?.[0]?.finishReason || 'unknown'
+      throw new Error(`No image in response (finishReason: ${finishReason})`)
+    }
 
     return `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`
   } catch (e: any) {
