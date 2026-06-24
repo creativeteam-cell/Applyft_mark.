@@ -5,27 +5,64 @@ import { useSession } from 'next-auth/react'
 
 const ENGINES = [
   { id: 'gemini', label: 'Banana', sublabel: 'Gemini 3.1 Flash' },
-  { id: 'dalle',  label: 'GPT',    sublabel: 'OpenAI · DALL-E 3' },
+  { id: 'dalle',  label: 'GPT',    sublabel: 'OpenAI · GPT Image 1' },
 ]
 
 const SIZES: Record<string, { label: string }[]> = {
   gemini: [
-    { label: '4×5' },
-    { label: '1×1' },
-    { label: '9×16' },
-    { label: '1.91×1' },
+    { label: '4x5' },
+    { label: '1x1' },
+    { label: '9x16' },
+    { label: '1.91x1' },
   ],
   dalle: [
-    { label: '1×1' },
-    { label: '16×9' },
-    { label: '9×16' },
+    { label: '1x1' },
+    { label: '16x9' },
+    { label: '9x16' },
   ],
 }
 
-// All sizes available in the modal (for recompose, Gemini handles all)
-const MODAL_SIZES = ['4×5', '1×1', '9×16', '1.91×1']
+const MODAL_SIZES = ['4x5', '1x1', '9x16', '1.91x1']
 
-// Derive a consistent color from email/name
+const STYLE_GROUPS = [
+  {
+    label: 'Realism',
+    styles: [
+      { id: 'photo',      label: 'Photo',      suffix: ', photorealistic, high-resolution DSLR photography, natural lighting, sharp details' },
+      { id: 'cinematic',  label: 'Cinematic',  suffix: ', cinematic shot, dramatic moody lighting, film color grading, anamorphic lens bokeh' },
+      { id: 'aerial',     label: 'Aerial',     suffix: ', aerial drone photography, bird\'s eye view, wide angle, sharp details from above' },
+    ],
+  },
+  {
+    label: '3D / Animation',
+    styles: [
+      { id: 'pixar',   label: 'Pixar',   suffix: ', Pixar 3D animation style, Disney character design, soft studio lighting, smooth surfaces' },
+      { id: 'clay',    label: 'Clay',    suffix: ', claymation style, colorful clay texture, soft rounded shapes, stop-motion aesthetic' },
+      { id: 'neon3d',  label: 'Neon 3D', suffix: ', glossy 3D render, neon glow lighting, dark background, reflective surfaces, cyberpunk palette' },
+    ],
+  },
+  {
+    label: 'Illustrated',
+    styles: [
+      { id: 'anime',      label: 'Anime',       suffix: ', Japanese anime illustration style, clean line art, vibrant colors, manga aesthetic' },
+      { id: 'handdrawn',  label: 'Hand Drawn',  suffix: ', hand-drawn pencil and ink sketch, crosshatching, vintage illustration, black and white' },
+      { id: 'watercolor', label: 'Watercolor',  suffix: ', watercolor painting, soft color washes, wet-on-wet technique, delicate brushstrokes' },
+      { id: 'comic',      label: 'Comic',       suffix: ', pop-art comic book style, bold outlines, halftone dots, bright flat colors' },
+    ],
+  },
+  {
+    label: 'Texture / Art',
+    styles: [
+      { id: 'origami',   label: 'Origami',   suffix: ', origami paper folding art style, geometric paper shapes, clean folds, minimalist' },
+      { id: 'quilling',  label: 'Quilling',  suffix: ', paper quilling art, colorful rolled paper strips, intricate swirls, handcraft texture' },
+      { id: 'marble',    label: 'Marble',    suffix: ', marble stone sculpture, classical Greco-Roman style, white and grey stone texture, museum quality' },
+      { id: 'sticker',   label: 'Sticker',   suffix: ', sticker illustration, thick white outline, flat colors, cute cartoon style' },
+    ],
+  },
+]
+
+const ALL_STYLES = STYLE_GROUPS.flatMap(g => g.styles)
+
 function colorFromString(str: string) {
   const colors = ['#4f6ef7', '#e05c8a', '#34a853', '#fbbc05', '#e8453c', '#9c27b0', '#00acc1']
   let hash = 0
@@ -51,26 +88,16 @@ interface HistoryItem {
 }
 
 function UserAvatar({ name, email, image, size = 28, selected, onClick }: {
-  name: string
-  email: string
-  image?: string
-  size?: number
-  selected?: boolean
-  onClick?: () => void
+  name: string; email: string; image?: string; size?: number; selected?: boolean; onClick?: () => void
 }) {
   const color = colorFromString(email || name)
   return (
-    <button
-      onClick={onClick}
-      title={name}
+    <button onClick={onClick} title={name}
       className="rounded-full flex-shrink-0 transition-all overflow-hidden"
-      style={{
-        width: size, height: size,
+      style={{ width: size, height: size,
         outline: selected ? '2px solid white' : '2px solid transparent',
         outlineOffset: 1,
-        opacity: selected === undefined ? 1 : selected ? 1 : 0.4,
-      }}
-    >
+        opacity: selected === undefined ? 1 : selected ? 1 : 0.4 }}>
       {image ? (
         <img src={image} alt={name} className="w-full h-full object-cover" />
       ) : (
@@ -83,25 +110,18 @@ function UserAvatar({ name, email, image, size = 28, selected, onClick }: {
   )
 }
 
-function HistoryGrid({ items, onSelect, filterLabel }: {
-  items: HistoryItem[]
-  onSelect?: (item: HistoryItem) => void
-  filterLabel?: string
-}) {
+function HistoryGrid({ items, onSelect }: { items: HistoryItem[]; onSelect?: (item: HistoryItem) => void }) {
   if (items.length === 0) {
     return (
       <div className="flex items-center justify-center py-16">
-        <p className="text-sm" style={{ color: 'rgba(255,255,255,0.2)' }}>
-          {filterLabel || 'No generations yet'}
-        </p>
+        <p className="text-sm" style={{ color: 'rgba(255,255,255,0.2)' }}>No generations yet</p>
       </div>
     )
   }
   return (
     <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
       {items.map(item => (
-        <div key={item.id}
-          onClick={() => onSelect?.(item)}
+        <div key={item.id} onClick={() => onSelect?.(item)}
           className="rounded-xl overflow-hidden cursor-pointer transition-all hover:scale-[1.02]"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
           <div className="aspect-[4/5] flex items-center justify-center overflow-hidden"
@@ -144,32 +164,21 @@ function HistoryGrid({ items, onSelect, filterLabel }: {
 }
 
 function PeopleFilter({ items, selectedEmails, onToggle, onClear }: {
-  items: HistoryItem[]
-  selectedEmails: Set<string>
-  onToggle: (email: string) => void
-  onClear: () => void
+  items: HistoryItem[]; selectedEmails: Set<string>; onToggle: (email: string) => void; onClear: () => void
 }) {
   const users = Array.from(
     new Map(items.map(i => [i.userEmail, { email: i.userEmail, name: i.userName, image: i.userImage }])).values()
   ).filter(u => u.email)
-
   if (users.length === 0) return null
   return (
     <div className="flex items-center gap-2 mb-4">
       {users.map(u => (
-        <UserAvatar
-          key={u.email}
-          name={u.name}
-          email={u.email}
-          image={u.image}
-          size={30}
+        <UserAvatar key={u.email} name={u.name} email={u.email} image={u.image} size={30}
           selected={selectedEmails.size === 0 ? undefined : selectedEmails.has(u.email)}
-          onClick={() => onToggle(u.email)}
-        />
+          onClick={() => onToggle(u.email)} />
       ))}
       {selectedEmails.size > 0 && (
-        <button onClick={onClear}
-          className="text-xs px-2 py-1 rounded-lg transition-all"
+        <button onClick={onClear} className="text-xs px-2 py-1 rounded-lg transition-all"
           style={{ color: 'var(--text-muted)', background: 'rgba(255,255,255,0.05)' }}>
           Clear
         </button>
@@ -178,15 +187,60 @@ function PeopleFilter({ items, selectedEmails, onToggle, onClear }: {
   )
 }
 
-// ─── Image Card Modal ────────────────────────────────────────────────────────
+function StylePicker({ selected, onSelect }: { selected: string | null; onSelect: (id: string | null) => void }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Style</span>
+        {selected && (
+          <button onClick={() => onSelect(null)} className="text-xs px-2 py-0.5 rounded transition-all"
+            style={{ color: 'var(--text-muted)', background: 'rgba(255,255,255,0.05)' }}>
+            Clear
+          </button>
+        )}
+      </div>
+      <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' } as any}>
+        {ALL_STYLES.map(style => (
+          <button key={style.id}
+            onClick={() => onSelect(selected === style.id ? null : style.id)}
+            className="flex-shrink-0 flex flex-col items-center gap-1 transition-all"
+            title={style.label}>
+            <div className="rounded-lg overflow-hidden transition-all"
+              style={{ width: 52, height: 68,
+                outline: selected === style.id ? '2px solid var(--accent)' : '2px solid transparent',
+                outlineOffset: 2,
+                opacity: selected && selected !== style.id ? 0.45 : 1 }}>
+              <img src={`/styles/${style.id}.jpg`} alt={style.label} className="w-full h-full object-cover" />
+            </div>
+            <span className="text-center leading-tight"
+              style={{ fontSize: 9,
+                color: selected === style.id ? 'var(--accent)' : 'var(--text-muted)',
+                fontWeight: selected === style.id ? 600 : 400,
+                maxWidth: 52, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {style.label}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Image Card Modal
+
+const MODAL_SIZES_BY_ENGINE: Record<string, string[]> = {
+  gemini: ['4x5', '1x1', '9x16', '1.91x1'],
+  dalle:  ['1x1', '16x9', '9x16'],
+}
 
 function ImageCardModal({ item, onClose, onGenerated }: {
-  item: HistoryItem
-  onClose: () => void
-  onGenerated: () => void
+  item: HistoryItem; onClose: () => void; onGenerated: () => void
 }) {
-  const defaultSizeIdx = Math.max(0, MODAL_SIZES.indexOf(item.size))
-  const [sizeIdx, setSizeIdx] = useState(defaultSizeIdx)
+  // Normalize size: replace × with x for lookup
+  const normalizedItemSize = item.size.replace(/[^\dx.]/g, 'x')
+  const defaultEngine = item.engine === 'GPT' ? 'dalle' : 'gemini'
+
+  const [modalEngine, setModalEngine] = useState<'gemini' | 'dalle'>(defaultEngine)
   const [sizeOpen, setSizeOpen] = useState(false)
   const [newPrompt, setNewPrompt] = useState('')
   const [generating, setGenerating] = useState(false)
@@ -194,10 +248,22 @@ function ImageCardModal({ item, onClose, onGenerated }: {
   const [copied, setCopied] = useState(false)
   const [imgSrc, setImgSrc] = useState<string | null>(null)
 
-  // Load full image from our API
-  useEffect(() => {
-    setImgSrc(`/api/generator/image/${item.id}`)
-  }, [item.id])
+  const availableSizes = MODAL_SIZES_BY_ENGINE[modalEngine]
+
+  // Default to current item size if it exists in this engine's list, else first
+  const [selectedSize, setSelectedSize] = useState<string>(() => {
+    return availableSizes.includes(normalizedItemSize) ? normalizedItemSize : availableSizes[0]
+  })
+
+  // When engine changes, reset size to first valid option
+  function handleEngineChange(eng: 'gemini' | 'dalle') {
+    setModalEngine(eng)
+    const sizes = MODAL_SIZES_BY_ENGINE[eng]
+    setSelectedSize(sizes.includes(selectedSize) ? selectedSize : sizes[0])
+    setSizeOpen(false)
+  }
+
+  useEffect(() => { setImgSrc(`/api/generator/image/${item.id}`) }, [item.id])
 
   function handleCopyPrompt() {
     navigator.clipboard.writeText(item.prompt)
@@ -209,34 +275,27 @@ function ImageCardModal({ item, onClose, onGenerated }: {
     if (generating) return
     setGenerating(true)
     setError(null)
-
-    const targetSize = MODAL_SIZES[sizeIdx]
-    const sizeCode = targetSize.replace('×', 'x')
-
     try {
       if (!newPrompt.trim()) {
-        // Recompose: send fileId to server — it fetches from Drive directly (avoids 413)
+        // Recompose — always Banana, uses selectedSize
         const res = await fetch('/api/generator/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ recomposeFileId: item.id, targetSize }),
+          body: JSON.stringify({ recomposeFileId: item.id, targetSize: selectedSize }),
         })
         const data = await res.json()
         if (!res.ok) throw new Error(data.error || 'Recompose failed')
-        onGenerated()
-        onClose()
+        onGenerated(); onClose()
       } else {
-        // Generate new image with the new prompt, same engine as original
-        const engine = item.engine === 'GPT' ? 'dalle' : 'gemini'
+        // New generation with chosen engine + size
         const res = await fetch('/api/generator/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: newPrompt.trim(), engine, size: targetSize }),
+          body: JSON.stringify({ prompt: newPrompt.trim(), engine: modalEngine, size: selectedSize }),
         })
         const data = await res.json()
         if (!res.ok) throw new Error(data.error || 'Generation failed')
-        onGenerated()
-        onClose()
+        onGenerated(); onClose()
       }
     } catch (e: any) {
       setError(e.message)
@@ -251,46 +310,32 @@ function ImageCardModal({ item, onClose, onGenerated }: {
     link.click()
   }
 
-  // Close on backdrop click
   function handleBackdrop(e: React.MouseEvent) {
     if (e.target === e.currentTarget) onClose()
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-6"
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6"
       style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
-      onClick={handleBackdrop}
-    >
-      <div
-        className="relative flex rounded-2xl overflow-hidden max-h-[90vh] w-full max-w-3xl"
+      onClick={handleBackdrop}>
+      <div className="relative flex rounded-2xl overflow-hidden max-h-[90vh] w-full max-w-3xl"
         style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Close button */}
-        <button
-          onClick={onClose}
+        onClick={e => e.stopPropagation()}>
+
+        <button onClick={onClose}
           className="absolute top-4 right-4 z-10 w-8 h-8 rounded-full flex items-center justify-center transition-all hover:bg-white/10"
-          style={{ background: 'rgba(0,0,0,0.4)' }}
-        >
+          style={{ background: 'rgba(0,0,0,0.4)' }}>
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
             <path d="M1 1l10 10M11 1L1 11" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
           </svg>
         </button>
 
-        {/* Image */}
+        {/* Image preview */}
         <div className="flex-shrink-0 flex items-center justify-center"
           style={{ width: 340, background: 'rgba(0,0,0,0.3)' }}>
           {imgSrc ? (
-            <img
-              src={imgSrc}
-              alt={item.prompt}
-              className="max-w-full max-h-[90vh] object-contain"
-              onError={() => {
-                // Fallback to thumbnail
-                if (item.thumbnailLink) setImgSrc(item.thumbnailLink)
-              }}
-            />
+            <img src={imgSrc} alt={item.prompt} className="max-w-full max-h-[90vh] object-contain"
+              onError={() => { if (item.thumbnailLink) setImgSrc(item.thumbnailLink) }} />
           ) : (
             <div className="flex items-center justify-center w-full h-64">
               <svg className="animate-spin" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
@@ -305,16 +350,12 @@ function ImageCardModal({ item, onClose, onGenerated }: {
         {/* Right panel */}
         <div className="flex flex-col flex-1 min-w-0 overflow-y-auto p-5">
 
-          {/* Meta */}
+          {/* Original meta */}
           <div className="flex items-center gap-2 mb-4">
             <span className="rounded px-2 py-1 text-xs font-mono font-medium"
-              style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)' }}>
-              {item.engine}
-            </span>
+              style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)' }}>{item.engine}</span>
             <span className="rounded px-2 py-1 text-xs font-mono"
-              style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>
-              {item.size}
-            </span>
+              style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>{item.size}</span>
             {item.userName && (
               <div className="flex items-center gap-1.5 ml-auto">
                 <UserAvatar name={item.userName} email={item.userEmail} image={item.userImage} size={22} />
@@ -326,32 +367,14 @@ function ImageCardModal({ item, onClose, onGenerated }: {
           {/* Prompt */}
           <div className="mb-5">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-                Prompt
-              </span>
-              <button
-                onClick={handleCopyPrompt}
+              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Prompt</span>
+              <button onClick={handleCopyPrompt}
                 className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg transition-all"
-                style={{
-                  background: copied ? 'rgba(52,168,83,0.15)' : 'rgba(255,255,255,0.06)',
-                  color: copied ? '#34a853' : 'var(--text-muted)',
-                }}
-              >
+                style={{ background: copied ? 'rgba(52,168,83,0.15)' : 'rgba(255,255,255,0.06)', color: copied ? '#34a853' : 'var(--text-muted)' }}>
                 {copied ? (
-                  <>
-                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
-                      <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                    Copied
-                  </>
+                  <><svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>Copied</>
                 ) : (
-                  <>
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="9" y="9" width="13" height="13" rx="2"/>
-                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                    </svg>
-                    Copy
-                  </>
+                  <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy</>
                 )}
               </button>
             </div>
@@ -360,20 +383,36 @@ function ImageCardModal({ item, onClose, onGenerated }: {
             </p>
           </div>
 
-          {/* Divider */}
-          <div className="mb-5" style={{ height: 1, background: 'var(--border)' }} />
+          <div className="mb-4" style={{ height: 1, background: 'var(--border)' }} />
 
-          {/* Size selector */}
+          {/* Engine toggle */}
           <div className="mb-4">
-            <div className="text-xs font-semibold uppercase tracking-wider mb-2"
-              style={{ color: 'var(--text-muted)' }}>Size</div>
+            <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Model</div>
+            <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+              {ENGINES.map(eng => (
+                <button key={eng.id}
+                  onClick={() => handleEngineChange(eng.id as 'gemini' | 'dalle')}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-all"
+                  style={{
+                    background: modalEngine === eng.id ? 'var(--accent)' : 'transparent',
+                    color: modalEngine === eng.id ? 'white' : 'var(--text-muted)',
+                  }}>
+                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                    style={{ background: modalEngine === eng.id ? 'rgba(255,255,255,0.7)' : 'var(--border)' }} />
+                  {eng.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Size dropdown */}
+          <div className="mb-4">
+            <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Size</div>
             <div className="relative">
-              <button
-                onClick={() => setSizeOpen(o => !o)}
+              <button onClick={() => setSizeOpen(o => !o)}
                 className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm"
-                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)' }}
-              >
-                <span className="font-mono font-medium">{MODAL_SIZES[sizeIdx]}</span>
+                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)' }}>
+                <span className="font-mono font-medium">{selectedSize}</span>
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none"
                   className={`transition-transform ${sizeOpen ? 'rotate-180' : ''}`}
                   style={{ color: 'var(--text-muted)' }}>
@@ -383,12 +422,10 @@ function ImageCardModal({ item, onClose, onGenerated }: {
               {sizeOpen && (
                 <div className="absolute top-full left-0 right-0 mt-1 rounded-lg overflow-hidden z-20"
                   style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
-                  {MODAL_SIZES.map((s, i) => (
-                    <button key={s} onClick={() => { setSizeIdx(i); setSizeOpen(false) }}
+                  {availableSizes.map(s => (
+                    <button key={s} onClick={() => { setSelectedSize(s); setSizeOpen(false) }}
                       className="w-full px-3 py-2.5 text-sm hover:bg-white/5 text-left font-mono font-medium"
-                      style={{ color: sizeIdx === i ? 'var(--accent)' : 'var(--text)' }}>
-                      {s}
-                    </button>
+                      style={{ color: selectedSize === s ? 'var(--accent)' : 'var(--text)' }}>{s}</button>
                   ))}
                 </div>
               )}
@@ -397,67 +434,38 @@ function ImageCardModal({ item, onClose, onGenerated }: {
 
           {/* New prompt */}
           <div className="mb-4 flex-1">
-            <div className="text-xs font-semibold uppercase tracking-wider mb-2"
-              style={{ color: 'var(--text-muted)' }}>
+            <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
               New prompt
-              <span className="ml-1 font-normal normal-case" style={{ color: 'rgba(255,255,255,0.25)' }}>
-                (leave empty to resize only)
-              </span>
+              <span className="ml-1 font-normal normal-case" style={{ color: 'rgba(255,255,255,0.25)' }}>(leave empty to resize only)</span>
             </div>
-            <textarea
-              value={newPrompt}
-              onChange={e => setNewPrompt(e.target.value)}
+            <textarea value={newPrompt} onChange={e => setNewPrompt(e.target.value)}
               placeholder="Describe a variation, or leave empty to recompose at new size..."
-              rows={3}
-              className="w-full rounded-lg resize-none outline-none text-sm leading-relaxed p-3"
-              style={{
-                background: 'rgba(255,255,255,0.04)',
+              rows={3} className="w-full rounded-lg resize-none outline-none text-sm leading-relaxed p-3"
+              style={{ background: 'rgba(255,255,255,0.04)',
                 border: `1px solid ${newPrompt ? 'var(--accent)' : 'var(--border)'}`,
-                color: 'var(--text)',
-                caretColor: 'var(--accent)',
-                transition: 'border-color 0.2s',
-              }}
-            />
+                color: 'var(--text)', caretColor: 'var(--accent)', transition: 'border-color 0.2s' }} />
           </div>
 
-          {/* Error */}
           {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
 
-          {/* Actions */}
           <div className="flex gap-2 mt-auto">
-            <button
-              onClick={handleGenerate}
-              disabled={generating}
+            <button onClick={handleGenerate} disabled={generating}
               className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all"
-              style={{
-                background: !generating ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
-                color: !generating ? 'white' : 'var(--text-muted)',
-              }}
-            >
+              style={{ background: !generating ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
+                color: !generating ? 'white' : 'var(--text-muted)' }}>
               {generating ? (
-                <>
-                  <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/>
-                    <path d="M12 2a10 10 0 0 1 10 10"/>
-                  </svg>
-                  {newPrompt.trim() ? 'Generating...' : 'Resizing...'}
-                </>
+                <><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
+                </svg>{newPrompt.trim() ? 'Generating...' : 'Resizing...'}</>
               ) : (
-                <>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-                  </svg>
-                  {newPrompt.trim() ? 'Generate' : 'Resize'}
-                </>
+                <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                </svg>{newPrompt.trim() ? 'Generate' : 'Resize'}</>
               )}
             </button>
-
-            <button
-              onClick={handleDownload}
+            <button onClick={handleDownload}
               className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all"
-              style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}
-              title="Download original"
-            >
+              style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                 <polyline points="7 10 12 15 17 10"/>
@@ -472,13 +480,12 @@ function ImageCardModal({ item, onClose, onGenerated }: {
   )
 }
 
-// ─── Main Page ───────────────────────────────────────────────────────────────
+// Main Page
 
 export function GeneratorPage() {
   const { data: session } = useSession()
   const [tab, setTab] = useState<'image' | 'video'>('image')
 
-  // Shared history state
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [historyLoading, setHistoryLoading] = useState(true)
   const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set())
@@ -502,23 +509,21 @@ export function GeneratorPage() {
       const res = await fetch('/api/generator/history')
       const data = await res.json()
       setHistory(data.items || [])
-    } catch { /* silent */ }
+    } catch { }
     setHistoryLoading(false)
   }, [])
 
   useEffect(() => { fetchHistory() }, [fetchHistory])
 
-  // Image tab state
   const [engineOpen, setEngineOpen] = useState(false)
   const [sizeOpen, setSizeOpen] = useState(false)
   const [engine, setEngine] = useState<'gemini' | 'dalle'>('gemini')
   const [selectedSize, setSelectedSize] = useState(0)
   const [prompt, setPrompt] = useState('')
   const [aiPrompt, setAiPrompt] = useState(false)
+  const [selectedStyle, setSelectedStyle] = useState<string | null>(null)
   const [reference, setReference] = useState<string | null>(null)
-  const [logo] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
-  const [result, setResult] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const referenceRef = useRef<HTMLInputElement>(null)
 
@@ -538,17 +543,22 @@ export function GeneratorPage() {
   async function handleGenerate() {
     if (!prompt.trim() || generating) return
     setGenerating(true)
-    setResult(null)
     setError(null)
     try {
+      const styleSuffix = selectedStyle ? (ALL_STYLES.find(s => s.id === selectedStyle)?.suffix ?? '') : ''
       const res = await fetch('/api/generator/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, engine, size: currentSize.label, referenceBase64: reference, aiPrompt }),
+        body: JSON.stringify({
+          prompt: prompt + styleSuffix,
+          engine,
+          size: currentSize.label,
+          referenceBase64: reference,
+          aiPrompt,
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Generation failed')
-      setResult(data.imageBase64)
       fetchHistory()
     } catch (e: any) {
       setError(e.message)
@@ -559,7 +569,6 @@ export function GeneratorPage() {
   return (
     <div className="flex flex-col" style={{ height: '100vh', paddingTop: 56, background: 'var(--bg)' }}>
 
-      {/* Modal */}
       {selectedItem && (
         <ImageCardModal
           item={selectedItem}
@@ -568,7 +577,6 @@ export function GeneratorPage() {
         />
       )}
 
-      {/* Tabs */}
       <div className="flex items-center gap-1 px-4 pt-3 pb-0 flex-shrink-0"
         style={{ borderBottom: '1px solid var(--border)' }}>
         {(['image', 'video'] as const).map(t => (
@@ -595,15 +603,13 @@ export function GeneratorPage() {
       ) : (
         <div className="flex flex-1 min-h-0">
 
-          {/* LEFT SIDEBAR */}
           <div className="flex-shrink-0 flex flex-col overflow-y-auto"
-            style={{ width: 260, borderRight: '1px solid var(--border)', background: 'var(--surface)' }}>
+            style={{ width: 270, borderRight: '1px solid var(--border)', background: 'var(--surface)' }}>
             <div className="flex flex-col gap-0 p-4 flex-1">
 
               {/* Engine */}
               <div className="mb-5">
-                <div className="text-xs font-semibold uppercase tracking-wider mb-2"
-                  style={{ color: 'var(--text-muted)' }}>Model</div>
+                <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Model</div>
                 <div className="relative">
                   <button onClick={() => { setEngineOpen(o => !o); setSizeOpen(false) }}
                     className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm transition-all"
@@ -614,8 +620,7 @@ export function GeneratorPage() {
                       <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{currentEngine.sublabel}</span>
                     </div>
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none"
-                      className={`transition-transform ${engineOpen ? 'rotate-180' : ''}`}
-                      style={{ color: 'var(--text-muted)' }}>
+                      className={`transition-transform ${engineOpen ? 'rotate-180' : ''}`} style={{ color: 'var(--text-muted)' }}>
                       <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
                     </svg>
                   </button>
@@ -640,16 +645,14 @@ export function GeneratorPage() {
 
               {/* Format */}
               <div className="mb-5">
-                <div className="text-xs font-semibold uppercase tracking-wider mb-2"
-                  style={{ color: 'var(--text-muted)' }}>Format</div>
+                <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Format</div>
                 <div className="relative">
                   <button onClick={() => { setSizeOpen(o => !o); setEngineOpen(false) }}
                     className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm"
                     style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)' }}>
                     <span className="font-mono font-medium">{currentSize.label}</span>
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none"
-                      className={`transition-transform ${sizeOpen ? 'rotate-180' : ''}`}
-                      style={{ color: 'var(--text-muted)' }}>
+                      className={`transition-transform ${sizeOpen ? 'rotate-180' : ''}`} style={{ color: 'var(--text-muted)' }}>
                       <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
                     </svg>
                   </button>
@@ -659,9 +662,7 @@ export function GeneratorPage() {
                       {sizes.map((s, i) => (
                         <button key={s.label} onClick={() => { setSelectedSize(i); setSizeOpen(false) }}
                           className="w-full px-3 py-2.5 text-sm hover:bg-white/5 text-left font-mono font-medium"
-                          style={{ color: selectedSize === i ? 'var(--accent)' : 'var(--text)' }}>
-                          {s.label}
-                        </button>
+                          style={{ color: selectedSize === i ? 'var(--accent)' : 'var(--text)' }}>{s.label}</button>
                       ))}
                     </div>
                   )}
@@ -670,8 +671,7 @@ export function GeneratorPage() {
 
               {/* Reference */}
               <div className="mb-5">
-                <div className="text-xs font-semibold uppercase tracking-wider mb-2"
-                  style={{ color: 'var(--text-muted)' }}>Reference</div>
+                <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Reference</div>
                 {reference ? (
                   <div className="relative group">
                     <img src={reference} alt="ref" className="w-full h-28 object-cover rounded-lg" />
@@ -697,18 +697,21 @@ export function GeneratorPage() {
                   onChange={e => handleFileUpload(e, setReference)} />
               </div>
 
+              {/* Style */}
+              <div className="mb-5">
+                <StylePicker selected={selectedStyle} onSelect={setSelectedStyle} />
+              </div>
+
               {/* Prompt */}
               <div className="flex-1 flex flex-col mb-4">
-                <div className="text-xs font-semibold uppercase tracking-wider mb-2"
-                  style={{ color: 'var(--text-muted)' }}>Prompt</div>
+                <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Prompt</div>
                 <div className="flex-1 rounded-lg flex flex-col overflow-hidden"
                   style={{ border: `1px solid ${prompt ? 'var(--accent)' : 'var(--border)'}`, background: 'rgba(79,110,247,0.04)', transition: 'border-color 0.2s' }}>
                   <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
                     placeholder="Describe your image..."
                     className="flex-1 bg-transparent resize-none outline-none text-sm leading-relaxed p-3 min-h-[100px]"
                     style={{ color: 'var(--text)', caretColor: 'var(--accent)' }} />
-                  <div className="flex items-center px-3 py-2"
-                    style={{ borderTop: '1px solid rgba(79,110,247,0.15)' }}>
+                  <div className="flex items-center px-3 py-2" style={{ borderTop: '1px solid rgba(79,110,247,0.15)' }}>
                     <button onClick={() => setAiPrompt(v => !v)}
                       className="relative w-8 h-4 rounded-full transition-all flex-shrink-0"
                       style={{ background: aiPrompt ? 'var(--accent)' : 'rgba(255,255,255,0.15)' }}>
@@ -722,42 +725,26 @@ export function GeneratorPage() {
 
             </div>
 
-            {/* Generate button */}
             <div className="p-4 flex-shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
-              {error && (
-                <p className="text-xs text-red-400 mb-2 text-center">{error}</p>
-              )}
-              <button onClick={handleGenerate}
-                disabled={!prompt.trim() || generating}
+              {error && <p className="text-xs text-red-400 mb-2 text-center">{error}</p>}
+              <button onClick={handleGenerate} disabled={!prompt.trim() || generating}
                 className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all"
-                style={{
-                  background: prompt.trim() && !generating ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
-                  color: prompt.trim() && !generating ? 'white' : 'var(--text-muted)',
-                }}>
+                style={{ background: prompt.trim() && !generating ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
+                  color: prompt.trim() && !generating ? 'white' : 'var(--text-muted)' }}>
                 {generating ? (
-                  <>
-                    <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/>
-                      <path d="M12 2a10 10 0 0 1 10 10" />
-                    </svg>
-                    Generating...
-                  </>
+                  <><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
+                  </svg>Generating...</>
                 ) : (
-                  <>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-                    </svg>
-                    Generate
-                  </>
+                  <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                  </svg>Generate</>
                 )}
               </button>
             </div>
           </div>
 
-          {/* MAIN AREA */}
           <div className="flex-1 overflow-y-auto p-6 min-w-0">
-
-            {/* Recent */}
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold">Recent</h2>
               <div className="flex items-center gap-2">
@@ -765,16 +752,9 @@ export function GeneratorPage() {
                 <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Saved to Google Drive</span>
               </div>
             </div>
-            <PeopleFilter
-              items={history}
-              selectedEmails={selectedEmails}
-              onToggle={toggleEmail}
-              onClear={() => setSelectedEmails(new Set())}
-            />
-            <HistoryGrid
-              items={filteredHistory}
-              onSelect={item => setSelectedItem(item)}
-            />
+            <PeopleFilter items={history} selectedEmails={selectedEmails}
+              onToggle={toggleEmail} onClear={() => setSelectedEmails(new Set())} />
+            <HistoryGrid items={filteredHistory} onSelect={item => setSelectedItem(item)} />
           </div>
         </div>
       )}
