@@ -261,6 +261,3 @@ Rules:
     return NextResponse.json({ error: e.message }, { status: 500 })
   }
 }
-ror: e.message }, { status: 500 })
-  }
-}
