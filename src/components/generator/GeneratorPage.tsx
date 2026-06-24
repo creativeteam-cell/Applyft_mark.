@@ -158,6 +158,14 @@ function UserAvatar({ name, email, image, size = 28, selected, onClick }: {
   )
 }
 
+// Maps size label → CSS aspect-ratio value
+const SIZE_ASPECT: Record<string, string> = {
+  '4x5':    '4 / 5',
+  '1x1':    '1 / 1',
+  '9x16':   '9 / 16',
+  '1.91x1': '1.91 / 1',
+}
+
 function HistoryGrid({ items, onSelect }: { items: HistoryItem[]; onSelect?: (item: HistoryItem) => void }) {
   if (items.length === 0) {
     return (
@@ -168,14 +176,16 @@ function HistoryGrid({ items, onSelect }: { items: HistoryItem[]; onSelect?: (it
   }
   return (
     <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
-      {items.map(item => (
+      {items.map(item => {
+        const aspect = SIZE_ASPECT[item.size] ?? '4 / 5'
+        return (
         <div key={item.id} onClick={() => onSelect?.(item)}
           className="rounded-xl overflow-hidden cursor-pointer transition-all hover:scale-[1.02]"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-          <div className="aspect-[4/5] flex items-center justify-center overflow-hidden"
-            style={{ background: 'rgba(255,255,255,0.02)' }}>
+          <div className="w-full overflow-hidden flex items-center justify-center"
+            style={{ aspectRatio: aspect, background: 'rgba(255,255,255,0.02)' }}>
             {item.thumbnailLink ? (
-              <img src={item.thumbnailLink} alt={item.prompt} className="w-full h-full object-cover" />
+              <img src={item.thumbnailLink} alt={item.prompt} className="w-full h-full object-fill" />
             ) : (
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="0.8"
                 style={{ color: 'rgba(255,255,255,0.1)' }}>
@@ -206,7 +216,8 @@ function HistoryGrid({ items, onSelect }: { items: HistoryItem[]; onSelect?: (it
             </div>
           </div>
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

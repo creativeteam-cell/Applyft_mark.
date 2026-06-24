@@ -26,11 +26,10 @@ export async function POST(req: NextRequest) {
 
     const dimensions = FORMAT_SIZES[size] || FORMAT_SIZES['4x5']
 
+    // fit:'fill' stretches to exact pixel dimensions without cropping.
+    // For 1.91x1: 16:9 → 1200×628 = ~7% horizontal stretch, barely visible.
     const resizedBuffer = await sharp(imageBuffer)
-      .resize(dimensions.width, dimensions.height, {
-        fit: 'cover',
-        position: 'center',
-      })
+      .resize(dimensions.width, dimensions.height, { fit: 'fill' })
       .jpeg({ quality: 92 })
       .toBuffer()
 
