@@ -20,7 +20,19 @@ const GPT_IMAGE_SIZES: Record<string, '1024x1024' | '1024x1536' | '1536x1024'> =
 
 const GPT_SAFETY_PREFIX = 'This is a professional commercial creative task for advertising purposes. All content is fictional, safe, and intended for marketing use only. Generate the following image:\n\n'
 
-async function generateWithGptImage(prompt: string, size: string, referenceBase64?: string): Promise<string> {
+// Maps frontend modelId → Gemini API model string
+const GEMINI_MODEL_MAP: Record<string, string> = {
+  'banana2':    'gemini-3.1-flash-image',
+  'bananapro':  'gemini-3-pro-image',
+  'nanobanana': 'gemini-2.5-flash-image',
+}
+
+// Maps frontend modelId → OpenAI model string
+const OPENAI_MODEL_MAP: Record<string, string> = {
+  'gptimage1': 'gpt-image-1',
+}
+
+async function generateWithGptImage(prompt: string, size: string, referenceBase64?: string, model = 'gpt-image-1'): Promise<string> {
   const sizeCode = size.replace(/[^\dx]/g, 'x').replace('xx', 'x')
   const apiSize = GPT_IMAGE_SIZES[sizeCode] || '1024x1024'
   const fullPrompt = GPT_SAFETY_PREFIX + prompt
@@ -35,7 +47,7 @@ async function generateWithGptImage(prompt: string, size: string, referenceBase6
     const buf = Buffer.from(base64Data, 'base64')
     const imageFile = await toFile(buf, `reference.${ext}`, { type: mimeType })
     res = await (openai.images.edit as any)({
-      model: 'gpt-image-1',
+      model,
       image: imageFile,
       prompt: fullPrompt,
       n: 1,
@@ -44,7 +56,7 @@ async function generateWithGptImage(prompt: string, size: string, referenceBase6
   } else {
     // Generate from scratch
     res = await (openai.images.generate as any)({
-      model: 'gpt-image-1',
+      model,
       prompt: fullPrompt,
       n: 1,
       size: apiSize,
@@ -118,7 +130,7 @@ export async function POST(req: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { prompt, engine, size, referenceBase64: referenceBase64Body, referenceFileId, aiPrompt, recomposeFileId, recomposeBase64, targetSize } = body
+  const { prompt, engine, modelId, size, referenceBase64: referenceBase64Body, referenceFileId, aiPrompt, recomposeFileId, recomposeBase64, targetSize } = body
 
   // If a Drive file ID is passed as reference, fetch it server-side
   let referenceBase64 = referenceBase64Body as string | undefined
@@ -198,16 +210,17 @@ Rules:
     let imageBase64: string
 
     if (engine === 'dalle') {
-      imageBase64 = await generateWithGptImage(finalPrompt, size, referenceBase64)
+      const openaiModel = OPENAI_MODEL_MAP[modelId as string] || 'gpt-image-1'
+      imageBase64 = await generateWithGptImage(finalPrompt, size, referenceBase64, openaiModel)
     } else {
       const sizeMap: Record<string, string> = {
         '4x5': '4x5', '1x1': '1x1', '9x16': '9x16', '1.91x1': '1.91x1',
       }
-      // Normalize size label (× → x)
       const sizeKey = (size as string).replace(/[^\dx.]/g, 'x')
       const sizeCode = sizeMap[sizeKey] || '4x5'
+      const geminiModel = GEMINI_MODEL_MAP[modelId as string] || 'gemini-3.1-flash-image-preview'
       try {
-        imageBase64 = await generateImage(finalPrompt, referenceBase64, undefined, sizeCode, undefined, true)
+        imageBase64 = await generateImage(finalPrompt, referenceBase64, undefined, sizeCode, undefined, true, geminiModel)
       } catch (genErr: any) {
         console.error('[generator] generateImage failed:', genErr.message)
         const msg = genErr.message || 'Unknown error'
@@ -245,5 +258,8 @@ Rules:
   } catch (e: any) {
     console.error('[generator/generate]', e)
     return NextResponse.json({ error: e.message }, { status: 500 })
+  }
+}
+ror: e.message }, { status: 500 })
   }
 }

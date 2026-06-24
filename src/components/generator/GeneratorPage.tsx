@@ -3,26 +3,74 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useSession } from 'next-auth/react'
 
-const ENGINES = [
-  { id: 'gemini', label: 'Banana', sublabel: 'Gemini 3.1 Flash' },
-  { id: 'dalle',  label: 'GPT',    sublabel: 'OpenAI · GPT Image 1' },
-]
-
-const SIZES: Record<string, { label: string }[]> = {
-  gemini: [
-    { label: '4x5' },
-    { label: '1x1' },
-    { label: '9x16' },
-    { label: '1.91x1' },
-  ],
-  dalle: [
-    { label: '1x1' },
-    { label: '16x9' },
-    { label: '9x16' },
-  ],
+interface ModelDef {
+  id: string
+  provider: 'gemini' | 'openai'
+  apiModel: string
+  label: string
+  providerLabel: string
+  description: string
+  tags: string[]
+  supportsReference: boolean
+  sizes: { label: string }[]
 }
 
-const MODAL_SIZES = ['4x5', '1x1', '9x16', '1.91x1']
+const MODELS: ModelDef[] = [
+  {
+    id: 'banana2',
+    provider: 'gemini',
+    apiModel: 'gemini-3.1-flash-image',
+    label: 'Banana 2',
+    providerLabel: 'Gemini Image',
+    description: 'Fast, stable generation for high-volume tasks',
+    tags: ['Fast', 'Stable', 'HD'],
+    supportsReference: true,
+    sizes: [{ label: '4x5' }, { label: '1x1' }, { label: '9x16' }, { label: '1.91x1' }],
+  },
+  {
+    id: 'bananapro',
+    provider: 'gemini',
+    apiModel: 'gemini-3-pro-image',
+    label: 'Banana Pro',
+    providerLabel: 'Gemini Image',
+    description: 'Studio-quality 4K visuals, best for complex scenes and text',
+    tags: ['4K', 'Best quality', 'Slow'],
+    supportsReference: true,
+    sizes: [{ label: '4x5' }, { label: '1x1' }, { label: '9x16' }, { label: '1.91x1' }],
+  },
+  {
+    id: 'nanobanana',
+    provider: 'gemini',
+    apiModel: 'gemini-2.5-flash-image',
+    label: 'Nano Banana',
+    providerLabel: 'Gemini Image · 2.5',
+    description: 'State-of-the-art creative image workflows',
+    tags: ['Fast', 'Creative', 'Flexible'],
+    supportsReference: true,
+    sizes: [{ label: '4x5' }, { label: '1x1' }, { label: '9x16' }, { label: '1.91x1' }],
+  },
+  {
+    id: 'gptimage1',
+    provider: 'openai',
+    apiModel: 'gpt-image-1',
+    label: 'GPT Image 1',
+    providerLabel: 'OpenAI',
+    description: 'Precise editing, excellent for text in images',
+    tags: ['Text', 'Editing', 'HD'],
+    supportsReference: true,
+    sizes: [{ label: '1x1' }, { label: '16x9' }, { label: '9x16' }],
+  },
+]
+
+const PROVIDERS = [
+  { id: 'gemini' as const, label: 'Gemini Image' },
+  { id: 'openai' as const, label: 'OpenAI' },
+]
+
+const MODAL_SIZES_BY_PROVIDER: Record<string, string[]> = {
+  gemini: ['4x5', '1x1', '9x16', '1.91x1'],
+  openai: ['1x1', '16x9', '9x16'],
+}
 
 const STYLE_GROUPS = [
   {
@@ -258,21 +306,98 @@ function StylePicker({ selected, onSelect }: { selected: string | null; onSelect
   )
 }
 
-// Image Card Modal
+// ── Shared model picker sub-component ────────────────────────────────────────
 
-const MODAL_SIZES_BY_ENGINE: Record<string, string[]> = {
-  gemini: ['4x5', '1x1', '9x16', '1.91x1'],
-  dalle:  ['1x1', '16x9', '9x16'],
+function ModelPicker({ selectedModelId, onSelect }: {
+  selectedModelId: string
+  onSelect: (id: string) => void
+}) {
+  const [provider, setProvider] = useState<'gemini' | 'openai'>(() => {
+    return MODELS.find(m => m.id === selectedModelId)?.provider ?? 'gemini'
+  })
+  const [modelOpen, setModelOpen] = useState(false)
+  const providerModels = MODELS.filter(m => m.provider === provider)
+  const current = MODELS.find(m => m.id === selectedModelId) ?? MODELS[0]
+
+  function switchProvider(p: 'gemini' | 'openai') {
+    setProvider(p)
+    setModelOpen(false)
+    const first = MODELS.find(m => m.provider === p)
+    if (first && first.id !== selectedModelId) onSelect(first.id)
+  }
+
+  return (
+    <div>
+      {/* Provider tabs */}
+      <div className="flex rounded-lg overflow-hidden mb-2" style={{ border: '1px solid var(--border)' }}>
+        {PROVIDERS.map(p => (
+          <button key={p.id} onClick={() => switchProvider(p.id)}
+            className="flex-1 py-1.5 text-xs font-medium transition-all"
+            style={{
+              background: provider === p.id ? 'var(--accent)' : 'transparent',
+              color: provider === p.id ? 'white' : 'var(--text-muted)',
+            }}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Sub-model dropdown */}
+      <div className="relative mb-2">
+        <button onClick={() => setModelOpen(o => !o)}
+          className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm"
+          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)' }}>
+          <div className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: 'var(--accent)' }} />
+            <span className="font-medium">{current.label}</span>
+          </div>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
+            className={`transition-transform ${modelOpen ? 'rotate-180' : ''}`} style={{ color: 'var(--text-muted)' }}>
+            <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+        </button>
+        {modelOpen && (
+          <div className="absolute top-full left-0 right-0 mt-1 rounded-lg overflow-hidden z-30"
+            style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+            {providerModels.map(m => (
+              <button key={m.id}
+                onClick={() => { onSelect(m.id); setModelOpen(false) }}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-white/5 text-left"
+                style={{ color: m.id === selectedModelId ? 'var(--accent)' : 'var(--text)' }}>
+                <span className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                  style={{ background: m.id === selectedModelId ? 'var(--accent)' : 'var(--border)' }} />
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium">{m.label}</div>
+                  <div className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{m.description}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Model info tags */}
+      <div className="flex gap-1 flex-wrap">
+        {current.tags.map(tag => (
+          <span key={tag} className="rounded px-1.5 py-0.5 text-xs"
+            style={{ background: 'rgba(79,110,247,0.1)', color: 'var(--text-muted)' }}>
+            {tag}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
 }
+
+// ── Image Card Modal ──────────────────────────────────────────────────────────
 
 function ImageCardModal({ item, onClose, onGenerated }: {
   item: HistoryItem; onClose: () => void; onGenerated: () => void
 }) {
-  // Normalize size: replace × with x for lookup
   const normalizedItemSize = item.size.replace(/[^\dx.]/g, 'x')
-  const defaultEngine = item.engine === 'GPT' ? 'dalle' : 'gemini'
+  const defaultModelId = item.engine === 'GPT' ? 'gptimage1' : 'banana2'
 
-  const [modalEngine, setModalEngine] = useState<'gemini' | 'dalle'>(defaultEngine)
+  const [selectedModelId, setSelectedModelId] = useState(defaultModelId)
   const [sizeOpen, setSizeOpen] = useState(false)
   const [newPrompt, setNewPrompt] = useState('')
   const [generating, setGenerating] = useState(false)
@@ -280,19 +405,19 @@ function ImageCardModal({ item, onClose, onGenerated }: {
   const [copied, setCopied] = useState(false)
   const [imgSrc, setImgSrc] = useState<string | null>(null)
 
-  const availableSizes = MODAL_SIZES_BY_ENGINE[modalEngine]
+  const currentModel = MODELS.find(m => m.id === selectedModelId) ?? MODELS[0]
+  const availableSizes = currentModel.sizes.map(s => s.label)
 
-  // Default to current item size if it exists in this engine's list, else first
-  const [selectedSize, setSelectedSize] = useState<string>(() => {
-    return availableSizes.includes(normalizedItemSize) ? normalizedItemSize : availableSizes[0]
-  })
+  const [selectedSize, setSelectedSize] = useState<string>(() =>
+    availableSizes.includes(normalizedItemSize) ? normalizedItemSize : availableSizes[0]
+  )
 
-  // When engine changes, reset size to first valid option
-  function handleEngineChange(eng: 'gemini' | 'dalle') {
-    setModalEngine(eng)
-    const sizes = MODAL_SIZES_BY_ENGINE[eng]
-    setSelectedSize(sizes.includes(selectedSize) ? selectedSize : sizes[0])
-    setSizeOpen(false)
+  // When model changes, reset size if not compatible
+  function handleModelSelect(id: string) {
+    setSelectedModelId(id)
+    const m = MODELS.find(x => x.id === id)!
+    const sizes = m.sizes.map(s => s.label)
+    if (!sizes.includes(selectedSize)) setSelectedSize(sizes[0])
   }
 
   useEffect(() => { setImgSrc(`/api/generator/image/${item.id}`) }, [item.id])
@@ -309,7 +434,6 @@ function ImageCardModal({ item, onClose, onGenerated }: {
     setError(null)
     try {
       if (!newPrompt.trim()) {
-        // Recompose — always Banana, uses selectedSize
         const res = await fetch('/api/generator/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -319,11 +443,16 @@ function ImageCardModal({ item, onClose, onGenerated }: {
         if (!res.ok) throw new Error(data.error || 'Recompose failed')
         onGenerated(); onClose()
       } else {
-        // New generation with chosen engine + size, using current image as reference
         const res = await fetch('/api/generator/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: newPrompt.trim(), engine: modalEngine, size: selectedSize, referenceFileId: item.id }),
+          body: JSON.stringify({
+            prompt: newPrompt.trim(),
+            engine: currentModel.provider === 'openai' ? 'dalle' : 'gemini',
+            modelId: selectedModelId,
+            size: selectedSize,
+            referenceFileId: item.id,
+          }),
         })
         const data = await res.json()
         if (!res.ok) throw new Error(data.error || 'Generation failed')
@@ -382,7 +511,7 @@ function ImageCardModal({ item, onClose, onGenerated }: {
         {/* Right panel */}
         <div className="flex flex-col flex-1 min-w-0 overflow-y-auto p-5">
 
-          {/* Original meta */}
+          {/* Meta */}
           <div className="flex items-center gap-2 mb-4">
             <span className="rounded px-2 py-1 text-xs font-mono font-medium"
               style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)' }}>{item.engine}</span>
@@ -422,24 +551,10 @@ function ImageCardModal({ item, onClose, onGenerated }: {
 
           <div className="mb-4" style={{ height: 1, background: 'var(--border)' }} />
 
-          {/* Engine toggle */}
+          {/* Model picker */}
           <div className="mb-4">
             <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Model</div>
-            <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-              {ENGINES.map(eng => (
-                <button key={eng.id}
-                  onClick={() => handleEngineChange(eng.id as 'gemini' | 'dalle')}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-all"
-                  style={{
-                    background: modalEngine === eng.id ? 'var(--accent)' : 'transparent',
-                    color: modalEngine === eng.id ? 'white' : 'var(--text-muted)',
-                  }}>
-                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                    style={{ background: modalEngine === eng.id ? 'rgba(255,255,255,0.7)' : 'var(--border)' }} />
-                  {eng.label}
-                </button>
-              ))}
-            </div>
+            <ModelPicker selectedModelId={selectedModelId} onSelect={handleModelSelect} />
           </div>
 
           {/* Size dropdown */}
@@ -451,8 +566,7 @@ function ImageCardModal({ item, onClose, onGenerated }: {
                 style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)' }}>
                 <span className="font-mono font-medium">{selectedSize}</span>
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none"
-                  className={`transition-transform ${sizeOpen ? 'rotate-180' : ''}`}
-                  style={{ color: 'var(--text-muted)' }}>
+                  className={`transition-transform ${sizeOpen ? 'rotate-180' : ''}`} style={{ color: 'var(--text-muted)' }}>
                   <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
                 </svg>
               </button>
@@ -552,10 +666,9 @@ export function GeneratorPage() {
 
   useEffect(() => { fetchHistory() }, [fetchHistory])
 
-  const [engineOpen, setEngineOpen] = useState(false)
   const [sizeOpen, setSizeOpen] = useState(false)
-  const [engine, setEngine] = useState<'gemini' | 'dalle'>('gemini')
-  const [selectedSize, setSelectedSize] = useState(0)
+  const [selectedModelId, setSelectedModelId] = useState('banana2')
+  const [selectedSizeIdx, setSelectedSizeIdx] = useState(0)
   const [prompt, setPrompt] = useState('')
   const [aiPrompt, setAiPrompt] = useState(false)
   const [selectedStyle, setSelectedStyle] = useState<string | null>(null)
@@ -564,9 +677,15 @@ export function GeneratorPage() {
   const [error, setError] = useState<string | null>(null)
   const referenceRef = useRef<HTMLInputElement>(null)
 
-  const sizes = SIZES[engine]
-  const currentEngine = ENGINES.find(e => e.id === engine)!
-  const currentSize = sizes[selectedSize] || sizes[0]
+  const currentModel = MODELS.find(m => m.id === selectedModelId) ?? MODELS[0]
+  const currentSize = currentModel.sizes[selectedSizeIdx] ?? currentModel.sizes[0]
+
+  function handleModelSelect(id: string) {
+    setSelectedModelId(id)
+    const m = MODELS.find(x => x.id === id)!
+    // Keep size index if valid, else reset
+    if (selectedSizeIdx >= m.sizes.length) setSelectedSizeIdx(0)
+  }
 
   function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>, setter: (v: string) => void) {
     const file = e.target.files?.[0]
@@ -577,29 +696,43 @@ export function GeneratorPage() {
     e.target.value = ''
   }
 
+  const styleSuffix = selectedStyle ? (ALL_STYLES.find(s => s.id === selectedStyle)?.suffix ?? '') : ''
+  const hasPrompt = prompt.trim().length > 0
+  const hasStyle = !!selectedStyle
+  const isRestyle = !hasPrompt && hasStyle && !!reference
+  const isResize  = !hasPrompt && !hasStyle && !!reference
+  const canGenerate = (hasPrompt || hasStyle || !!reference) && !generating
+  const btnLabel = generating
+    ? (isRestyle ? 'Restyling...' : isResize ? 'Resizing...' : 'Generating...')
+    : (isRestyle ? 'Restyle' : isResize ? 'Resize' : 'Generate')
+
   async function handleGenerate() {
-    if ((!prompt.trim() && !reference) || generating) return
+    if (!canGenerate) return
     setGenerating(true)
     setError(null)
     try {
       let res: Response
-      if (!prompt.trim() && reference) {
-        // Reference uploaded but no prompt → recompose/resize
+      if (isResize) {
+        // No prompt, no style — just recompose at new size
         res = await fetch('/api/generator/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ recomposeBase64: reference, targetSize: currentSize.label }),
         })
       } else {
-        const styleSuffix = selectedStyle ? (ALL_STYLES.find(s => s.id === selectedStyle)?.suffix ?? '') : ''
+        // Generate / Restyle — always send model info
+        const finalPrompt = isRestyle
+          ? `Recreate this image in the following style${styleSuffix}`
+          : prompt + styleSuffix
         res = await fetch('/api/generator/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            prompt: prompt + styleSuffix,
-            engine,
+            prompt: finalPrompt,
+            engine: currentModel.provider === 'openai' ? 'dalle' : 'gemini',
+            modelId: selectedModelId,
             size: currentSize.label,
-            referenceBase64: reference,
+            referenceBase64: currentModel.supportsReference ? reference : undefined,
             aiPrompt,
           }),
         })
@@ -654,47 +787,17 @@ export function GeneratorPage() {
             style={{ width: 270, borderRight: '1px solid var(--border)', background: 'var(--surface)' }}>
             <div className="flex flex-col gap-0 p-4 flex-1">
 
-              {/* Engine */}
+              {/* Model */}
               <div className="mb-5">
                 <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Model</div>
-                <div className="relative">
-                  <button onClick={() => { setEngineOpen(o => !o); setSizeOpen(false) }}
-                    className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm transition-all"
-                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)' }}>
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: 'var(--accent)' }} />
-                      <span className="font-medium">{currentEngine.label}</span>
-                      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{currentEngine.sublabel}</span>
-                    </div>
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none"
-                      className={`transition-transform ${engineOpen ? 'rotate-180' : ''}`} style={{ color: 'var(--text-muted)' }}>
-                      <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                    </svg>
-                  </button>
-                  {engineOpen && (
-                    <div className="absolute top-full left-0 right-0 mt-1 rounded-lg overflow-hidden z-20"
-                      style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
-                      {ENGINES.map(eng => (
-                        <button key={eng.id}
-                          onClick={() => { setEngine(eng.id as any); setSelectedSize(0); setEngineOpen(false) }}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-white/5 text-left"
-                          style={{ color: engine === eng.id ? 'var(--accent)' : 'var(--text)' }}>
-                          <span className="w-2 h-2 rounded-full flex-shrink-0"
-                            style={{ background: engine === eng.id ? 'var(--accent)' : 'var(--border)' }} />
-                          <span className="font-medium">{eng.label}</span>
-                          <span className="text-xs ml-auto" style={{ color: 'var(--text-muted)' }}>{eng.sublabel}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <ModelPicker selectedModelId={selectedModelId} onSelect={id => { handleModelSelect(id); setSizeOpen(false) }} />
               </div>
 
               {/* Format */}
               <div className="mb-5">
                 <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Format</div>
                 <div className="relative">
-                  <button onClick={() => { setSizeOpen(o => !o); setEngineOpen(false) }}
+                  <button onClick={() => setSizeOpen(o => !o)}
                     className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm"
                     style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)' }}>
                     <span className="font-mono font-medium">{currentSize.label}</span>
@@ -706,10 +809,10 @@ export function GeneratorPage() {
                   {sizeOpen && (
                     <div className="absolute top-full left-0 right-0 mt-1 rounded-lg overflow-hidden z-20"
                       style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
-                      {sizes.map((s, i) => (
-                        <button key={s.label} onClick={() => { setSelectedSize(i); setSizeOpen(false) }}
+                      {currentModel.sizes.map((s, i) => (
+                        <button key={s.label} onClick={() => { setSelectedSizeIdx(i); setSizeOpen(false) }}
                           className="w-full px-3 py-2.5 text-sm hover:bg-white/5 text-left font-mono font-medium"
-                          style={{ color: selectedSize === i ? 'var(--accent)' : 'var(--text)' }}>{s.label}</button>
+                          style={{ color: selectedSizeIdx === i ? 'var(--accent)' : 'var(--text)' }}>{s.label}</button>
                       ))}
                     </div>
                   )}
@@ -717,32 +820,35 @@ export function GeneratorPage() {
               </div>
 
               {/* Reference */}
-              <div className="mb-5">
-                <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Reference</div>
-                {reference ? (
-                  <div className="relative group">
-                    <img src={reference} alt="ref" className="w-full h-28 object-cover rounded-lg" />
-                    <button onClick={() => setReference(null)}
-                      className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                      style={{ background: 'rgba(0,0,0,0.75)' }}>
-                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                        <path d="M1 1l8 8M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+              {currentModel.supportsReference && (
+                <div className="mb-5">
+                  <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Reference</div>
+                  <input ref={referenceRef} type="file" accept="image/*" className="hidden"
+                    onChange={e => handleFileUpload(e, setReference)} />
+                  {reference ? (
+                    <div className="relative rounded-lg overflow-hidden" style={{ height: 80 }}>
+                      <img src={reference} alt="reference" className="w-full h-full object-cover" />
+                      <button onClick={() => setReference(null)}
+                        className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full flex items-center justify-center"
+                        style={{ background: 'rgba(0,0,0,0.6)' }}>
+                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                          <path d="M1 1l8 8M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+                        </svg>
+                      </button>
+                    </div>
+                  ) : (
+                    <button onClick={() => referenceRef.current?.click()}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm transition-all hover:bg-white/5"
+                      style={{ border: '1px dashed var(--border)', color: 'var(--text-muted)' }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <rect x="3" y="3" width="18" height="18" rx="3"/>
+                        <circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
                       </svg>
+                      Upload reference
                     </button>
-                  </div>
-                ) : (
-                  <button onClick={() => referenceRef.current?.click()}
-                    className="w-full h-20 rounded-lg border-2 border-dashed flex items-center justify-center gap-2"
-                    style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                      <path d="M12 5v14M5 12h14"/>
-                    </svg>
-                    <span className="text-xs">Add reference</span>
-                  </button>
-                )}
-                <input ref={referenceRef} type="file" accept="image/*" className="hidden"
-                  onChange={e => handleFileUpload(e, setReference)} />
-              </div>
+                  )}
+                </div>
+              )}
 
               {/* Style */}
               <div className="mb-5">
@@ -750,59 +856,67 @@ export function GeneratorPage() {
               </div>
 
               {/* Prompt */}
-              <div className="flex-1 flex flex-col mb-4">
-                <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Prompt</div>
-                <div className="flex-1 rounded-lg flex flex-col overflow-hidden"
-                  style={{ border: `1px solid ${prompt ? 'var(--accent)' : 'var(--border)'}`, background: 'rgba(79,110,247,0.04)', transition: 'border-color 0.2s' }}>
-                  <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
-                    placeholder="Describe your image..."
-                    className="flex-1 bg-transparent resize-none outline-none text-sm leading-relaxed p-3 min-h-[100px]"
-                    style={{ color: 'var(--text)', caretColor: 'var(--accent)' }} />
-                  <div className="flex items-center px-3 py-2" style={{ borderTop: '1px solid rgba(79,110,247,0.15)' }}>
-                    <button onClick={() => setAiPrompt(v => !v)}
-                      className="relative w-8 h-4 rounded-full transition-all flex-shrink-0"
-                      style={{ background: aiPrompt ? 'var(--accent)' : 'rgba(255,255,255,0.15)' }}>
-                      <span className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all"
-                        style={{ left: aiPrompt ? 'calc(100% - 14px)' : 2 }} />
-                    </button>
-                    <span className="text-xs ml-2" style={{ color: 'var(--text-muted)' }}>AI prompt</span>
-                  </div>
+              <div className="mb-4 flex-1 flex flex-col">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Prompt</span>
+                  <button onClick={() => setAiPrompt(o => !o)}
+                    className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-lg transition-all"
+                    style={{ background: aiPrompt ? 'rgba(79,110,247,0.15)' : 'rgba(255,255,255,0.05)',
+                      color: aiPrompt ? 'var(--accent)' : 'var(--text-muted)',
+                      border: `1px solid ${aiPrompt ? 'var(--accent)' : 'transparent'}` }}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                    </svg>
+                    AI
+                  </button>
                 </div>
+                <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
+                  placeholder={isRestyle ? 'Restyle reference with selected style...' : 'Describe the image...'}
+                  rows={4} className="w-full rounded-lg resize-none outline-none text-sm leading-relaxed p-3 flex-1"
+                  style={{ background: 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${prompt ? 'var(--accent)' : 'var(--border)'}`,
+                    color: 'var(--text)', caretColor: 'var(--accent)', transition: 'border-color 0.2s' }} />
               </div>
+
+              {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
 
             </div>
 
+            {/* Generate button */}
             <div className="p-4 flex-shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
-              {error && <p className="text-xs text-red-400 mb-2 text-center">{error}</p>}
-              <button onClick={handleGenerate} disabled={(!prompt.trim() && !reference) || generating}
+              <button onClick={handleGenerate} disabled={!canGenerate}
                 className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all"
-                style={{ background: (prompt.trim() || reference) && !generating ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
-                  color: (prompt.trim() || reference) && !generating ? 'white' : 'var(--text-muted)' }}>
+                style={{ background: canGenerate ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
+                  color: canGenerate ? 'white' : 'var(--text-muted)' }}>
                 {generating ? (
                   <><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
-                  </svg>{!prompt.trim() && reference ? 'Resizing...' : 'Generating...'}</>
+                  </svg>{btnLabel}</>
                 ) : (
                   <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-                  </svg>{!prompt.trim() && reference ? 'Resize' : 'Generate'}</>
+                  </svg>{btnLabel}</>
                 )}
               </button>
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-6 min-w-0">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold">Recent</h2>
-              <div className="flex items-center gap-2">
-                {historyLoading && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading...</span>}
-                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Saved to Google Drive</span>
+          {/* Main content */}
+          <div className="flex-1 overflow-y-auto p-6">
+            <PeopleFilter items={history} selectedEmails={selectedEmails} onToggle={toggleEmail} onClear={() => setSelectedEmails(new Set())} />
+            {historyLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <svg className="animate-spin" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                  style={{ color: 'rgba(255,255,255,0.3)' }}>
+                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/>
+                  <path d="M12 2a10 10 0 0 1 10 10"/>
+                </svg>
               </div>
-            </div>
-            <PeopleFilter items={history} selectedEmails={selectedEmails}
-              onToggle={toggleEmail} onClear={() => setSelectedEmails(new Set())} />
-            <HistoryGrid items={filteredHistory} onSelect={item => setSelectedItem(item)} />
+            ) : (
+              <HistoryGrid items={filteredHistory} onSelect={setSelectedItem} />
+            )}
           </div>
+
         </div>
       )}
     </div>
