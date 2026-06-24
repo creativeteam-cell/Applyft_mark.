@@ -74,6 +74,7 @@ export function GeneratePanel({
   const [logoOpen, setLogoOpen] = useState(false)
   const [promptBorder, setPromptBorder] = useState('var(--border)')
   const [enhancing, setEnhancing] = useState(false)
+  const [enhanceError, setEnhanceError] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
   const assetFileRef = useRef<HTMLInputElement>(null)
   const [pendingAssetBase64, setPendingAssetBase64] = useState<string | null>(null)
@@ -162,6 +163,7 @@ export function GeneratePanel({
 
   async function handleEnhancePrompt() {
     setEnhancing(true)
+    setEnhanceError('')
     try {
       const res = await fetch('/api/generator/enhance', {
         method: 'POST',
@@ -173,9 +175,16 @@ export function GeneratePanel({
         }),
       })
       const data = await res.json()
-      if (data.enhanced) onPromptChange(data.enhanced)
-    } catch (e) {
+      if (data.enhanced) {
+        onPromptChange(data.enhanced)
+      } else {
+        setEnhanceError(data.error || 'No response')
+        setTimeout(() => setEnhanceError(''), 5000)
+      }
+    } catch (e: any) {
       console.error('[enhance]', e)
+      setEnhanceError(e.message || 'Network error')
+      setTimeout(() => setEnhanceError(''), 5000)
     }
     setEnhancing(false)
   }
@@ -294,12 +303,20 @@ export function GeneratePanel({
               disabled={enhancing}
               title="GPT reads your prompt + images and rewrites it for Gemini"
               className="absolute right-2 top-2 z-10 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all disabled:opacity-50"
-              style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}
+              style={{
+                background: enhanceError ? 'rgba(248,113,113,0.15)' : 'rgba(255,255,255,0.07)',
+                border: `1px solid ${enhanceError ? 'rgba(248,113,113,0.5)' : 'var(--border)'}`,
+                color: enhanceError ? '#f87171' : 'var(--text-muted)',
+              }}
             >
               {enhancing ? (
                 <><svg className="animate-spin" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
                 </svg>Enhancing...</>
+              ) : enhanceError ? (
+                <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>{enhanceError.length > 30 ? 'Error — retry?' : enhanceError}</>
               ) : (
                 <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>

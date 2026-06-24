@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import OpenAI from 'openai'
 
-export const maxDuration = 30
+export const maxDuration = 60
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -60,7 +60,7 @@ Rules:
       messages: [{ role: 'user', content }],
       max_tokens: 600,
       temperature: 0.4,
-    }, { timeout: 25000 })
+    }, { timeout: 55000 })
 
     const enhanced = res.choices[0]?.message?.content?.trim() || prompt
     return NextResponse.json({ enhanced })
