@@ -215,31 +215,16 @@ function ImageCardModal({ item, onClose, onGenerated }: {
 
     try {
       if (!newPrompt.trim()) {
-        // Recompose: fetch image as base64 first
-        const imgRes = await fetch(`/api/generator/image/${item.id}`)
-        if (!imgRes.ok) throw new Error('Failed to fetch image for recompose')
-        const blob = await imgRes.blob()
-        const base64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader()
-          reader.onload = () => resolve(reader.result as string)
-          reader.onerror = reject
-          reader.readAsDataURL(blob)
-        })
-
-        const res = await fetch('/api/generate', {
+        // Recompose: send fileId to server — it fetches from Drive directly (avoids 413)
+        const res = await fetch('/api/generator/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ recomposeBase64: base64, targetSize: sizeCode }),
+          body: JSON.stringify({ recomposeFileId: item.id, targetSize }),
         })
         const data = await res.json()
         if (!res.ok) throw new Error(data.error || 'Recompose failed')
-        // Recompose result isn't saved to Drive automatically — open in a new tab or download
-        // For now: trigger a download of the result
-        const link = document.createElement('a')
-        link.href = data.imageBase64
-        link.download = `recomposed-${sizeCode}.jpg`
-        link.click()
         onGenerated()
+        onClose()
       } else {
         // Generate new image with the new prompt, same engine as original
         const engine = item.engine === 'GPT' ? 'dalle' : 'gemini'
