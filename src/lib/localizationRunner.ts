@@ -438,7 +438,7 @@ VALIDATION:
       },
     ],
     max_tokens: 16000,
-  })
+  }, { timeout: 90000 })
   const raw = response.choices[0].message.content || '{}'
   const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
   return JSON.parse(clean.slice(clean.indexOf('{'), clean.lastIndexOf('}') + 1))
@@ -677,7 +677,7 @@ Respond ONLY with a raw JSON array, no markdown, no backticks:
       ],
     }],
     max_tokens: 1000,
-  })
+  }, { timeout: 60000 })
   try {
     const raw = response.choices[0].message.content || '[]'
     const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()

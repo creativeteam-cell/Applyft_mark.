@@ -42,6 +42,7 @@ const _job: {
   localizing: boolean
   abort: AbortController | null
   totalLangs: number
+  lastParams: { folders: { id: string; name: string }[]; langs: string[]; marketer: string; appCode: string } | null
   listeners: Set<() => void>
   notify: () => void
   subscribe: (fn: () => void) => () => void
@@ -50,6 +51,7 @@ const _job: {
   localizing: false,
   abort: null,
   totalLangs: 0,
+  lastParams: null,
   listeners: new Set(),
   notify() { this.listeners.forEach(fn => fn()) },
   subscribe(fn) { this.listeners.add(fn); return () => { this.listeners.delete(fn) } },
@@ -251,6 +253,7 @@ export function LocalizationPage() {
     const controller = new AbortController()
     _job.abort = controller
     _job.totalLangs = allLangs.length
+    _job.lastParams = { folders: selectedFolders, langs: allLangs, marketer: selectedMarketer, appCode: selectedApp }
     _job.state = { status: 'running', folders: Array.from(masterFolders.values()) }
     _job.localizing = true
     _job.notify()
@@ -343,6 +346,72 @@ export function LocalizationPage() {
     }
   }
 
+  async function handleResume() {
+    if (!_job.lastParams || localizing) return
+    const { folders: f, langs, marketer, appCode } = _job.lastParams
+    // Re-select same folders and langs, then run
+    const pairs: { folder: { id: string; name: string }; lang: string }[] = []
+    for (const lang of langs) {
+      for (const folder of f) {
+        pairs.push({ folder, lang })
+      }
+    }
+    const masterFolders = new Map<string, FolderProgress>()
+    for (const folder of f) {
+      masterFolders.set(folder.id, { folderId: folder.id, folderName: folder.name, status: 'pending', completedLangs: [] })
+    }
+    _job.abort?.abort()
+    const controller = new AbortController()
+    _job.abort = controller
+    _job.totalLangs = langs.length
+    _job.state = { status: 'running', folders: Array.from(masterFolders.values()) }
+    _job.localizing = true
+    _job.notify()
+    try {
+      for (let pairIdx = 0; pairIdx < pairs.length; pairIdx++) {
+        if (controller.signal.aborted) break
+        const { folder: batchFolder, lang: batchLang } = pairs[pairIdx]
+        const res = await fetch('/api/localization/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ folders: [batchFolder], languages: [batchLang], cp: marketer, appCode }),
+          signal: controller.signal,
+        })
+        if (!res.ok || !res.body) { const err = await res.json().catch(() => ({ error: 'Failed' })); throw new Error(err.error || 'Failed') }
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buf = ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+          const parts = buf.split('\n\n')
+          buf = parts.pop() || ''
+          for (const part of parts) {
+            const line = part.startsWith('data: ') ? part.slice(6) : part
+            try {
+              const snap = JSON.parse(line)
+              const folder = masterFolders.get(snap.folders?.[0]?.folderId)
+              if (folder && snap.folders?.[0]) {
+                Object.assign(folder, snap.folders[0])
+                masterFolders.set(folder.folderId, folder)
+              }
+              _job.state = { status: snap.status === 'done' && pairIdx < pairs.length - 1 ? 'running' : snap.status, folders: Array.from(masterFolders.values()) }
+              _job.notify()
+            } catch { }
+          }
+        }
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        _job.localizing = false; _job.abort = null; _job.notify()
+        alert('Resume failed: ' + err.message)
+        return
+      }
+    }
+    _job.localizing = false; _job.abort = null; _job.notify()
+  }
+
   const q = search.trim()
   const qPadded = q.padStart(3, '0')
   const localFiltered = q ? folders.filter(f => f.name.includes(qPadded)) : folders
@@ -413,11 +482,35 @@ export function LocalizationPage() {
 
           <div className="ml-auto flex items-center gap-2">
             {activeJob && activeJob.status === 'running' && (
-              <span className="text-xs text-gray-400 font-mono flex items-center gap-2">
-                <span className="animate-spin">~</span>
-                {activeJob.folders?.reduce((s, f) => s + (f.completedLangs?.length || 0), 0) ?? 0}
-                /{(activeJob.folders?.length ?? 0) * _job.totalLangs} langs
-              </span>
+              <>
+                <span className="text-xs text-gray-400 font-mono flex items-center gap-2">
+                  <span className="animate-spin">~</span>
+                  {activeJob.folders?.reduce((s, f) => s + (f.completedLangs?.length || 0), 0) ?? 0}
+                  /{(activeJob.folders?.length ?? 0) * _job.totalLangs} langs
+                </span>
+                <button
+                  onClick={() => { _job.abort?.abort(); _job.localizing = false; _job.abort = null; _job.notify() }}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all"
+                  style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444' }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+                    <rect x="1.5" y="1.5" width="7" height="7" rx="1"/>
+                  </svg>
+                  Stop
+                </button>
+              </>
+            )}
+            {!localizing && _job.lastParams && (
+              <button
+                onClick={handleResume}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all"
+                style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', color: 'var(--accent)' }}
+              >
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+                  <polygon points="2,1 9,5 2,9"/>
+                </svg>
+                Resume
+              </button>
             )}
             <button
               onClick={() => { delete _cache.folders[selectedApp]; fetchFolders(true) }}
