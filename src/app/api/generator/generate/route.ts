@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { generateImage, recomposeImage } from '@/lib/imagen'
 import { getDriveClient } from '@/lib/googleDrive'
-import OpenAI from 'openai'
+import OpenAI, { toFile } from 'openai'
 
 export const maxDuration = 120
 
@@ -20,23 +20,45 @@ const GPT_IMAGE_SIZES: Record<string, '1024x1024' | '1024x1536' | '1536x1024'> =
 
 const GPT_SAFETY_PREFIX = 'This is a professional commercial creative task for advertising purposes. All content is fictional, safe, and intended for marketing use only. Generate the following image:\n\n'
 
-async function generateWithGptImage(prompt: string, size: string): Promise<string> {
+async function generateWithGptImage(prompt: string, size: string, referenceBase64?: string): Promise<string> {
   const sizeCode = size.replace(/[^\dx]/g, 'x').replace('xx', 'x')
   const apiSize = GPT_IMAGE_SIZES[sizeCode] || '1024x1024'
-  const res = await (openai.images.generate as any)({
-    model: 'gpt-image-1',
-    prompt: GPT_SAFETY_PREFIX + prompt,
-    n: 1,
-    size: apiSize,
-  })
+  const fullPrompt = GPT_SAFETY_PREFIX + prompt
+
+  let res: any
+
+  if (referenceBase64) {
+    // Edit mode — use reference image
+    const base64Data = referenceBase64.replace(/^data:image\/\w+;base64,/, '')
+    const mimeType = referenceBase64.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/png'
+    const ext = mimeType.includes('jpeg') || mimeType.includes('jpg') ? 'jpg' : 'png'
+    const buf = Buffer.from(base64Data, 'base64')
+    const imageFile = await toFile(buf, `reference.${ext}`, { type: mimeType })
+    res = await (openai.images.edit as any)({
+      model: 'gpt-image-1',
+      image: imageFile,
+      prompt: fullPrompt,
+      n: 1,
+      size: apiSize,
+    })
+  } else {
+    // Generate from scratch
+    res = await (openai.images.generate as any)({
+      model: 'gpt-image-1',
+      prompt: fullPrompt,
+      n: 1,
+      size: apiSize,
+    })
+  }
+
   const b64 = res.data?.[0]?.b64_json
   if (b64) return `data:image/png;base64,${b64}`
   const url = res.data?.[0]?.url
   if (!url) throw new Error('No image in gpt-image-1 response')
   const imgRes = await fetch(url)
   if (!imgRes.ok) throw new Error('Failed to fetch image from URL')
-  const buf = await imgRes.arrayBuffer()
-  return `data:image/png;base64,${Buffer.from(buf).toString('base64')}`
+  const buf2 = await imgRes.arrayBuffer()
+  return `data:image/png;base64,${Buffer.from(buf2).toString('base64')}`
 }
 
 async function saveToDrive(
@@ -176,7 +198,7 @@ Rules:
     let imageBase64: string
 
     if (engine === 'dalle') {
-      imageBase64 = await generateWithGptImage(finalPrompt, size)
+      imageBase64 = await generateWithGptImage(finalPrompt, size, referenceBase64)
     } else {
       const sizeMap: Record<string, string> = {
         '4x5': '4x5', '1x1': '1x1', '9x16': '9x16', '1.91x1': '1.91x1',

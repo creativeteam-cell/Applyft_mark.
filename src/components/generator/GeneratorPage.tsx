@@ -239,13 +239,18 @@ function StylePicker({ selected, onSelect }: { selected: string | null; onSelect
             </button>
           ))}
         </div>
-        {/* Fade + chevron hint — hidden when scrolled to end */}
+        {/* Fade + clickable chevron — hidden when scrolled to end */}
         {!atEnd && (
-          <div className="absolute top-0 right-0 h-full flex items-center justify-end pointer-events-none"
+          <div className="absolute top-0 right-0 h-full flex items-center justify-end"
             style={{ width: 40, background: 'linear-gradient(to right, transparent, var(--surface) 70%)' }}>
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ color: 'var(--text-muted)', marginRight: 4 }}>
-              <path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
+            <button
+              onClick={() => scrollRef.current?.scrollBy({ left: 120, behavior: 'smooth' })}
+              className="flex items-center justify-center w-6 h-6 rounded-full transition-all hover:bg-white/10"
+              style={{ marginRight: 2, color: 'var(--text-muted)' }}>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
           </div>
         )}
       </div>
