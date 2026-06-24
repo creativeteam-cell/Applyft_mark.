@@ -1,3 +1,4 @@
+// Generator API — Gemini Image & OpenAI gpt-image-1
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
