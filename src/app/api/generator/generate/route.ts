@@ -24,10 +24,13 @@ async function generateWithDalle(prompt: string): Promise<string> {
     prompt,
     n: 1,
     size: '1024x1024',
-    response_format: 'b64_json',
   })
-  const b64 = res.data?.[0]?.b64_json!
-  return `data:image/png;base64,${b64}`
+  const url = res.data?.[0]?.url
+  if (!url) throw new Error('No image URL in DALL-E response')
+  const imgRes = await fetch(url)
+  if (!imgRes.ok) throw new Error('Failed to fetch DALL-E image')
+  const buf = await imgRes.arrayBuffer()
+  return `data:image/png;base64,${Buffer.from(buf).toString('base64')}`
 }
 
 async function saveToDrive(
@@ -74,19 +77,49 @@ export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { prompt, engine, size, referenceBase64, logoBase64 } = await req.json()
+  const { prompt, engine, size, referenceBase64, aiPrompt } = await req.json()
   if (!prompt?.trim()) return NextResponse.json({ error: 'Prompt is required' }, { status: 400 })
 
   try {
+    // Enhance prompt with GPT-4o mini if AI prompt is enabled
+    let finalPrompt = prompt.trim()
+    if (aiPrompt) {
+      try {
+        const enhanced = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert at writing prompts for AI image generation (Midjourney, DALL-E, Gemini).
+Your task: take the user's rough idea and rewrite it into a detailed, vivid image generation prompt.
+Rules:
+- Keep the core idea and intent exactly as the user intended
+- Add specific details: lighting, style, mood, camera angle, colors, composition
+- Use concise descriptive language (no full sentences needed)
+- Do NOT add any text overlays, captions, or UI elements unless explicitly requested
+- Return ONLY the improved prompt, nothing else`,
+            },
+            { role: 'user', content: prompt },
+          ],
+          max_tokens: 300,
+          temperature: 0.7,
+        }, { timeout: 30000 })
+        finalPrompt = enhanced.choices[0]?.message?.content?.trim() || prompt
+      } catch (e) {
+        console.warn('[generator] AI prompt enhancement failed, using original:', e)
+        // fallback to original prompt
+      }
+    }
+
     let imageBase64: string
 
     if (engine === 'dalle') {
-      imageBase64 = await generateWithDalle(prompt)
+      imageBase64 = await generateWithDalle(finalPrompt)
     } else {
       const sizeMap: Record<string, string> = { '4×5': '4x5', '1×1': '1x1', '9×16': '9x16', '1.91×1': '1.91x1' }
       const sizeCode = sizeMap[size] || '4x5'
       try {
-        imageBase64 = await generateImage(prompt, referenceBase64, undefined, sizeCode, undefined, true)
+        imageBase64 = await generateImage(finalPrompt, referenceBase64, undefined, sizeCode, undefined, true)
       } catch (genErr: any) {
         console.error('[generator] generateImage failed:', genErr.message)
         const msg = genErr.message || 'Unknown error'
@@ -104,7 +137,7 @@ export async function POST(req: NextRequest) {
 
     if (userToken) {
       const saved = await saveToDrive(imageBase64, {
-        prompt,
+        prompt: finalPrompt,
         engine: engine === 'dalle' ? 'GPT' : 'Banana',
         size,
         userName: session.user.name || '',

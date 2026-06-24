@@ -22,7 +22,8 @@ const SIZES: Record<string, { label: string }[]> = {
   ],
 }
 
-const RESIZE_TARGETS = ['4×5', '1×1', '9×16', '1.91×1']
+// All sizes available in the modal (for recompose, Gemini handles all)
+const MODAL_SIZES = ['4×5', '1×1', '9×16', '1.91×1']
 
 // Derive a consistent color from email/name
 function colorFromString(str: string) {
@@ -47,12 +48,6 @@ interface HistoryItem {
   thumbnailLink: string | null
   webViewLink: string | null
   createdTime: string
-}
-
-interface UserFilter {
-  email: string
-  name: string
-  image: string
 }
 
 function UserAvatar({ name, email, image, size = 28, selected, onClick }: {
@@ -183,14 +178,326 @@ function PeopleFilter({ items, selectedEmails, onToggle, onClear }: {
   )
 }
 
+// ─── Image Card Modal ────────────────────────────────────────────────────────
+
+function ImageCardModal({ item, onClose, onGenerated }: {
+  item: HistoryItem
+  onClose: () => void
+  onGenerated: () => void
+}) {
+  const defaultSizeIdx = Math.max(0, MODAL_SIZES.indexOf(item.size))
+  const [sizeIdx, setSizeIdx] = useState(defaultSizeIdx)
+  const [sizeOpen, setSizeOpen] = useState(false)
+  const [newPrompt, setNewPrompt] = useState('')
+  const [generating, setGenerating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [imgSrc, setImgSrc] = useState<string | null>(null)
+
+  // Load full image from our API
+  useEffect(() => {
+    setImgSrc(`/api/generator/image/${item.id}`)
+  }, [item.id])
+
+  function handleCopyPrompt() {
+    navigator.clipboard.writeText(item.prompt)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  async function handleGenerate() {
+    if (generating) return
+    setGenerating(true)
+    setError(null)
+
+    const targetSize = MODAL_SIZES[sizeIdx]
+    const sizeCode = targetSize.replace('×', 'x')
+
+    try {
+      if (!newPrompt.trim()) {
+        // Recompose: fetch image as base64 first
+        const imgRes = await fetch(`/api/generator/image/${item.id}`)
+        if (!imgRes.ok) throw new Error('Failed to fetch image for recompose')
+        const blob = await imgRes.blob()
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(reader.result as string)
+          reader.onerror = reject
+          reader.readAsDataURL(blob)
+        })
+
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recomposeBase64: base64, targetSize: sizeCode }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Recompose failed')
+        // Recompose result isn't saved to Drive automatically — open in a new tab or download
+        // For now: trigger a download of the result
+        const link = document.createElement('a')
+        link.href = data.imageBase64
+        link.download = `recomposed-${sizeCode}.jpg`
+        link.click()
+        onGenerated()
+      } else {
+        // Generate new image with the new prompt, same engine as original
+        const engine = item.engine === 'GPT' ? 'dalle' : 'gemini'
+        const res = await fetch('/api/generator/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: newPrompt.trim(), engine, size: targetSize }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Generation failed')
+        onGenerated()
+        onClose()
+      }
+    } catch (e: any) {
+      setError(e.message)
+    }
+    setGenerating(false)
+  }
+
+  function handleDownload() {
+    const link = document.createElement('a')
+    link.href = `/api/generator/image/${item.id}?download=1`
+    link.download = `generated-${item.id}.jpg`
+    link.click()
+  }
+
+  // Close on backdrop click
+  function handleBackdrop(e: React.MouseEvent) {
+    if (e.target === e.currentTarget) onClose()
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-6"
+      style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
+      onClick={handleBackdrop}
+    >
+      <div
+        className="relative flex rounded-2xl overflow-hidden max-h-[90vh] w-full max-w-3xl"
+        style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 z-10 w-8 h-8 rounded-full flex items-center justify-center transition-all hover:bg-white/10"
+          style={{ background: 'rgba(0,0,0,0.4)' }}
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M1 1l10 10M11 1L1 11" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+        </button>
+
+        {/* Image */}
+        <div className="flex-shrink-0 flex items-center justify-center"
+          style={{ width: 340, background: 'rgba(0,0,0,0.3)' }}>
+          {imgSrc ? (
+            <img
+              src={imgSrc}
+              alt={item.prompt}
+              className="max-w-full max-h-[90vh] object-contain"
+              onError={() => {
+                // Fallback to thumbnail
+                if (item.thumbnailLink) setImgSrc(item.thumbnailLink)
+              }}
+            />
+          ) : (
+            <div className="flex items-center justify-center w-full h-64">
+              <svg className="animate-spin" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                style={{ color: 'rgba(255,255,255,0.3)' }}>
+                <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/>
+                <path d="M12 2a10 10 0 0 1 10 10"/>
+              </svg>
+            </div>
+          )}
+        </div>
+
+        {/* Right panel */}
+        <div className="flex flex-col flex-1 min-w-0 overflow-y-auto p-5">
+
+          {/* Meta */}
+          <div className="flex items-center gap-2 mb-4">
+            <span className="rounded px-2 py-1 text-xs font-mono font-medium"
+              style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)' }}>
+              {item.engine}
+            </span>
+            <span className="rounded px-2 py-1 text-xs font-mono"
+              style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>
+              {item.size}
+            </span>
+            {item.userName && (
+              <div className="flex items-center gap-1.5 ml-auto">
+                <UserAvatar name={item.userName} email={item.userEmail} image={item.userImage} size={22} />
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{item.userName}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Prompt */}
+          <div className="mb-5">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                Prompt
+              </span>
+              <button
+                onClick={handleCopyPrompt}
+                className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg transition-all"
+                style={{
+                  background: copied ? 'rgba(52,168,83,0.15)' : 'rgba(255,255,255,0.06)',
+                  color: copied ? '#34a853' : 'var(--text-muted)',
+                }}
+              >
+                {copied ? (
+                  <>
+                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                      <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    Copied
+                  </>
+                ) : (
+                  <>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="9" y="9" width="13" height="13" rx="2"/>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                    </svg>
+                    Copy
+                  </>
+                )}
+              </button>
+            </div>
+            <p className="text-sm leading-relaxed" style={{ color: 'var(--text)' }}>
+              {item.prompt || <span style={{ color: 'var(--text-muted)' }}>No prompt saved</span>}
+            </p>
+          </div>
+
+          {/* Divider */}
+          <div className="mb-5" style={{ height: 1, background: 'var(--border)' }} />
+
+          {/* Size selector */}
+          <div className="mb-4">
+            <div className="text-xs font-semibold uppercase tracking-wider mb-2"
+              style={{ color: 'var(--text-muted)' }}>Size</div>
+            <div className="relative">
+              <button
+                onClick={() => setSizeOpen(o => !o)}
+                className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm"
+                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)' }}
+              >
+                <span className="font-mono font-medium">{MODAL_SIZES[sizeIdx]}</span>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"
+                  className={`transition-transform ${sizeOpen ? 'rotate-180' : ''}`}
+                  style={{ color: 'var(--text-muted)' }}>
+                  <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+              </button>
+              {sizeOpen && (
+                <div className="absolute top-full left-0 right-0 mt-1 rounded-lg overflow-hidden z-20"
+                  style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                  {MODAL_SIZES.map((s, i) => (
+                    <button key={s} onClick={() => { setSizeIdx(i); setSizeOpen(false) }}
+                      className="w-full px-3 py-2.5 text-sm hover:bg-white/5 text-left font-mono font-medium"
+                      style={{ color: sizeIdx === i ? 'var(--accent)' : 'var(--text)' }}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* New prompt */}
+          <div className="mb-4 flex-1">
+            <div className="text-xs font-semibold uppercase tracking-wider mb-2"
+              style={{ color: 'var(--text-muted)' }}>
+              New prompt
+              <span className="ml-1 font-normal normal-case" style={{ color: 'rgba(255,255,255,0.25)' }}>
+                (leave empty to resize only)
+              </span>
+            </div>
+            <textarea
+              value={newPrompt}
+              onChange={e => setNewPrompt(e.target.value)}
+              placeholder="Describe a variation, or leave empty to recompose at new size..."
+              rows={3}
+              className="w-full rounded-lg resize-none outline-none text-sm leading-relaxed p-3"
+              style={{
+                background: 'rgba(255,255,255,0.04)',
+                border: `1px solid ${newPrompt ? 'var(--accent)' : 'var(--border)'}`,
+                color: 'var(--text)',
+                caretColor: 'var(--accent)',
+                transition: 'border-color 0.2s',
+              }}
+            />
+          </div>
+
+          {/* Error */}
+          {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
+
+          {/* Actions */}
+          <div className="flex gap-2 mt-auto">
+            <button
+              onClick={handleGenerate}
+              disabled={generating}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all"
+              style={{
+                background: !generating ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
+                color: !generating ? 'white' : 'var(--text-muted)',
+              }}
+            >
+              {generating ? (
+                <>
+                  <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/>
+                    <path d="M12 2a10 10 0 0 1 10 10"/>
+                  </svg>
+                  {newPrompt.trim() ? 'Generating...' : 'Resizing...'}
+                </>
+              ) : (
+                <>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                  </svg>
+                  {newPrompt.trim() ? 'Generate' : 'Resize'}
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={handleDownload}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all"
+              style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}
+              title="Download original"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Download
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Main Page ───────────────────────────────────────────────────────────────
+
 export function GeneratorPage() {
   const { data: session } = useSession()
-  const [tab, setTab] = useState<'image' | 'resize' | 'video'>('image')
+  const [tab, setTab] = useState<'image' | 'video'>('image')
 
   // Shared history state
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [historyLoading, setHistoryLoading] = useState(true)
   const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set())
+  const [selectedItem, setSelectedItem] = useState<HistoryItem | null>(null)
 
   const filteredHistory = selectedEmails.size === 0
     ? history
@@ -252,7 +559,7 @@ export function GeneratorPage() {
       const res = await fetch('/api/generator/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, engine, size: currentSize.label, referenceBase64: reference, logoBase64: logo }),
+        body: JSON.stringify({ prompt, engine, size: currentSize.label, referenceBase64: reference, aiPrompt }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Generation failed')
@@ -267,10 +574,19 @@ export function GeneratorPage() {
   return (
     <div className="flex flex-col" style={{ height: '100vh', paddingTop: 56, background: 'var(--bg)' }}>
 
+      {/* Modal */}
+      {selectedItem && (
+        <ImageCardModal
+          item={selectedItem}
+          onClose={() => setSelectedItem(null)}
+          onGenerated={() => { fetchHistory(); setSelectedItem(null) }}
+        />
+      )}
+
       {/* Tabs */}
       <div className="flex items-center gap-1 px-4 pt-3 pb-0 flex-shrink-0"
         style={{ borderBottom: '1px solid var(--border)' }}>
-        {(['image', 'resize', 'video'] as const).map(t => (
+        {(['image', 'video'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className="px-5 py-2 text-sm font-medium capitalize transition-all relative"
             style={{ color: tab === t ? 'var(--accent)' : 'var(--text-muted)' }}>
@@ -283,16 +599,7 @@ export function GeneratorPage() {
         ))}
       </div>
 
-      {tab === 'resize' ? (
-        <ResizeTab
-          history={filteredHistory}
-          allHistory={history}
-          selectedEmails={selectedEmails}
-          onToggleEmail={toggleEmail}
-          onClearEmails={() => setSelectedEmails(new Set())}
-          onHistoryRefresh={fetchHistory}
-        />
-      ) : tab === 'video' ? (
+      {tab === 'video' ? (
         <div className="flex-1 flex items-center justify-center flex-col gap-3">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1"
             style={{ color: 'rgba(255,255,255,0.1)' }}>
@@ -479,197 +786,13 @@ export function GeneratorPage() {
               onToggle={toggleEmail}
               onClear={() => setSelectedEmails(new Set())}
             />
-            <HistoryGrid items={filteredHistory} />
+            <HistoryGrid
+              items={filteredHistory}
+              onSelect={item => setSelectedItem(item)}
+            />
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-function ResizeTab({ history, allHistory, selectedEmails, onToggleEmail, onClearEmails, onHistoryRefresh }: {
-  history: HistoryItem[]
-  allHistory: HistoryItem[]
-  selectedEmails: Set<string>
-  onToggleEmail: (email: string) => void
-  onClearEmails: () => void
-  onHistoryRefresh: () => void
-}) {
-  const [source, setSource] = useState<string | null>(null)
-  const [sourceLabel, setSourceLabel] = useState<string>('')
-  const [targetSize, setTargetSize] = useState(0)
-  const [sizeOpen, setSizeOpen] = useState(false)
-  const [resizing, setResizing] = useState(false)
-  const [result, setResult] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const uploadRef = useRef<HTMLInputElement>(null)
-
-  function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = ev => { setSource(ev.target?.result as string); setSourceLabel(file.name) }
-    reader.readAsDataURL(file)
-    e.target.value = ''
-  }
-
-  async function handleResize() {
-    if (!source || resizing) return
-    setResizing(true)
-    setResult(null)
-    setError(null)
-    try {
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recomposeBase64: source, targetSize: RESIZE_TARGETS[targetSize].replace('×', 'x').replace('1.91x1', '1.91x1') }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Resize failed')
-      setResult(data.imageBase64)
-    } catch (e: any) {
-      setError(e.message)
-    }
-    setResizing(false)
-  }
-
-  return (
-    <div className="flex flex-1 min-h-0">
-      {/* LEFT SIDEBAR */}
-      <div className="flex-shrink-0 flex flex-col overflow-y-auto"
-        style={{ width: 260, borderRight: '1px solid var(--border)', background: 'var(--surface)' }}>
-        <div className="flex flex-col gap-0 p-4 flex-1">
-
-          {/* Source */}
-          <div className="mb-5">
-            <div className="text-xs font-semibold uppercase tracking-wider mb-2"
-              style={{ color: 'var(--text-muted)' }}>Source image</div>
-            {source ? (
-              <div className="relative group">
-                <img src={source} alt="source" className="w-full h-40 object-cover rounded-lg" />
-                {sourceLabel && (
-                  <p className="text-xs mt-1 truncate" style={{ color: 'var(--text-muted)' }}>{sourceLabel}</p>
-                )}
-                <button onClick={() => { setSource(null); setSourceLabel('') }}
-                  className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                  style={{ background: 'rgba(0,0,0,0.75)' }}>
-                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                    <path d="M1 1l8 8M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
-                  </svg>
-                </button>
-              </div>
-            ) : (
-              <button onClick={() => uploadRef.current?.click()}
-                className="w-full h-32 rounded-lg border-2 border-dashed flex flex-col items-center justify-center gap-2"
-                style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="17 8 12 3 7 8"/>
-                  <line x1="12" y1="3" x2="12" y2="15"/>
-                </svg>
-                <span className="text-xs">Upload image</span>
-                <span className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>or pick from Recent</span>
-              </button>
-            )}
-            <input ref={uploadRef} type="file" accept="image/*" className="hidden" onChange={handleUpload} />
-          </div>
-
-          {/* Target format */}
-          <div className="mb-5">
-            <div className="text-xs font-semibold uppercase tracking-wider mb-2"
-              style={{ color: 'var(--text-muted)' }}>Target format</div>
-            <div className="relative">
-              <button onClick={() => setSizeOpen(o => !o)}
-                className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm"
-                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)' }}>
-                <span className="font-mono font-medium">{RESIZE_TARGETS[targetSize]}</span>
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"
-                  className={`transition-transform ${sizeOpen ? 'rotate-180' : ''}`}
-                  style={{ color: 'var(--text-muted)' }}>
-                  <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                </svg>
-              </button>
-              {sizeOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1 rounded-lg overflow-hidden z-20"
-                  style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
-                  {RESIZE_TARGETS.map((s, i) => (
-                    <button key={s} onClick={() => { setTargetSize(i); setSizeOpen(false) }}
-                      className="w-full px-3 py-2.5 text-sm hover:bg-white/5 text-left font-mono font-medium"
-                      style={{ color: targetSize === i ? 'var(--accent)' : 'var(--text)' }}>
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Resize button */}
-        <div className="p-4 flex-shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
-          {error && <p className="text-xs text-red-400 mb-2 text-center">{error}</p>}
-          <button onClick={handleResize} disabled={!source || resizing}
-            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all"
-            style={{
-              background: source && !resizing ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
-              color: source && !resizing ? 'white' : 'var(--text-muted)',
-            }}>
-            {resizing ? (
-              <>
-                <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/>
-                  <path d="M12 2a10 10 0 0 1 10 10" />
-                </svg>
-                Resizing...
-              </>
-            ) : (
-              <>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
-                </svg>
-                Resize
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* MAIN */}
-      <div className="flex-1 overflow-y-auto p-6 min-w-0">
-        <div className="mb-8 rounded-xl flex items-center justify-center overflow-hidden"
-          style={{ minHeight: 280, background: 'var(--surface)', border: '1px solid var(--border)' }}>
-          {result ? (
-            <img src={result} alt="result" className="max-h-96 object-contain" />
-          ) : (
-            <div className="flex flex-col items-center gap-3">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="0.8"
-                style={{ color: 'rgba(255,255,255,0.1)' }}>
-                <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
-              </svg>
-              <p className="text-sm" style={{ color: 'rgba(255,255,255,0.2)' }}>
-                {resizing ? 'Resizing...' : 'Result will appear here'}
-              </p>
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold">Recent</h2>
-          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Click to use as source</span>
-        </div>
-        <PeopleFilter
-          items={allHistory}
-          selectedEmails={selectedEmails}
-          onToggle={onToggleEmail}
-          onClear={onClearEmails}
-        />
-        <HistoryGrid
-          items={history}
-          onSelect={item => {
-            if (item.thumbnailLink) { setSource(item.thumbnailLink); setSourceLabel(item.prompt || item.id) }
-          }}
-        />
-      </div>
     </div>
   )
 }
