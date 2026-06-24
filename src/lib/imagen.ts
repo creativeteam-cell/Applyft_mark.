@@ -51,7 +51,8 @@ LAYOUT RULES:
 - Maintain the same overall mood, style, colors, typography, and composition hierarchy
 
 SAFE ZONE — NON-NEGOTIABLE:
-- Every text element, button, and UI element MUST have at least 120px clearance from EVERY edge (top, bottom, left, right)
+- Every text element, button, and UI element MUST have at least 160px clearance from EVERY edge (top, bottom, left, right)
+- If in doubt, push elements further toward the center — never toward any edge
 - Nothing may touch or cross the safe zone boundary — not even partially`,
 
   '9x16': `Recompose this exact ad creative for a tall vertical 9:16 aspect ratio.
@@ -69,7 +70,8 @@ LAYOUT RULES:
 - Maintain the same overall mood, style, colors, typography, and composition hierarchy
 
 SAFE ZONE — NON-NEGOTIABLE:
-- Every text element, button, and UI element MUST have at least 120px clearance from EVERY edge (top, bottom, left, right)
+- Every text element, button, and UI element MUST have at least 160px clearance from EVERY edge (top, bottom, left, right)
+- If in doubt, push elements further toward the center — never toward any edge
 - Nothing may touch or cross the safe zone boundary — not even partially`,
 
   '1.91x1': `Recompose this exact ad creative for a wide horizontal 1.91:1 aspect ratio.
@@ -83,12 +85,16 @@ EXPANSION RULE — MOST IMPORTANT:
 
 LAYOUT RULES:
 - Keep the main subject at roughly the same scale as the original
-- Use the extra horizontal space for background extension or to give text more room
+- Use the extra horizontal space for background extension only — keep all key elements centered
 - Maintain the same overall mood, style, colors, typography, and composition hierarchy
 
-SAFE ZONE — NON-NEGOTIABLE:
-- Every text element, button, and UI element MUST have at least 120px clearance from EVERY edge (top, bottom, left, right)
-- The top and bottom edges are especially critical — keep all content strictly in the vertical center
+SAFE ZONE — NON-NEGOTIABLE — THIS IS CRITICAL FOR 1.91:1:
+- The top and bottom of this image WILL BE CROPPED during final export
+- Every text element, button, logo, and UI element MUST have at least 220px clearance from the TOP edge
+- Every text element, button, logo, and UI element MUST have at least 220px clearance from the BOTTOM edge
+- Every text element, button, logo, and UI element MUST have at least 160px clearance from LEFT and RIGHT edges
+- Place ALL content in the vertical center band of the image — imagine a horizontal strip in the middle third
+- If any element is near the top or bottom — move it to the center. No exceptions.
 - Nothing may touch or cross the safe zone boundary — not even partially`,
 }
 
@@ -242,10 +248,10 @@ const SIZE_HINTS: Record<string, string> = {
 
   '1.91x1':
     '\n\n[CRITICAL - OUTPUT FORMAT]: LANDSCAPE image, aspect ratio 16:9 (wide horizontal). ' +
-    'CROP WARNING: the top 40px and bottom 40px of this image WILL BE CROPPED after generation. ' +
-    'SAFE ZONE: ALL text, buttons, and UI elements MUST be at least 74 pixels from TOP, ' +
-    '74 pixels from BOTTOM, and 34 pixels from LEFT and RIGHT. ' +
-    'Place all content strictly in the vertical center — never near the top or bottom edges.',
+    'CROP WARNING: the top ~50px and bottom ~50px of this image WILL BE CROPPED after generation — anything in that zone will be cut off. ' +
+    'SAFE ZONE: ALL text, buttons, logos, and UI elements MUST be at least 150 pixels from TOP and BOTTOM edges, and at least 80 pixels from LEFT and RIGHT edges. ' +
+    'Place all content strictly in the vertical center band — never near the top or bottom edges. ' +
+    'If unsure, push content further toward the middle.',
 }
 
 const RAW_MODE_PREFIX = "Generate exactly the image described below. Follow the description literally and precisely. Do NOT add any text, labels, watermarks, logos, advertising copy, UI elements, banners, or decorative elements that are not explicitly mentioned. Do not treat this as an advertisement — just create the image as described."

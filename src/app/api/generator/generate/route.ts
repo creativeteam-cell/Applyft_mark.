@@ -4,6 +4,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { generateImage, recomposeImage } from '@/lib/imagen'
 import { getDriveClient } from '@/lib/googleDrive'
+import { updateQueue } from '@/lib/queue'
 import OpenAI, { toFile } from 'openai'
 
 export const maxDuration = 120
@@ -209,33 +210,39 @@ Rules:
     }
 
     let imageBase64: string
+    const queueModel = engine === 'dalle' ? 'openai' : 'gemini'
+    await updateQueue(queueModel, 1)
 
-    if (engine === 'dalle') {
-      const openaiModel = OPENAI_MODEL_MAP[modelId as string] || 'gpt-image-1'
-      imageBase64 = await generateWithGptImage(finalPrompt, size, referenceBase64, openaiModel)
-    } else {
-      const sizeMap: Record<string, string> = {
-        '4x5': '4x5', '1x1': '1x1', '9x16': '9x16', '1.91x1': '1.91x1',
+    try {
+      if (engine === 'dalle') {
+        const openaiModel = OPENAI_MODEL_MAP[modelId as string] || 'gpt-image-1'
+        imageBase64 = await generateWithGptImage(finalPrompt, size, referenceBase64, openaiModel)
+      } else {
+        const sizeMap: Record<string, string> = {
+          '4x5': '4x5', '1x1': '1x1', '9x16': '9x16', '1.91x1': '1.91x1',
+        }
+        const sizeKey = (size as string).replace(/[^\dx.]/g, 'x')
+        const sizeCode = sizeMap[sizeKey] || '4x5'
+        const geminiModel = GEMINI_MODEL_MAP[modelId as string] || 'gemini-3.1-flash-image-preview'
+        try {
+          imageBase64 = await generateImage(finalPrompt, referenceBase64, undefined, sizeCode, undefined, true, geminiModel)
+        } catch (genErr: any) {
+          console.error('[generator] generateImage failed:', genErr.message)
+          const msg = genErr.message || 'Unknown error'
+          if (msg.includes('IMAGE_SAFETY') || msg.includes('No image in response')) {
+            return NextResponse.json({ error: `Gemini blocked the request (content filter). Try rephrasing the prompt. Details: ${msg}` }, { status: 422 })
+          }
+          if (msg.includes('RATE_LIMIT') || msg.includes('rate limit')) {
+            return NextResponse.json({ error: 'Gemini is busy, please try again in a moment.' }, { status: 429 })
+          }
+          if (msg.includes('TIMEOUT') || msg.includes('timed out')) {
+            return NextResponse.json({ error: 'Generation timed out. Please try again.' }, { status: 504 })
+          }
+          return NextResponse.json({ error: `Generation failed: ${msg}` }, { status: 500 })
+        }
       }
-      const sizeKey = (size as string).replace(/[^\dx.]/g, 'x')
-      const sizeCode = sizeMap[sizeKey] || '4x5'
-      const geminiModel = GEMINI_MODEL_MAP[modelId as string] || 'gemini-3.1-flash-image-preview'
-      try {
-        imageBase64 = await generateImage(finalPrompt, referenceBase64, undefined, sizeCode, undefined, true, geminiModel)
-      } catch (genErr: any) {
-        console.error('[generator] generateImage failed:', genErr.message)
-        const msg = genErr.message || 'Unknown error'
-        if (msg.includes('IMAGE_SAFETY') || msg.includes('No image in response')) {
-          return NextResponse.json({ error: `Gemini blocked the request (content filter). Try rephrasing the prompt. Details: ${msg}` }, { status: 422 })
-        }
-        if (msg.includes('RATE_LIMIT') || msg.includes('rate limit')) {
-          return NextResponse.json({ error: 'Gemini is busy, please try again in a moment.' }, { status: 429 })
-        }
-        if (msg.includes('TIMEOUT') || msg.includes('timed out')) {
-          return NextResponse.json({ error: 'Generation timed out. Please try again.' }, { status: 504 })
-        }
-        return NextResponse.json({ error: `Generation failed: ${msg}` }, { status: 500 })
-      }
+    } finally {
+      await updateQueue(queueModel, -1)
     }
 
     const userToken = (session as any).accessToken

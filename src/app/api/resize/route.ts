@@ -26,10 +26,16 @@ export async function POST(req: NextRequest) {
 
     const dimensions = FORMAT_SIZES[size] || FORMAT_SIZES['4x5']
 
+    // Use 'contain' for 1.91x1 — Gemini generates 16:9 (1.78:1) which is narrower than
+    // the 1.91:1 target, so 'cover' crops ~47px off top & bottom. 'contain' keeps the
+    // full image and adds ~41px neutral bars on each side instead — nothing gets cut off.
+    // For 4x5, 1x1, 9x16 the Gemini native ratio matches exactly, so fit doesn't matter.
+    const fit = size === '1.91x1' ? ('contain' as const) : ('cover' as const)
     const resizedBuffer = await sharp(imageBuffer)
       .resize(dimensions.width, dimensions.height, {
-        fit: 'cover',
+        fit,
         position: 'center',
+        background: { r: 0, g: 0, b: 0, alpha: 1 },
       })
       .jpeg({ quality: 92 })
       .toBuffer()
