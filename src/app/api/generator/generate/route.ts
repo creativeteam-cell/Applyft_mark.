@@ -96,7 +96,17 @@ export async function POST(req: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { prompt, engine, size, referenceBase64, aiPrompt, recomposeFileId, recomposeBase64, targetSize } = body
+  const { prompt, engine, size, referenceBase64: referenceBase64Body, referenceFileId, aiPrompt, recomposeFileId, recomposeBase64, targetSize } = body
+
+  // If a Drive file ID is passed as reference, fetch it server-side
+  let referenceBase64 = referenceBase64Body as string | undefined
+  if (referenceFileId && !referenceBase64) {
+    try {
+      referenceBase64 = await fetchDriveFileAsBase64(referenceFileId as string)
+    } catch (e) {
+      console.warn('[generator] failed to fetch referenceFileId:', e)
+    }
+  }
 
   // ── Recompose mode: resize an existing image (Drive file or base64) ──
   if (recomposeFileId || recomposeBase64) {

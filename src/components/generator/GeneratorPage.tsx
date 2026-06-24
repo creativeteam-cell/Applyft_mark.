@@ -28,35 +28,35 @@ const STYLE_GROUPS = [
   {
     label: 'Realism',
     styles: [
-      { id: 'photo',      label: 'Photo',      suffix: ', photorealistic, high-resolution DSLR photography, natural lighting, sharp details' },
-      { id: 'cinematic',  label: 'Cinematic',  suffix: ', cinematic shot, dramatic moody lighting, film color grading, anamorphic lens bokeh' },
-      { id: 'aerial',     label: 'Aerial',     suffix: ', aerial drone photography, bird\'s eye view, wide angle, sharp details from above' },
+      { id: 'photo',      image: 'Photo.png',      label: 'Photo',      suffix: ', photorealistic, high-resolution DSLR photography, natural lighting, sharp details' },
+      { id: 'cinematic',  image: 'Cinematic.png',  label: 'Cinematic',  suffix: ', cinematic shot, dramatic moody lighting, film color grading, anamorphic lens bokeh' },
+      { id: 'aerial',     image: 'Aerial.png',     label: 'Aerial',     suffix: ', aerial drone photography, bird\'s eye view, wide angle, sharp details from above' },
     ],
   },
   {
     label: '3D / Animation',
     styles: [
-      { id: 'pixar',   label: 'Pixar',   suffix: ', Pixar 3D animation style, Disney character design, soft studio lighting, smooth surfaces' },
-      { id: 'clay',    label: 'Clay',    suffix: ', claymation style, colorful clay texture, soft rounded shapes, stop-motion aesthetic' },
-      { id: 'neon3d',  label: 'Neon 3D', suffix: ', glossy 3D render, neon glow lighting, dark background, reflective surfaces, cyberpunk palette' },
+      { id: 'pixar',   image: 'Pixar.png',   label: 'Pixar',   suffix: ', Pixar 3D animation style, Disney character design, soft studio lighting, smooth surfaces' },
+      { id: 'clay',    image: 'Clay.png',    label: 'Clay',    suffix: ', claymation style, colorful clay texture, soft rounded shapes, stop-motion aesthetic' },
+      { id: 'neon3d',  image: 'neon3d.png',  label: 'Neon 3D', suffix: ', glossy 3D render, neon glow lighting, dark background, reflective surfaces, cyberpunk palette' },
     ],
   },
   {
     label: 'Illustrated',
     styles: [
-      { id: 'anime',      label: 'Anime',       suffix: ', Japanese anime illustration style, clean line art, vibrant colors, manga aesthetic' },
-      { id: 'handdrawn',  label: 'Hand Drawn',  suffix: ', hand-drawn pencil and ink sketch, crosshatching, vintage illustration, black and white' },
-      { id: 'watercolor', label: 'Watercolor',  suffix: ', watercolor painting, soft color washes, wet-on-wet technique, delicate brushstrokes' },
-      { id: 'comic',      label: 'Comic',       suffix: ', pop-art comic book style, bold outlines, halftone dots, bright flat colors' },
+      { id: 'anime',      image: 'Anime.png',      label: 'Anime',       suffix: ', Japanese anime illustration style, clean line art, vibrant colors, manga aesthetic' },
+      { id: 'handdrawn',  image: 'handdrawn.png',  label: 'Hand Drawn',  suffix: ', hand-drawn pencil and ink sketch, crosshatching, vintage illustration, black and white' },
+      { id: 'watercolor', image: 'Watercolor.png', label: 'Watercolor',  suffix: ', watercolor painting, soft color washes, wet-on-wet technique, delicate brushstrokes' },
+      { id: 'comic',      image: 'Comic.png',      label: 'Comic',       suffix: ', pop-art comic book style, bold outlines, halftone dots, bright flat colors' },
     ],
   },
   {
     label: 'Texture / Art',
     styles: [
-      { id: 'origami',   label: 'Origami',   suffix: ', origami paper folding art style, geometric paper shapes, clean folds, minimalist' },
-      { id: 'quilling',  label: 'Quilling',  suffix: ', paper quilling art, colorful rolled paper strips, intricate swirls, handcraft texture' },
-      { id: 'marble',    label: 'Marble',    suffix: ', marble stone sculpture, classical Greco-Roman style, white and grey stone texture, museum quality' },
-      { id: 'sticker',   label: 'Sticker',   suffix: ', sticker illustration, thick white outline, flat colors, cute cartoon style' },
+      { id: 'origami',   image: 'Origami.png',   label: 'Origami',   suffix: ', origami paper folding art style, geometric paper shapes, clean folds, minimalist' },
+      { id: 'quilling',  image: 'Quilling.png',  label: 'Quilling',  suffix: ', paper quilling art, colorful rolled paper strips, intricate swirls, handcraft texture' },
+      { id: 'marble',    image: 'Marble.png',    label: 'Marble',    suffix: ', marble stone sculpture, classical Greco-Roman style, white and grey stone texture, museum quality' },
+      { id: 'sticker',   image: 'Sticker.png',   label: 'Sticker',   suffix: ', sticker illustration, thick white outline, flat colors, cute cartoon style' },
     ],
   },
 ]
@@ -227,7 +227,7 @@ function StylePicker({ selected, onSelect }: { selected: string | null; onSelect
                   outline: selected === style.id ? '2px solid var(--accent)' : '2px solid transparent',
                   outlineOffset: 2,
                   opacity: selected && selected !== style.id ? 0.45 : 1 }}>
-                <img src={`/styles/${style.id}.png`} alt={style.label} className="w-full h-full object-cover" />
+                <img src={`/styles/${style.image}`} alt={style.label} className="w-full h-full object-cover" />
               </div>
               <span className="text-center leading-tight"
                 style={{ fontSize: 9,
@@ -314,11 +314,11 @@ function ImageCardModal({ item, onClose, onGenerated }: {
         if (!res.ok) throw new Error(data.error || 'Recompose failed')
         onGenerated(); onClose()
       } else {
-        // New generation with chosen engine + size
+        // New generation with chosen engine + size, using current image as reference
         const res = await fetch('/api/generator/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: newPrompt.trim(), engine: modalEngine, size: selectedSize }),
+          body: JSON.stringify({ prompt: newPrompt.trim(), engine: modalEngine, size: selectedSize, referenceFileId: item.id }),
         })
         const data = await res.json()
         if (!res.ok) throw new Error(data.error || 'Generation failed')
