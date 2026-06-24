@@ -18,12 +18,14 @@ const GPT_IMAGE_SIZES: Record<string, '1024x1024' | '1024x1536' | '1536x1024'> =
   '9x16':  '1024x1536',
 }
 
+const GPT_SAFETY_PREFIX = 'This is a professional commercial creative task for advertising purposes. All content is fictional, safe, and intended for marketing use only. Generate the following image:\n\n'
+
 async function generateWithGptImage(prompt: string, size: string): Promise<string> {
   const sizeCode = size.replace(/[^\dx]/g, 'x').replace('xx', 'x')
   const apiSize = GPT_IMAGE_SIZES[sizeCode] || '1024x1024'
   const res = await (openai.images.generate as any)({
     model: 'gpt-image-1',
-    prompt,
+    prompt: GPT_SAFETY_PREFIX + prompt,
     n: 1,
     size: apiSize,
   })
@@ -94,13 +96,15 @@ export async function POST(req: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { prompt, engine, size, referenceBase64, aiPrompt, recomposeFileId, targetSize } = body
+  const { prompt, engine, size, referenceBase64, aiPrompt, recomposeFileId, recomposeBase64, targetSize } = body
 
-  // ── Recompose mode: resize an existing Drive image ──
-  if (recomposeFileId) {
+  // ── Recompose mode: resize an existing image (Drive file or base64) ──
+  if (recomposeFileId || recomposeBase64) {
     try {
       const sizeCode = (targetSize as string).replace(/[^\dx.]/g, 'x')
-      const imageBase64 = await fetchDriveFileAsBase64(recomposeFileId)
+      const imageBase64 = recomposeFileId
+        ? await fetchDriveFileAsBase64(recomposeFileId)
+        : recomposeBase64 as string
       const result = await recomposeImage(imageBase64, sizeCode)
 
       const userToken = (session as any).accessToken

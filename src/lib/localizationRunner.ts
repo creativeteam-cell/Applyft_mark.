@@ -29,9 +29,28 @@ async function resizeToTarget(buffer: Buffer, width: number, height: number): Pr
 
 // --- Gemini two-pass localization ---
 
-async function geminiRequest(parts: any[], mimeType: string, retryCount = 0): Promise<Buffer> {
+const SIZE_TO_ASPECT_LOC: Record<string, string> = {
+  '1.91x1': '16:9',
+  '9x16':   '9:16',
+  '4x5':    '4:5',
+  '1x1':    '1:1',
+}
+
+function getAspectRatioFromName(name: string): string | undefined {
+  for (const key of Object.keys(SIZE_MAP)) {
+    if (name.includes(`_${key}_`) || name.includes(`_${key}.`) || name.includes(`_${key.replace('.', ',')}`)) {
+      return SIZE_TO_ASPECT_LOC[key]
+    }
+  }
+  return undefined
+}
+
+async function geminiRequest(parts: any[], mimeType: string, retryCount = 0, aspectRatio?: string): Promise<Buffer> {
   const apiKey = process.env.GOOGLE_AI_API_KEY
   if (!apiKey) throw new Error('GOOGLE_AI_API_KEY not set')
+
+  const generationConfig: any = { responseModalities: ['IMAGE'] }
+  if (aspectRatio) generationConfig.imageConfig = { aspectRatio }
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=${apiKey}`,
@@ -40,7 +59,7 @@ async function geminiRequest(parts: any[], mimeType: string, retryCount = 0): Pr
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts }],
-        generationConfig: { responseModalities: ['IMAGE'] },
+        generationConfig,
       }),
     }
   )
@@ -51,7 +70,7 @@ async function geminiRequest(parts: any[], mimeType: string, retryCount = 0): Pr
     const delay = Math.min(10000 * Math.pow(2, retryCount), 60000) // 10s, 20s, 40s, 60s
     console.warn(`[gemini] 429 rate limit, waiting ${delay / 1000}s before retry ${retryCount + 1}...`)
     await new Promise(r => setTimeout(r, delay))
-    return geminiRequest(parts, mimeType, retryCount + 1)
+    return geminiRequest(parts, mimeType, retryCount + 1, aspectRatio)
   }
 
   if (!res.ok) {
@@ -127,6 +146,7 @@ async function localizeImage(
   language: string,
   phrases: { en: string; translated: string; role?: string }[],
   onAttempt?: (attempt: number, status: 'ok' | 'fail' | 'retry') => void,
+  aspectRatio?: string,
 ): Promise<Buffer> {
   let lastResult: Buffer | null = null
   let lastFixPrompt = ''
@@ -140,7 +160,7 @@ async function localizeImage(
       result = await geminiRequest([
         { text: prompt },
         { inline_data: { mime_type: mimeType, data: imgBuffer.toString('base64') } },
-      ], mimeType)
+      ], mimeType, 0, aspectRatio)
     } catch (err: any) {
       console.warn(`[loc] Gemini attempt ${attempt} failed:`, err.message)
       if (attempt < 5) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
@@ -936,13 +956,14 @@ export async function runLocalizationJob(
 
           try {
 
+            const imgAspectRatio = getAspectRatioFromName(img.name)
             let finalBuffer = buffer
             try {
               finalBuffer = await localizeImage(buffer, mime, lang, langPhrases, (attempt, status) => {
                 const icon = status === 'ok' ? '✓' : status === 'retry' ? '↻' : '✗'
                 patch(folder.id, { uploadInfo: `${lang}: ${img.name} — attempt ${attempt}/5 ${icon}` })
                 emit()
-              })
+              }, imgAspectRatio)
             } catch (locErr: any) {
               console.warn(`[loc] Localization failed for ${img.name}:`, locErr.message)
             }

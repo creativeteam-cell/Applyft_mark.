@@ -245,10 +245,12 @@ const SIZE_HINTS: Record<string, string> = {
     'Place all content strictly in the vertical center — never near the top or bottom edges.',
 }
 
+const RAW_MODE_PREFIX = "Generate exactly the image described below. Follow the description literally and precisely. Do NOT add any text, labels, watermarks, logos, advertising copy, UI elements, banners, or decorative elements that are not explicitly mentioned. Do not treat this as an advertisement — just create the image as described."
+
 export async function generateImage(prompt: string, referenceBase64?: string, logoBase64?: string, size = '4x5', assets?: Asset[], rawMode = false): Promise<string> {
   // rawMode: plain image generation (Generator tab) — no ad-specific rules, no text overlays
   if (rawMode) {
-    return withRetry(FICTIONAL_DISCLAIMER + '\n\n' + prompt, referenceBase64, undefined, 3, size)
+    return withRetry(RAW_MODE_PREFIX + '\n\n' + prompt, referenceBase64, undefined, 3, size)
   }
 
   const hint = SIZE_HINTS[size] || SIZE_HINTS['4x5']

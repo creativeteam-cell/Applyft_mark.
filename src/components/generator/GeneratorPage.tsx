@@ -188,6 +188,21 @@ function PeopleFilter({ items, selectedEmails, onToggle, onClear }: {
 }
 
 function StylePicker({ selected, onSelect }: { selected: string | null; onSelect: (id: string | null) => void }) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [atEnd, setAtEnd] = useState(false)
+
+  function handleScroll() {
+    const el = scrollRef.current
+    if (!el) return
+    setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 8)
+  }
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 8)
+  }, [])
+
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
@@ -199,28 +214,40 @@ function StylePicker({ selected, onSelect }: { selected: string | null; onSelect
           </button>
         )}
       </div>
-      <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' } as any}>
-        {ALL_STYLES.map(style => (
-          <button key={style.id}
-            onClick={() => onSelect(selected === style.id ? null : style.id)}
-            className="flex-shrink-0 flex flex-col items-center gap-1 transition-all"
-            title={style.label}>
-            <div className="rounded-lg overflow-hidden transition-all"
-              style={{ width: 52, height: 68,
-                outline: selected === style.id ? '2px solid var(--accent)' : '2px solid transparent',
-                outlineOffset: 2,
-                opacity: selected && selected !== style.id ? 0.45 : 1 }}>
-              <img src={`/styles/${style.id}.jpg`} alt={style.label} className="w-full h-full object-cover" />
-            </div>
-            <span className="text-center leading-tight"
-              style={{ fontSize: 9,
-                color: selected === style.id ? 'var(--accent)' : 'var(--text-muted)',
-                fontWeight: selected === style.id ? 600 : 400,
-                maxWidth: 52, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {style.label}
-            </span>
-          </button>
-        ))}
+      <div className="relative">
+        <div ref={scrollRef} onScroll={handleScroll}
+          className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' } as any}>
+          {ALL_STYLES.map(style => (
+            <button key={style.id}
+              onClick={() => onSelect(selected === style.id ? null : style.id)}
+              className="flex-shrink-0 flex flex-col items-center gap-1 transition-all"
+              title={style.label}>
+              <div className="rounded-lg overflow-hidden transition-all"
+                style={{ width: 52, height: 68,
+                  outline: selected === style.id ? '2px solid var(--accent)' : '2px solid transparent',
+                  outlineOffset: 2,
+                  opacity: selected && selected !== style.id ? 0.45 : 1 }}>
+                <img src={`/styles/${style.id}.png`} alt={style.label} className="w-full h-full object-cover" />
+              </div>
+              <span className="text-center leading-tight"
+                style={{ fontSize: 9,
+                  color: selected === style.id ? 'var(--accent)' : 'var(--text-muted)',
+                  fontWeight: selected === style.id ? 600 : 400,
+                  maxWidth: 52, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {style.label}
+              </span>
+            </button>
+          ))}
+        </div>
+        {/* Fade + chevron hint — hidden when scrolled to end */}
+        {!atEnd && (
+          <div className="absolute top-0 right-0 h-full flex items-center justify-end pointer-events-none"
+            style={{ width: 40, background: 'linear-gradient(to right, transparent, var(--surface) 70%)' }}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ color: 'var(--text-muted)', marginRight: 4 }}>
+              <path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -356,6 +383,11 @@ function ImageCardModal({ item, onClose, onGenerated }: {
               style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)' }}>{item.engine}</span>
             <span className="rounded px-2 py-1 text-xs font-mono"
               style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>{item.size}</span>
+            {item.createdTime && (
+              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                {new Date(item.createdTime).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}
+              </span>
+            )}
             {item.userName && (
               <div className="flex items-center gap-1.5 ml-auto">
                 <UserAvatar name={item.userName} email={item.userEmail} image={item.userImage} size={22} />
@@ -541,22 +573,32 @@ export function GeneratorPage() {
   }
 
   async function handleGenerate() {
-    if (!prompt.trim() || generating) return
+    if ((!prompt.trim() && !reference) || generating) return
     setGenerating(true)
     setError(null)
     try {
-      const styleSuffix = selectedStyle ? (ALL_STYLES.find(s => s.id === selectedStyle)?.suffix ?? '') : ''
-      const res = await fetch('/api/generator/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: prompt + styleSuffix,
-          engine,
-          size: currentSize.label,
-          referenceBase64: reference,
-          aiPrompt,
-        }),
-      })
+      let res: Response
+      if (!prompt.trim() && reference) {
+        // Reference uploaded but no prompt → recompose/resize
+        res = await fetch('/api/generator/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recomposeBase64: reference, targetSize: currentSize.label }),
+        })
+      } else {
+        const styleSuffix = selectedStyle ? (ALL_STYLES.find(s => s.id === selectedStyle)?.suffix ?? '') : ''
+        res = await fetch('/api/generator/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: prompt + styleSuffix,
+            engine,
+            size: currentSize.label,
+            referenceBase64: reference,
+            aiPrompt,
+          }),
+        })
+      }
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Generation failed')
       fetchHistory()
@@ -727,18 +769,18 @@ export function GeneratorPage() {
 
             <div className="p-4 flex-shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
               {error && <p className="text-xs text-red-400 mb-2 text-center">{error}</p>}
-              <button onClick={handleGenerate} disabled={!prompt.trim() || generating}
+              <button onClick={handleGenerate} disabled={(!prompt.trim() && !reference) || generating}
                 className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all"
-                style={{ background: prompt.trim() && !generating ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
-                  color: prompt.trim() && !generating ? 'white' : 'var(--text-muted)' }}>
+                style={{ background: (prompt.trim() || reference) && !generating ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
+                  color: (prompt.trim() || reference) && !generating ? 'white' : 'var(--text-muted)' }}>
                 {generating ? (
                   <><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
-                  </svg>Generating...</>
+                  </svg>{!prompt.trim() && reference ? 'Resizing...' : 'Generating...'}</>
                 ) : (
                   <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-                  </svg>Generate</>
+                  </svg>{!prompt.trim() && reference ? 'Resize' : 'Generate'}</>
                 )}
               </button>
             </div>
