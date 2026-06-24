@@ -6,11 +6,6 @@ import sharp from 'sharp'
 
 export const maxDuration = 60
 
-// Next.js default body limit is 4MB — large 2K images exceed this.
-// We resize all images to max 1024px before sending to GPT-4o.
-export const config = {
-  api: { bodyParser: { sizeLimit: '20mb' } },
-}
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
