@@ -2,10 +2,32 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import OpenAI from 'openai'
+import sharp from 'sharp'
 
 export const maxDuration = 60
 
+// Next.js default body limit is 4MB — large 2K images exceed this.
+// We resize all images to max 1024px before sending to GPT-4o.
+export const config = {
+  api: { bodyParser: { sizeLimit: '20mb' } },
+}
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+
+// Downscale base64 image to max 1024px on the longest side, return as JPEG base64 data URL.
+async function shrinkImage(base64DataUrl: string): Promise<string> {
+  try {
+    const base64Data = base64DataUrl.replace(/^data:image\/\w+;base64,/, '')
+    const buf = Buffer.from(base64Data, 'base64')
+    const out = await sharp(buf)
+      .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 80 })
+      .toBuffer()
+    return `data:image/jpeg;base64,${out.toString('base64')}`
+  } catch {
+    return base64DataUrl // fallback: send as-is
+  }
+}
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -19,19 +41,23 @@ export async function POST(req: NextRequest) {
 
   const content: OpenAI.Chat.ChatCompletionContentPart[] = []
 
-  // Add reference image first
+  // Add reference image — shrunk to 1024px so it fits in the request body
   if (referenceBase64) {
-    const url = referenceBase64.startsWith('data:') ? referenceBase64 : `data:image/jpeg;base64,${referenceBase64}`
+    const url = await shrinkImage(
+      referenceBase64.startsWith('data:') ? referenceBase64 : `data:image/jpeg;base64,${referenceBase64}`
+    )
     content.push({ type: 'text', text: '[REFERENCE IMAGE — the base image to edit/extend:]' })
-    content.push({ type: 'image_url', image_url: { url, detail: 'high' } })
+    content.push({ type: 'image_url', image_url: { url, detail: 'auto' } })
   }
 
-  // Add assets
+  // Add assets — also shrunk
   if (assets && assets.length > 0) {
     for (const asset of assets) {
-      const url = asset.base64.startsWith('data:') ? asset.base64 : `data:image/jpeg;base64,${asset.base64}`
+      const url = await shrinkImage(
+        asset.base64.startsWith('data:') ? asset.base64 : `data:image/jpeg;base64,${asset.base64}`
+      )
       content.push({ type: 'text', text: `[ASSET @${asset.name}:]` })
-      content.push({ type: 'image_url', image_url: { url, detail: 'high' } })
+      content.push({ type: 'image_url', image_url: { url, detail: 'auto' } })
     }
   }
 

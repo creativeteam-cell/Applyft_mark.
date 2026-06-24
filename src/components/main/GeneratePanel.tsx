@@ -3,6 +3,26 @@
 import { useRef, useState, useEffect, useReducer } from 'react'
 import { HighlightTextarea } from './HighlightTextarea'
 
+// Shrink a base64 data URL to max 1024px on the longest side (JPEG 80%).
+// Reduces payload from ~3MB (2K PNG) to ~150-300KB before sending to the API.
+function shrinkImage(dataUrl: string, maxPx = 1024): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      const scale = Math.min(1, maxPx / Math.max(img.width, img.height))
+      const w = Math.round(img.width * scale)
+      const h = Math.round(img.height * scale)
+      const canvas = document.createElement('canvas')
+      canvas.width = w
+      canvas.height = h
+      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h)
+      resolve(canvas.toDataURL('image/jpeg', 0.8))
+    }
+    img.onerror = () => resolve(dataUrl) // fallback
+    img.src = dataUrl
+  })
+}
+
 export interface Asset {
   name: string
   base64: string
@@ -165,13 +185,19 @@ export function GeneratePanel({
     setEnhancing(true)
     setEnhanceError('')
     try {
+      // Shrink images client-side before sending — 2K PNG = ~3MB base64,
+      // Vercel's request body limit is 4.5MB total. Shrink to 1024px first.
+      const [refSmall, ...assetsSmall] = await Promise.all([
+        reference ? shrinkImage(reference) : Promise.resolve(undefined),
+        ...assets.map(a => shrinkImage(a.base64).then(b64 => ({ name: a.name, base64: b64 }))),
+      ])
       const res = await fetch('/api/generator/enhance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt,
-          referenceBase64: reference || undefined,
-          assets: assets.map(a => ({ name: a.name, base64: a.base64 })),
+          referenceBase64: refSmall || undefined,
+          assets: assetsSmall,
         }),
       })
       const data = await res.json()
