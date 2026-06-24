@@ -236,22 +236,25 @@ const TEXT_FROM_REF_RULE = '\n\n[CRITICAL - TEXT]: If a reference image is provi
 const SIZE_HINTS: Record<string, string> = {
   '4x5':
     '\n\n[CRITICAL - OUTPUT FORMAT]: PORTRAIT image, aspect ratio 4:5 (4 wide by 5 tall). ' +
-    'SAFE ZONE: ALL text, buttons, and UI elements MUST be at least 34 pixels from EVERY edge (top, bottom, left, right).',
+    'SAFE ZONE: ALL text, buttons, logos, and UI elements MUST be at least 100 pixels from EVERY edge (top, bottom, left, right). ' +
+    'Elements near edges risk being cut off — push them toward the center.',
 
   '1x1':
     '\n\n[CRITICAL - OUTPUT FORMAT]: SQUARE image, aspect ratio 1:1. ' +
-    'SAFE ZONE: ALL text, buttons, and UI elements MUST be at least 34 pixels from EVERY edge.',
+    'SAFE ZONE: ALL text, buttons, logos, and UI elements MUST be at least 100 pixels from EVERY edge. ' +
+    'Elements near edges risk being cut off — push them toward the center.',
 
   '9x16':
     '\n\n[CRITICAL - OUTPUT FORMAT]: TALL PORTRAIT image, aspect ratio 9:16 (phone screen). ' +
-    'SAFE ZONE: ALL text, buttons, and UI elements MUST be at least 34 pixels from EVERY edge.',
+    'SAFE ZONE: ALL text, buttons, logos, and UI elements MUST be at least 100 pixels from EVERY edge. ' +
+    'Elements near edges risk being cut off — push them toward the center.',
 
   '1.91x1':
     '\n\n[CRITICAL - OUTPUT FORMAT]: LANDSCAPE image, aspect ratio 16:9 (wide horizontal). ' +
-    'CROP WARNING: the top ~50px and bottom ~50px of this image WILL BE CROPPED after generation — anything in that zone will be cut off. ' +
-    'SAFE ZONE: ALL text, buttons, logos, and UI elements MUST be at least 150 pixels from TOP and BOTTOM edges, and at least 80 pixels from LEFT and RIGHT edges. ' +
-    'Place all content strictly in the vertical center band — never near the top or bottom edges. ' +
-    'If unsure, push content further toward the middle.',
+    'SAFE ZONE: ALL text, buttons, logos, and UI elements MUST be at least 160 pixels from TOP and BOTTOM edges, and at least 100 pixels from LEFT and RIGHT edges. ' +
+    'Place all content strictly in the vertical center band — NEVER near the top or bottom. ' +
+    'If a text banner sits at the top edge, move it lower. If store badges or logos sit at the bottom edge, move them higher. ' +
+    'If unsure, push content further toward the vertical middle of the image.',
 }
 
 const RAW_MODE_PREFIX = "Generate exactly the image described below. Follow the description literally and precisely. Do NOT add any text, labels, watermarks, logos, advertising copy, UI elements, banners, or decorative elements that are not explicitly mentioned. Do not treat this as an advertisement — just create the image as described."
