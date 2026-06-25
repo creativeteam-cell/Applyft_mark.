@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import OpenAI from 'openai'
 import sharp from 'sharp'
+import { updateQueue } from '@/lib/queue'
 
 export const maxDuration = 60
 
@@ -76,14 +77,19 @@ Rules:
   })
 
   try {
-    const res = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [{ role: 'user', content }],
-      max_tokens: 600,
-      temperature: 0.4,
-    }, { timeout: 55000 })
-
-    const enhanced = res.choices[0]?.message?.content?.trim() || prompt
+    await updateQueue('openai', 1)
+    let enhanced: string
+    try {
+      const res = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content }],
+        max_tokens: 600,
+        temperature: 0.4,
+      }, { timeout: 55000 })
+      enhanced = res.choices[0]?.message?.content?.trim() || prompt
+    } finally {
+      await updateQueue('openai', -1)
+    }
     return NextResponse.json({ enhanced })
   } catch (e: any) {
     console.error('[enhance]', e)

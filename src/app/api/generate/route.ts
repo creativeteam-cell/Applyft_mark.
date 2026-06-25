@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth'
 import { generatePrompt } from '@/lib/openai'
 import { generateImage, recomposeImage } from '@/lib/imagen'
 import { getConfig } from '@/lib/appsStore'
+import { updateQueue } from '@/lib/queue'
 
 export const maxDuration = 210
 
@@ -34,8 +35,13 @@ export async function POST(req: NextRequest) {
 
     // Режим рекомпозиции
     if (recomposeBase64 && targetSize) {
-      const imageBase64 = await recomposeImage(recomposeBase64, targetSize, fixNote)
-      return NextResponse.json({ imageBase64 })
+      await updateQueue('gemini', 1)
+      try {
+        const imageBase64 = await recomposeImage(recomposeBase64, targetSize, fixNote)
+        return NextResponse.json({ imageBase64 })
+      } finally {
+        await updateQueue('gemini', -1)
+      }
     }
 
     let finalPrompt = customPrompt
@@ -70,17 +76,21 @@ export async function POST(req: NextRequest) {
       }
 
       try {
-        finalPrompt = await generatePrompt({
-          appInfo,
-          selectedPain: selectedPain !== 'none' ? selectedPain : undefined,
-          selectedHook: selectedHook && selectedHook !== 'none' ? selectedHook : undefined,
-          selectedConcept: selectedConceptText,
-          userText,
-          referenceBase64,
-
-          fixNote,
-          previousImageBase64,
-        })
+        await updateQueue('openai', 1)
+        try {
+          finalPrompt = await generatePrompt({
+            appInfo,
+            selectedPain: selectedPain !== 'none' ? selectedPain : undefined,
+            selectedHook: selectedHook && selectedHook !== 'none' ? selectedHook : undefined,
+            selectedConcept: selectedConceptText,
+            userText,
+            referenceBase64,
+            fixNote,
+            previousImageBase64,
+          })
+        } finally {
+          await updateQueue('openai', -1)
+        }
       } catch (e: any) {
         if (e.message === 'NOT_ENOUGH_DATA') {
           return NextResponse.json(
@@ -104,13 +114,19 @@ export async function POST(req: NextRequest) {
       finalPromptWithLogo = finalPrompt + `\n\nLOGO PLACEMENT — CRITICAL: The last image provided is the app logo. You MUST reproduce it exactly as-is. Rules: (1) Copy every detail — icon, wordmark, text, colors, proportions — pixel-perfectly. Do NOT simplify, redraw, or omit any part including any text in the logo. (2) Size: approximately 15% of the image width. (3) Do not let it overlap headlines, subheadlines, or CTA buttons. (4) ${logoPositionRule}`
     }
 
-    const imageBase64 = await generateImage(
-      finalPromptWithLogo,
-      imageReference,
-      logoBase64 || undefined,
-      targetSize || '4x5',
-      assets || undefined
-    )
+    await updateQueue('gemini', 1)
+    let imageBase64: string
+    try {
+      imageBase64 = await generateImage(
+        finalPromptWithLogo,
+        imageReference,
+        logoBase64 || undefined,
+        targetSize || '4x5',
+        assets || undefined
+      )
+    } finally {
+      await updateQueue('gemini', -1)
+    }
 
     return NextResponse.json({ prompt: finalPrompt, imageBase64 })
 

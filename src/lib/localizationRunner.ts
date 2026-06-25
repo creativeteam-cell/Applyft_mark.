@@ -1,6 +1,7 @@
 import OpenAI from 'openai'
 import sharp from 'sharp'
 import { getDriveClient, invalidateLocCache } from './googleDrive'
+import { updateQueue } from './queue'
 
 // --- Size helpers ---
 
@@ -447,7 +448,10 @@ VALIDATION:
 // --- GPT Translator ---
 
 async function translateTexts(analysis: any, targetLanguages: string[], retryCount = 0): Promise<any> {
-  const response = await openai.chat.completions.create({
+  if (retryCount === 0) await updateQueue('openai', 1)
+  let response: any
+  try {
+  response = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [
       {
@@ -566,13 +570,16 @@ VALIDATION:
     max_tokens: 4000,
   }, { timeout: 90000 }).catch(async (err: any) => {
     if (retryCount < 3) {
-      const delay = 5000 * (retryCount + 1) // 5s, 10s, 15s
+      const delay = 5000 * (retryCount + 1)
       console.warn(`[gpt] translateTexts failed (${err.message}), retry ${retryCount + 1} in ${delay / 1000}s...`)
       await new Promise(r => setTimeout(r, delay))
       return translateTexts(analysis, targetLanguages, retryCount + 1)
     }
     throw err
   })
+  } finally {
+    if (retryCount === 0) await updateQueue('openai', -1)
+  }
   const raw = (response as any).choices[0].message.content || '{}'
   const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
   return JSON.parse(clean.slice(clean.indexOf('{'), clean.lastIndexOf('}') + 1))
@@ -586,6 +593,8 @@ async function reviewLocalizedImage(
   language: string,
   phrases: { en: string; translated: string }[]
 ): Promise<{ status: 'ok' | 'fail'; fix_prompt: string }> {
+  await updateQueue('openai', 1)
+  try {
   if (phrases.length === 0) return { status: 'ok', fix_prompt: '' }
   const expectedText = phrases.map(p => {
     const isAllCaps = p.en === p.en.toUpperCase() && /[A-Z]/.test(p.en)
@@ -644,6 +653,9 @@ If issues found:
   } catch {
     return { status: 'ok', fix_prompt: '' }
   }
+  } finally {
+    await updateQueue('openai', -1)
+  }
 }
 
 // --- Extract translations from existing translated image (OCR reuse) ---
@@ -653,6 +665,8 @@ async function extractTranslationsFromExisting(
   translatedDataUrl: string,
   language: string,
 ): Promise<{ en: string; translated: string }[]> {
+  await updateQueue('openai', 1)
+  try {
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [{
@@ -685,6 +699,9 @@ Respond ONLY with a raw JSON array, no markdown, no backticks:
     return Array.isArray(arr) ? arr : []
   } catch {
     return []
+  }
+  } finally {
+    await updateQueue('openai', -1)
   }
 }
 
@@ -818,7 +835,12 @@ export async function runLocalizationJob(
 
         let analysis: any
         try {
-          analysis = await analyzeImage(base64)
+          await updateQueue('openai', 1)
+          try {
+            analysis = await analyzeImage(base64)
+          } finally {
+            await updateQueue('openai', -1)
+          }
         } catch (err: any) {
           console.warn(`[loc] analyzeImage failed for ${img.name}:`, err.message)
           imageDataList.push({ img, buffer, mime, texts: new Set(), roles: {}, types: {}, properNouns: new Set() })
