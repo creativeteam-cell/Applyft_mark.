@@ -95,6 +95,7 @@ export function GeneratePanel({
   const [promptBorder, setPromptBorder] = useState('var(--border)')
   const [enhancing, setEnhancing] = useState(false)
   const [enhanceError, setEnhanceError] = useState('')
+  const [describing, setDescribing] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const assetFileRef = useRef<HTMLInputElement>(null)
   const [pendingAssetBase64, setPendingAssetBase64] = useState<string | null>(null)
@@ -215,6 +216,24 @@ export function GeneratePanel({
     setEnhancing(false)
   }
 
+  async function handleMakePrompt() {
+    if (!reference) return
+    setDescribing(true)
+    try {
+      const res = await fetch('/api/generator/describe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: reference }),
+      })
+      const contentType = res.headers.get('content-type') || ''
+      const data = contentType.includes('application/json') ? await res.json() : { error: await res.text() }
+      if (data.description) onPromptChange(data.description)
+    } catch (e: any) {
+      console.error('[describe]', e)
+    }
+    setDescribing(false)
+  }
+
   async function handleUrlFetch(url: string) {
     if (!url.trim()) return
     setUrlLoading(true)
@@ -258,14 +277,34 @@ export function GeneratePanel({
         {/* Левая колонка — референс */}
         <div className="flex flex-col gap-2" style={{ width: 160 }}>
           {reference ? (
-            <div className="relative">
-              <img src={reference} alt="reference"
-                className="w-full rounded-xl object-cover cursor-pointer"
-                style={{ height: 100 }}
-                onClick={() => fileRef.current?.click()} />
-              <button onClick={() => onReferenceChange(null)}
-                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center shadow-lg">
-                ×
+            <div className="flex flex-col gap-1.5">
+              <div className="relative">
+                <img src={reference} alt="reference"
+                  className="w-full rounded-xl object-cover cursor-pointer"
+                  style={{ height: 100 }}
+                  onClick={() => fileRef.current?.click()} />
+                <button onClick={() => onReferenceChange(null)}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center shadow-lg">
+                  ×
+                </button>
+              </div>
+              <button
+                onClick={handleMakePrompt}
+                disabled={describing}
+                title="GPT-4o analyzes the image and writes a detailed generation prompt"
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all disabled:opacity-50"
+                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}
+              >
+                {describing ? (
+                  <><svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
+                  </svg>Reading...</>
+                ) : (
+                  <><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+                  </svg>Make prompt</>
+                )}
               </button>
             </div>
           ) : (
