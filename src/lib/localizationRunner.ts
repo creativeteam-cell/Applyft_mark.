@@ -369,6 +369,13 @@ If a visible proper noun, brand name, app name, username, contact name, or UI la
 - also include it in "proper_nouns"
 - do not only place it in "proper_nouns"
 
+STORE BADGE RULE — CRITICAL:
+The strings "Google Play", "Play Store", "App Store", "Google", "Apple" are platform brand names.
+If you see them on the image (e.g. on store badges):
+- Always classify them as kind: "platform_name" in proper_nouns
+- Always include them in "proper_nouns" regardless of context
+- They must NEVER be translated or transliterated under any circumstances
+
 CHAT RULES:
 - Chat bubbles must be extracted individually.
 - Both left and right chat bubbles must be included.
@@ -439,6 +446,7 @@ VALIDATION:
       },
     ],
     max_tokens: 16000,
+    temperature: 0,
   }, { timeout: 90000 })
   const raw = response.choices[0].message.content || '{}'
   const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
@@ -534,8 +542,13 @@ LENGTH RULE:
 GENDER RULE:
 - Use speaker_gender and target_audience from context for grammatical agreement.
 
-PROPER NOUNS RULE:
+PROPER NOUNS RULE — ABSOLUTE, NO EXCEPTIONS:
 - Never translate or modify brand names, app names, product names, personal names, usernames, contact names, geographic proper nouns, or platform names.
+- The following strings must ALWAYS remain exactly as written in English, even inside a longer translated phrase:
+  "Google Play", "Play Store", "App Store", "Google", "Apple"
+- If a badge text contains e.g. "Get it on Google Play" → translate only "Get it on", keep "Google Play" verbatim.
+- If a badge text contains "Download on the App Store" → translate only "Download on the", keep "App Store" verbatim.
+- Writing "グーグルプレイ" or any transliteration of these brand names is strictly forbidden.
 
 TRANSLATION SCOPE:
 - Translate all texts with importance high, medium, and low.
@@ -568,6 +581,7 @@ VALIDATION:
       { role: 'user', content: `Translate into: ${targetLanguages.join(', ')}` },
     ],
     max_tokens: 4000,
+    temperature: 0,
   }, { timeout: 90000 }).catch(async (err: any) => {
     if (retryCount < 3) {
       const delay = 5000 * (retryCount + 1)
