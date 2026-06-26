@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { setQueueActive } from '@/lib/queueClient'
 
 interface Asset {
   name: string
@@ -120,6 +121,8 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
   async function generateFirst(fix?: string, prevImage?: string, customPrompt?: string) {
     setStage('generating')
     setError(null)
+    setQueueActive('openai', true)
+    setQueueActive('gemini', true)
 
     try {
       // Compress all image inputs to avoid 413 Request Entity Too Large
@@ -187,6 +190,9 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
     } catch (e: any) {
       setError(e.message)
       setStage('preview')
+    } finally {
+      setQueueActive('openai', false)
+      setQueueActive('gemini', false)
     }
   }
 
@@ -197,6 +203,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
   async function handleApprove() {
     if (!previewImage) return
     setStage('generating-all')
+    setQueueActive('gemini', true)
 
     try {
       const results: Record<string, string> = { '4x5': previewImage }
@@ -255,6 +262,8 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
     } catch (e: any) {
       setError(e.message)
       setStage('preview')
+    } finally {
+      setQueueActive('gemini', false)
     }
   }
 
@@ -327,18 +336,23 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
 
   async function enhanceFix(note: string, imageBase64: string | null | undefined, setter: (v: string) => void) {
     if (!note.trim()) return
-    const compress = imageBase64 ? await compressImage(imageBase64, 1024) : undefined
-    const res = await fetch('/api/generator/enhance', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt: `FIX INSTRUCTION (rewrite for Gemini): ${note}`,
-        referenceBase64: compress,
-      }),
-    })
-    const ct = res.headers.get('content-type') || ''
-    const data = ct.includes('application/json') ? await res.json() : { error: await res.text() }
-    if (data.enhanced) setter(data.enhanced)
+    setQueueActive('openai', true)
+    try {
+      const compress = imageBase64 ? await compressImage(imageBase64, 1024) : undefined
+      const res = await fetch('/api/generator/enhance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `FIX INSTRUCTION (rewrite for Gemini): ${note}`,
+          referenceBase64: compress,
+        }),
+      })
+      const ct = res.headers.get('content-type') || ''
+      const data = ct.includes('application/json') ? await res.json() : { error: await res.text() }
+      if (data.enhanced) setter(data.enhanced)
+    } finally {
+      setQueueActive('openai', false)
+    }
   }
 
   async function handleRebuildSizes() {

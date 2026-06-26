@@ -1,7 +1,8 @@
 'use client'
 
-// v2.3
+// v2.4
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { setQueueActive } from '@/lib/queueClient'
 
 interface App { code: string; name: string; active: boolean }
 interface Marketer { code: string; name: string }
@@ -258,6 +259,8 @@ export function LocalizationPage() {
     _job.localizing = true
     _job.notify()
     setSelected(new Set())
+    setQueueActive('openai', true)
+    setQueueActive('gemini', true)
 
     try {
       for (let pairIdx = 0; pairIdx < pairs.length; pairIdx++) {
@@ -321,6 +324,8 @@ export function LocalizationPage() {
               if ((snapshot.status === 'done' || snapshot.status === 'error') && isLastPair) {
                 _job.localizing = false
                 _job.abort = null
+                setQueueActive('openai', false)
+                setQueueActive('gemini', false)
                 _job.notify()
                 setTimeout(() => fetchFolders(), 1500)
 
@@ -338,9 +343,15 @@ export function LocalizationPage() {
         }
       }
     } catch (err: any) {
-      if (err.name === 'AbortError') return
+      if (err.name === 'AbortError') {
+        setQueueActive('openai', false)
+        setQueueActive('gemini', false)
+        return
+      }
       _job.localizing = false
       _job.abort = null
+      setQueueActive('openai', false)
+      setQueueActive('gemini', false)
       _job.notify()
       alert('Localization failed: ' + err.message)
     }
@@ -367,6 +378,8 @@ export function LocalizationPage() {
     _job.state = { status: 'running', folders: Array.from(masterFolders.values()) }
     _job.localizing = true
     _job.notify()
+    setQueueActive('openai', true)
+    setQueueActive('gemini', true)
     try {
       for (let pairIdx = 0; pairIdx < pairs.length; pairIdx++) {
         if (controller.signal.aborted) break
@@ -403,13 +416,18 @@ export function LocalizationPage() {
         }
       }
     } catch (err: any) {
+      setQueueActive('openai', false)
+      setQueueActive('gemini', false)
       if (err.name !== 'AbortError') {
         _job.localizing = false; _job.abort = null; _job.notify()
         alert('Resume failed: ' + err.message)
         return
       }
     }
-    _job.localizing = false; _job.abort = null; _job.notify()
+    _job.localizing = false; _job.abort = null
+    setQueueActive('openai', false)
+    setQueueActive('gemini', false)
+    _job.notify()
   }
 
   const q = search.trim()

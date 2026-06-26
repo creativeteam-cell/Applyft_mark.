@@ -2,6 +2,7 @@
 
 import { useRef, useState, useEffect, useReducer } from 'react'
 import { HighlightTextarea } from './HighlightTextarea'
+import { setQueueActive } from '@/lib/queueClient'
 
 // Shrink a base64 data URL to max 1024px on the longest side (JPEG 80%).
 // Reduces payload from ~3MB (2K PNG) to ~150-300KB before sending to the API.
@@ -184,6 +185,7 @@ export function GeneratePanel({
 
   async function handleEnhancePrompt() {
     setEnhancing(true)
+    setQueueActive('openai', true)
     setEnhanceError('')
     try {
       // Shrink images client-side before sending — 2K PNG = ~3MB base64,
@@ -213,12 +215,14 @@ export function GeneratePanel({
       setEnhanceError(e.message || 'Network error')
       setTimeout(() => setEnhanceError(''), 5000)
     }
+    setQueueActive('openai', false)
     setEnhancing(false)
   }
 
   async function handleMakePrompt() {
     if (!reference) return
     setDescribing(true)
+    setQueueActive('openai', true)
     try {
       const res = await fetch('/api/generator/describe', {
         method: 'POST',
@@ -231,6 +235,7 @@ export function GeneratePanel({
     } catch (e: any) {
       console.error('[describe]', e)
     }
+    setQueueActive('openai', false)
     setDescribing(false)
   }
 

@@ -4,6 +4,7 @@ import { signOut } from 'next-auth/react'
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { readQueueClient } from '@/lib/queueClient'
 
 interface HeaderProps {
   user: {
@@ -26,14 +27,9 @@ function QueuePanel() {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    async function fetchQueue() {
-      try {
-        const res = await fetch('/api/queue')
-        if (res.ok) setQueue(await res.json())
-      } catch {}
-    }
-    fetchQueue()
-    const interval = setInterval(fetchQueue, 4000)
+    function tick() { setQueue(readQueueClient()) }
+    tick()
+    const interval = setInterval(tick, 2000)
     return () => clearInterval(interval)
   }, [])
 
@@ -86,7 +82,7 @@ function QueuePanel() {
                 <span className="text-sm" style={{ color: 'var(--text)' }}>Gemini Image</span>
               </div>
               <span className="text-sm font-mono font-medium" style={{ color: (queue?.gemini ?? 0) > 0 ? '#4ade80' : 'var(--text-muted)' }}>
-                {queue?.gemini ?? '—'} {(queue?.gemini ?? 0) === 1 ? 'active' : (queue?.gemini ?? 0) > 1 ? 'active' : 'idle'}
+                {(queue?.gemini ?? 0) > 0 ? 'active' : 'idle'}
               </span>
             </div>
             {/* OpenAI */}
@@ -97,12 +93,12 @@ function QueuePanel() {
                 <span className="text-sm" style={{ color: 'var(--text)' }}>OpenAI</span>
               </div>
               <span className="text-sm font-mono font-medium" style={{ color: (queue?.openai ?? 0) > 0 ? '#4ade80' : 'var(--text-muted)' }}>
-                {queue?.openai ?? '—'} {(queue?.openai ?? 0) > 0 ? 'active' : 'idle'}
+                {(queue?.openai ?? 0) > 0 ? 'active' : 'idle'}
               </span>
             </div>
           </div>
           <div className="px-4 pb-2.5">
-            <span className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>Updates every 4s</span>
+            <span className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>Updates every 2s</span>
           </div>
         </div>
       )}

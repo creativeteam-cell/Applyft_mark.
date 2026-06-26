@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useSession } from 'next-auth/react'
+import { setQueueActive } from '@/lib/queueClient'
 
 // Shrink image to max px on longest side (JPEG) to stay under Vercel's 4.5MB payload limit
 function shrinkImage(dataUrl: string, maxPx = 1536): Promise<string> {
@@ -460,6 +461,7 @@ function ImageCardModal({ item, onClose, onGenerated }: {
   async function handleGenerate() {
     if (generating) return
     setGenerating(true)
+    setQueueActive('gemini', true)
     setError(null)
     try {
       if (!newPrompt.trim()) {
@@ -490,6 +492,7 @@ function ImageCardModal({ item, onClose, onGenerated }: {
     } catch (e: any) {
       setError(e.message)
     }
+    setQueueActive('gemini', false)
     setGenerating(false)
   }
 
@@ -738,6 +741,7 @@ export function GeneratorPage() {
   async function handleGenerate() {
     if (!canGenerate) return
     setGenerating(true)
+    setQueueActive('gemini', true)
     setError(null)
     try {
       // Shrink reference before sending — 2K image = ~3-5MB base64, Vercel limit is 4.5MB
@@ -774,6 +778,7 @@ export function GeneratorPage() {
     } catch (e: any) {
       setError(e.message)
     }
+    setQueueActive('gemini', false)
     setGenerating(false)
   }
 
