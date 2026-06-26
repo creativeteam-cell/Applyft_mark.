@@ -322,6 +322,24 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
   }
 
   const [rebuilding, setRebuilding] = useState(false)
+  const [enhancingFix, setEnhancingFix] = useState(false)
+  const [enhancingSizeFix, setEnhancingSizeFix] = useState(false)
+
+  async function enhanceFix(note: string, imageBase64: string | null | undefined, setter: (v: string) => void) {
+    if (!note.trim()) return
+    const compress = imageBase64 ? await compressImage(imageBase64, 1024) : undefined
+    const res = await fetch('/api/generator/enhance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: `FIX INSTRUCTION (rewrite for Gemini): ${note}`,
+        referenceBase64: compress,
+      }),
+    })
+    const ct = res.headers.get('content-type') || ''
+    const data = ct.includes('application/json') ? await res.json() : { error: await res.text() }
+    if (data.enhanced) setter(data.enhanced)
+  }
 
   async function handleRebuildSizes() {
     const base = getSizeImage('4x5')
@@ -616,15 +634,32 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                   style={{ maxHeight: 180, aspectRatio: '4/5' }} />
               </div>
             )}
-            <textarea
-              value={fixNote}
-              onChange={e => setFixNote(e.target.value)}
-              placeholder="e.g. Make the text bigger, change background to dark blue... (any language)"
-              rows={3}
-              className="w-full rounded-xl p-4 text-sm outline-none resize-none mb-4"
-              style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }}
-              autoFocus
-            />
+            <div className="relative mb-4">
+              <textarea
+                value={fixNote}
+                onChange={e => setFixNote(e.target.value)}
+                placeholder="e.g. Make the text bigger, change background to dark blue... (any language)"
+                rows={3}
+                className="w-full rounded-xl p-4 text-sm outline-none resize-none"
+                style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', paddingRight: 120 }}
+                autoFocus
+              />
+              <button
+                onClick={async () => {
+                  setEnhancingFix(true)
+                  await enhanceFix(fixNote, previewImage, setFixNote)
+                  setEnhancingFix(false)
+                }}
+                disabled={!fixNote.trim() || enhancingFix}
+                title="GPT-4o reads the image + your fix and rewrites it for Gemini"
+                className="absolute right-2 top-2 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all disabled:opacity-40"
+                style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                {enhancingFix
+                  ? <><svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>...</>
+                  : <><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>⚡ Enhance</>
+                }
+              </button>
+            </div>
             <div className="flex gap-3">
               <button onClick={handleSubmitFix} disabled={!fixNote.trim()}
                 className="flex-1 py-3 rounded-xl font-semibold disabled:opacity-40"
@@ -747,6 +782,18 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                     className="flex-1 px-3 py-2 rounded-xl text-sm outline-none"
                     style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
                   />
+                  <button
+                    onClick={async () => {
+                      setEnhancingSizeFix(true)
+                      await enhanceFix(sizeFixNote, getSizeImage(fixingSize), setSizeFixNote)
+                      setEnhancingSizeFix(false)
+                    }}
+                    disabled={!sizeFixNote.trim() || enhancingSizeFix}
+                    title="GPT-4o rewrites your fix for Gemini"
+                    className="px-3 py-2 rounded-xl text-sm font-medium disabled:opacity-40"
+                    style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                    {enhancingSizeFix ? '...' : '⚡'}
+                  </button>
                   <button
                     onClick={() => handleSizeFix(fixingSize)}
                     disabled={!sizeFixNote.trim()}

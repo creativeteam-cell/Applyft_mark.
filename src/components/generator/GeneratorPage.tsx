@@ -3,6 +3,24 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useSession } from 'next-auth/react'
 
+// Shrink image to max px on longest side (JPEG) to stay under Vercel's 4.5MB payload limit
+function shrinkImage(dataUrl: string, maxPx = 1536): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      const scale = Math.min(1, maxPx / Math.max(img.width, img.height))
+      const w = Math.round(img.width * scale)
+      const h = Math.round(img.height * scale)
+      const canvas = document.createElement('canvas')
+      canvas.width = w; canvas.height = h
+      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h)
+      resolve(canvas.toDataURL('image/jpeg', 0.85))
+    }
+    img.onerror = () => resolve(dataUrl)
+    img.src = dataUrl
+  })
+}
+
 interface ModelDef {
   id: string
   provider: 'gemini' | 'openai'
@@ -722,16 +740,17 @@ export function GeneratorPage() {
     setGenerating(true)
     setError(null)
     try {
+      // Shrink reference before sending — 2K image = ~3-5MB base64, Vercel limit is 4.5MB
+      const refSmall = reference ? await shrinkImage(reference) : null
+
       let res: Response
       if (isResize) {
-        // No prompt, no style — just recompose at new size
         res = await fetch('/api/generator/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ recomposeBase64: reference, targetSize: currentSize.label }),
+          body: JSON.stringify({ recomposeBase64: refSmall, targetSize: currentSize.label }),
         })
       } else {
-        // Generate / Restyle — always send model info
         const finalPrompt = isRestyle
           ? `Recreate this image in the following style${styleSuffix}`
           : prompt + styleSuffix
@@ -743,7 +762,7 @@ export function GeneratorPage() {
             engine: currentModel.provider === 'openai' ? 'dalle' : 'gemini',
             modelId: selectedModelId,
             size: currentSize.label,
-            referenceBase64: currentModel.supportsReference ? reference : undefined,
+            referenceBase64: currentModel.supportsReference ? refSmall : undefined,
             aiPrompt,
           }),
         })
