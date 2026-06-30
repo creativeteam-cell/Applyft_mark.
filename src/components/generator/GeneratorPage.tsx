@@ -706,6 +706,7 @@ export function GeneratorPage() {
   const [selectedStyle, setSelectedStyle] = useState<string | null>(null)
   const [reference, setReference] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
+  const [describing, setDescribing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const referenceRef = useRef<HTMLInputElement>(null)
 
@@ -737,6 +738,26 @@ export function GeneratorPage() {
   const btnLabel = generating
     ? (isRestyle ? 'Restyling...' : isResize ? 'Resizing...' : 'Generating...')
     : (isRestyle ? 'Restyle' : isResize ? 'Resize' : 'Generate')
+
+  async function handleMakePrompt() {
+    if (!reference) return
+    setDescribing(true)
+    setQueueActive('openai', true)
+    try {
+      const res = await fetch('/api/generator/describe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: reference }),
+      })
+      const ct = res.headers.get('content-type') || ''
+      const data = ct.includes('application/json') ? await res.json() : { error: await res.text() }
+      if (data.description) setPrompt(data.description)
+    } catch (e: any) {
+      console.error('[describe]', e)
+    }
+    setQueueActive('openai', false)
+    setDescribing(false)
+  }
 
   async function handleGenerate() {
     if (!canGenerate) return
@@ -862,14 +883,30 @@ export function GeneratorPage() {
                   <input ref={referenceRef} type="file" accept="image/*" className="hidden"
                     onChange={e => handleFileUpload(e, setReference)} />
                   {reference ? (
-                    <div className="relative rounded-lg overflow-hidden" style={{ height: 80 }}>
-                      <img src={reference} alt="reference" className="w-full h-full object-cover" />
-                      <button onClick={() => setReference(null)}
-                        className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full flex items-center justify-center"
-                        style={{ background: 'rgba(0,0,0,0.6)' }}>
-                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                          <path d="M1 1l8 8M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
-                        </svg>
+                    <div className="flex flex-col gap-1.5">
+                      <div className="relative rounded-lg overflow-hidden" style={{ height: 80 }}>
+                        <img src={reference} alt="reference" className="w-full h-full object-cover" />
+                        <button onClick={() => setReference(null)}
+                          className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full flex items-center justify-center"
+                          style={{ background: 'rgba(0,0,0,0.6)' }}>
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                            <path d="M1 1l8 8M9 1L1 9" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+                          </svg>
+                        </button>
+                      </div>
+                      <button onClick={handleMakePrompt} disabled={describing}
+                        className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs transition-all"
+                        style={{ background: 'rgba(79,110,247,0.1)', color: describing ? 'var(--text-muted)' : 'var(--accent)',
+                          border: '1px solid rgba(79,110,247,0.25)' }}>
+                        {describing ? (
+                          <><svg className="animate-spin" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
+                          </svg>Describing...</>
+                        ) : (
+                          <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                          </svg>Make prompt</>
+                        )}
                       </button>
                     </div>
                   ) : (

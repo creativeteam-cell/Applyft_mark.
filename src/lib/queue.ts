@@ -1,99 +1,47 @@
-// Cross-device AI queue tracking via a heartbeat file in Google Drive.
-// Each model writes a timestamp when active, 0 when idle.
-// No read-modify-write race condition — each model field is independent.
-// Heartbeats expire after BEAT_EXPIRE_MS for crash protection.
+// Cross-device AI queue tracking via Upstash Redis.
+// Each model stores a heartbeat timestamp that expires automatically.
 
-import { getDriveClient } from './googleDrive'
+import { Redis } from '@upstash/redis'
 
-const BEAT_FILE = '_qbeat.json'
-const FOLDER_ID = process.env.GENERATOR_DRIVE_FOLDER_ID!
-const BEAT_EXPIRE_MS = 45_000 // 45 seconds
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL!,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+})
+
+const BEAT_TTL = 45 // seconds before key auto-expires (crash protection)
 
 export interface QueueState {
   gemini: number
   openai: number
 }
 
-interface BeatFile {
-  gemini?: number  // unix ms timestamp (0 = idle)
-  openai?: number
-}
-
-async function findBeatFileId(): Promise<string | null> {
-  try {
-    const drive = getDriveClient()
-    const res = await drive.files.list({
-      q: `'${FOLDER_ID}' in parents and name = '${BEAT_FILE}' and trashed = false`,
-      fields: 'files(id)',
-      supportsAllDrives: true,
-      includeItemsFromAllDrives: true,
-    })
-    return res.data.files?.[0]?.id ?? null
-  } catch (e) {
-    console.error('[queue] findBeatFileId error:', e)
-    return null
-  }
-}
-
-async function readBeatFile(): Promise<BeatFile> {
-  try {
-    const drive = getDriveClient()
-    const fileId = await findBeatFileId()
-    if (!fileId) return {}
-    const res = await (drive.files.get as any)(
-      { fileId, alt: 'media', supportsAllDrives: true },
-      { responseType: 'text' }
-    ) as any
-    const raw = typeof res.data === 'string' ? res.data : JSON.stringify(res.data)
-    return JSON.parse(raw)
-  } catch (e) {
-    console.error('[queue] readBeatFile error:', e)
-    return {}
-  }
-}
-
-async function writeBeatFile(data: BeatFile): Promise<void> {
-  try {
-    const drive = getDriveClient()
-    const content = JSON.stringify(data)
-    const fileId = await findBeatFileId()
-    if (fileId) {
-      await (drive.files.update as any)({
-        fileId,
-        supportsAllDrives: true,
-        media: { mimeType: 'application/json', body: content },
-      })
-    } else {
-      await (drive.files.create as any)({
-        supportsAllDrives: true,
-        requestBody: { name: BEAT_FILE, parents: [FOLDER_ID] },
-        media: { mimeType: 'application/json', body: content },
-      })
-    }
-  } catch (e) {
-    console.error('[queue] writeBeatFile error:', e)
-  }
-}
-
-function beatToCount(ts: number | undefined): number {
-  if (!ts || ts === 0) return 0
-  return Date.now() - ts < BEAT_EXPIRE_MS ? 1 : 0
+function beatKey(model: 'gemini' | 'openai') {
+  return `queue:beat:${model}`
 }
 
 export async function readQueue(): Promise<QueueState> {
-  const beat = await readBeatFile()
-  return {
-    gemini: beatToCount(beat.gemini),
-    openai: beatToCount(beat.openai),
+  try {
+    const [gemini, openai] = await Promise.all([
+      redis.get<number>(beatKey('gemini')),
+      redis.get<number>(beatKey('openai')),
+    ])
+    return {
+      gemini: gemini ? 1 : 0,
+      openai: openai ? 1 : 0,
+    }
+  } catch (e) {
+    console.error('[queue] readQueue error:', e)
+    return { gemini: 0, openai: 0 }
   }
 }
 
-/** Call with active=true before AI work, active=false after. */
 export async function updateQueue(model: 'gemini' | 'openai', delta: 1 | -1): Promise<void> {
   try {
-    const beat = await readBeatFile()
-    beat[model] = delta === 1 ? Date.now() : 0
-    await writeBeatFile(beat)
+    if (delta === 1) {
+      await redis.set(beatKey(model), Date.now(), { ex: BEAT_TTL })
+    } else {
+      await redis.del(beatKey(model))
+    }
   } catch (e) {
     console.error('[queue] updateQueue error:', e)
   }
