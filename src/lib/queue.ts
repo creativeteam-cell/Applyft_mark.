@@ -1,5 +1,5 @@
 // Cross-device AI queue tracking via Upstash Redis.
-// Each model stores a heartbeat timestamp that expires automatically.
+// Uses atomic INCR/DECR — correct under concurrent usage across all devices.
 
 import { Redis } from '@upstash/redis'
 
@@ -8,26 +8,26 @@ const redis = new Redis({
   token: process.env.UPSTASH_REDIS_KV_REST_API_TOKEN!,
 })
 
-const BEAT_TTL = 45 // seconds before key auto-expires (crash protection)
+const KEY_TTL = 300 // 5 min auto-reset in case of crash
 
 export interface QueueState {
   gemini: number
   openai: number
 }
 
-function beatKey(model: 'gemini' | 'openai') {
-  return `queue:beat:${model}`
+function countKey(model: 'gemini' | 'openai') {
+  return `queue:count:${model}`
 }
 
 export async function readQueue(): Promise<QueueState> {
   try {
     const [gemini, openai] = await Promise.all([
-      redis.get<number>(beatKey('gemini')),
-      redis.get<number>(beatKey('openai')),
+      redis.get<number>(countKey('gemini')),
+      redis.get<number>(countKey('openai')),
     ])
     return {
-      gemini: gemini ? 1 : 0,
-      openai: openai ? 1 : 0,
+      gemini: Math.max(0, gemini ?? 0),
+      openai: Math.max(0, openai ?? 0),
     }
   } catch (e) {
     console.error('[queue] readQueue error:', e)
@@ -37,10 +37,17 @@ export async function readQueue(): Promise<QueueState> {
 
 export async function updateQueue(model: 'gemini' | 'openai', delta: 1 | -1): Promise<void> {
   try {
+    const key = countKey(model)
     if (delta === 1) {
-      await redis.set(beatKey(model), Date.now(), { ex: BEAT_TTL })
+      await redis.incr(key)
+      await redis.expire(key, KEY_TTL)
     } else {
-      await redis.del(beatKey(model))
+      const current = await redis.get<number>(key)
+      if (current && current > 0) {
+        await redis.decr(key)
+      } else {
+        await redis.set(key, 0, { ex: KEY_TTL })
+      }
     }
   } catch (e) {
     console.error('[queue] updateQueue error:', e)

@@ -96,28 +96,23 @@ function QueuePanel() {
             </span>
           </div>
           <div className="px-4 py-3 flex flex-col gap-3">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full flex-shrink-0"
-                  style={{ background: queue.gemini > 0 ? '#4ade80' : 'rgba(255,255,255,0.15)' }} />
-                <span className="text-sm" style={{ color: 'var(--text)' }}>Gemini Image</span>
-              </div>
-              <span className="text-sm font-mono font-medium"
-                style={{ color: queue.gemini > 0 ? '#4ade80' : 'var(--text-muted)' }}>
-                {queue.gemini > 0 ? 'active' : 'idle'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full flex-shrink-0"
-                  style={{ background: queue.openai > 0 ? '#4ade80' : 'rgba(255,255,255,0.15)' }} />
-                <span className="text-sm" style={{ color: 'var(--text)' }}>OpenAI</span>
-              </div>
-              <span className="text-sm font-mono font-medium"
-                style={{ color: queue.openai > 0 ? '#4ade80' : 'var(--text-muted)' }}>
-                {queue.openai > 0 ? 'active' : 'idle'}
-              </span>
-            </div>
+            {(['gemini', 'openai'] as const).map(model => {
+              const count = queue[model]
+              const label = model === 'gemini' ? 'Gemini Image' : 'OpenAI'
+              return (
+                <div key={model} className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full flex-shrink-0"
+                      style={{ background: count > 0 ? '#4ade80' : 'rgba(255,255,255,0.15)' }} />
+                    <span className="text-sm" style={{ color: 'var(--text)' }}>{label}</span>
+                  </div>
+                  <span className="text-sm font-mono font-medium"
+                    style={{ color: count > 0 ? '#4ade80' : 'var(--text-muted)' }}>
+                    {count > 0 ? `${count} active` : 'idle'}
+                  </span>
+                </div>
+              )
+            })}
           </div>
           <div className="px-4 pb-2.5">
             <span className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>
