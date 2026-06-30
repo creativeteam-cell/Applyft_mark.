@@ -4,8 +4,8 @@
 import { Redis } from '@upstash/redis'
 
 const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL!,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+  url: process.env.UPSTASH_REDIS_KV_REST_API_URL!,
+  token: process.env.UPSTASH_REDIS_KV_REST_API_TOKEN!,
 })
 
 const BEAT_TTL = 45 // seconds before key auto-expires (crash protection)
@@ -43,6 +43,4 @@ export async function updateQueue(model: 'gemini' | 'openai', delta: 1 | -1): Pr
       await redis.del(beatKey(model))
     }
   } catch (e) {
-    console.error('[queue] updateQueue error:', e)
-  }
-}
+    console.error('[queue] updateQueue erro
