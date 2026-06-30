@@ -23,14 +23,31 @@ const NAV = [
 
 function QueuePanel() {
   const [open, setOpen] = useState(false)
-  const [queue, setQueue] = useState<{ gemini: number; openai: number } | null>(null)
+  // local: from localStorage (instant, current device)
+  // server: from Drive via /api/queue (cross-device)
+  const [local, setLocal] = useState<{ gemini: number; openai: number }>({ gemini: 0, openai: 0 })
+  const [server, setServer] = useState<{ gemini: number; openai: number }>({ gemini: 0, openai: 0 })
   const ref = useRef<HTMLDivElement>(null)
 
+  // Poll localStorage every 2s
   useEffect(() => {
-    function tick() { setQueue(readQueueClient()) }
+    function tick() { setLocal(readQueueClient()) }
     tick()
-    const interval = setInterval(tick, 2000)
-    return () => clearInterval(interval)
+    const id = setInterval(tick, 2000)
+    return () => clearInterval(id)
+  }, [])
+
+  // Poll server every 5s for cross-device visibility
+  useEffect(() => {
+    async function fetchServer() {
+      try {
+        const res = await fetch('/api/queue')
+        if (res.ok) setServer(await res.json())
+      } catch {}
+    }
+    fetchServer()
+    const id = setInterval(fetchServer, 5000)
+    return () => clearInterval(id)
   }, [])
 
   useEffect(() => {
@@ -41,7 +58,13 @@ function QueuePanel() {
     return () => document.removeEventListener('mousedown', onClickOutside)
   }, [])
 
-  const total = (queue?.gemini ?? 0) + (queue?.openai ?? 0)
+  // Merge: take the higher value (local wins for instant feedback, server for cross-device)
+  const queue = {
+    gemini: Math.max(local.gemini, server.gemini),
+    openai: Math.max(local.openai, server.openai),
+  }
+
+  const total = queue.gemini + queue.openai
   const busy = total > 0
 
   return (
@@ -51,7 +74,6 @@ function QueuePanel() {
         className="flex items-center gap-2 px-3 py-1.5 rounded-xl transition-all hover:bg-white/5"
         title="AI Queue"
       >
-        {/* Pulse dot */}
         <div className="relative flex items-center justify-center w-4 h-4">
           {busy && (
             <span className="absolute inline-flex w-full h-full rounded-full opacity-60 animate-ping"
@@ -74,31 +96,33 @@ function QueuePanel() {
             </span>
           </div>
           <div className="px-4 py-3 flex flex-col gap-3">
-            {/* Gemini */}
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full flex-shrink-0"
-                  style={{ background: (queue?.gemini ?? 0) > 0 ? '#4ade80' : 'rgba(255,255,255,0.15)' }} />
+                  style={{ background: queue.gemini > 0 ? '#4ade80' : 'rgba(255,255,255,0.15)' }} />
                 <span className="text-sm" style={{ color: 'var(--text)' }}>Gemini Image</span>
               </div>
-              <span className="text-sm font-mono font-medium" style={{ color: (queue?.gemini ?? 0) > 0 ? '#4ade80' : 'var(--text-muted)' }}>
-                {(queue?.gemini ?? 0) > 0 ? 'active' : 'idle'}
+              <span className="text-sm font-mono font-medium"
+                style={{ color: queue.gemini > 0 ? '#4ade80' : 'var(--text-muted)' }}>
+                {queue.gemini > 0 ? 'active' : 'idle'}
               </span>
             </div>
-            {/* OpenAI */}
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full flex-shrink-0"
-                  style={{ background: (queue?.openai ?? 0) > 0 ? '#4ade80' : 'rgba(255,255,255,0.15)' }} />
+                  style={{ background: queue.openai > 0 ? '#4ade80' : 'rgba(255,255,255,0.15)' }} />
                 <span className="text-sm" style={{ color: 'var(--text)' }}>OpenAI</span>
               </div>
-              <span className="text-sm font-mono font-medium" style={{ color: (queue?.openai ?? 0) > 0 ? '#4ade80' : 'var(--text-muted)' }}>
-                {(queue?.openai ?? 0) > 0 ? 'active' : 'idle'}
+              <span className="text-sm font-mono font-medium"
+                style={{ color: queue.openai > 0 ? '#4ade80' : 'var(--text-muted)' }}>
+                {queue.openai > 0 ? 'active' : 'idle'}
               </span>
             </div>
           </div>
           <div className="px-4 pb-2.5">
-            <span className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>Updates every 2s</span>
+            <span className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>
+              Local: 2s · Network: 5s
+            </span>
           </div>
         </div>
       )}
@@ -115,7 +139,6 @@ export function Header({ user }: HeaderProps) {
       style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>
       <div className="flex items-center justify-between px-8 h-14">
 
-        {/* Logo + Nav */}
         <div className="flex items-center gap-8">
           <div className="flex items-center gap-2">
             <span className="text-xs font-mono tracking-[0.3em] text-gray-500 uppercase">ApplyFT</span>
