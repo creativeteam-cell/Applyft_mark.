@@ -43,4 +43,6 @@ export async function updateQueue(model: 'gemini' | 'openai', delta: 1 | -1): Pr
       await redis.del(beatKey(model))
     }
   } catch (e) {
-    console.error('[queue] updateQueue erro
+    console.error('[queue] updateQueue error:', e)
+  }
+}
