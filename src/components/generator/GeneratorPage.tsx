@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useSession } from 'next-auth/react'
 import { setQueueActive } from '@/lib/queueClient'
+import { VideoPage } from '@/components/video/VideoPage'
 
 // Shrink image to max px on longest side (JPEG) to stay under Vercel's 4.5MB payload limit
 function shrinkImage(dataUrl: string, maxPx = 1536): Promise<string> {
@@ -847,13 +848,7 @@ export function GeneratorPage() {
       </div>
 
       {tab === 'video' ? (
-        <div className="flex-1 flex items-center justify-center flex-col gap-3">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1"
-            style={{ color: 'rgba(255,255,255,0.1)' }}>
-            <polygon points="5 3 19 12 5 21 5 3"/>
-          </svg>
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Video generation — coming soon</p>
-        </div>
+        <VideoPage />
       ) : (
         <div className="flex flex-1 min-h-0">
 
@@ -969,11 +964,10 @@ export function GeneratorPage() {
               </div>
 
               {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
-
             </div>
 
             {/* Generate button */}
-            <div className="p-4 flex-shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
+            <div className="p-4 border-t flex-shrink-0" style={{ borderColor: 'var(--border)' }}>
               <button onClick={handleGenerate} disabled={!canGenerate}
                 className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all"
                 style={{ background: canGenerate ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
@@ -991,22 +985,20 @@ export function GeneratorPage() {
             </div>
           </div>
 
-          {/* Main content */}
+          {/* Right panel — history */}
           <div className="flex-1 overflow-y-auto p-6">
             <PeopleFilter items={history} selectedEmails={selectedEmails} onToggle={toggleEmail} onClear={() => setSelectedEmails(new Set())} />
             {historyLoading ? (
               <div className="flex items-center justify-center py-16">
                 <svg className="animate-spin" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                  style={{ color: 'rgba(255,255,255,0.3)' }}>
-                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/>
-                  <path d="M12 2a10 10 0 0 1 10 10"/>
+                  style={{ color: 'rgba(255,255,255,0.2)' }}>
+                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
                 </svg>
               </div>
             ) : (
               <HistoryGrid items={filteredHistory} onSelect={setSelectedItem} />
             )}
           </div>
-
         </div>
       )}
     </div>
