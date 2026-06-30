@@ -114,7 +114,6 @@ export function VideoPage() {
     reader.onload = (ev) => {
       const dataUrl = ev.target?.result as string
       setImagePreview(dataUrl)
-      // Strip data: prefix for Kling API
       const base64 = dataUrl.split(',')[1]
       setImage(base64)
     }
@@ -126,12 +125,12 @@ export function VideoPage() {
 
   return (
     <div className="flex h-screen pt-14" style={{ background: 'var(--bg)' }}>
-      {/* Left panel — controls */}
+      {/* Left panel */}
       <div className="w-[360px] flex-shrink-0 border-r flex flex-col" style={{ borderColor: 'var(--border)' }}>
 
         {/* Tabs */}
         <div className="flex border-b" style={{ borderColor: 'var(--border)' }}>
-          {([['text', 'Text → Video'], ['image', 'Image → Video']] as [Tab, string][]).map(([t, label]) => (
+          {([['text', 'Text to Video'], ['image', 'Image to Video']] as [Tab, string][]).map(([t, label]) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -181,7 +180,7 @@ export function VideoPage() {
             </div>
           </div>
 
-          {/* Image upload (image tab) */}
+          {/* Image upload */}
           {tab === 'image' && (
             <div>
               <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-muted)' }}>
@@ -189,7 +188,7 @@ export function VideoPage() {
               </label>
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className="rounded-xl border-2 border-dashed cursor-pointer flex items-center justify-center transition-all hover:border-[var(--accent)]"
+                className="rounded-xl border-2 border-dashed cursor-pointer flex items-center justify-center transition-all"
                 style={{
                   borderColor: imagePreview ? 'transparent' : 'var(--border)',
                   minHeight: 160,
@@ -218,7 +217,7 @@ export function VideoPage() {
               onChange={e => setPrompt(e.target.value)}
               placeholder={tab === 'text' ? 'Describe the video...' : 'Describe how the image should move...'}
               rows={4}
-              className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none focus:ring-1 focus:ring-[var(--accent)]"
+              className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none"
               style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
             />
           </div>
@@ -233,7 +232,7 @@ export function VideoPage() {
               onChange={e => setNegativePrompt(e.target.value)}
               placeholder="What to avoid..."
               rows={2}
-              className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none focus:ring-1 focus:ring-[var(--accent)]"
+              className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none"
               style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
             />
           </div>
@@ -333,25 +332,24 @@ export function VideoPage() {
               cursor: canGenerate ? 'pointer' : 'not-allowed',
             }}
           >
-            {status === 'pending' || status === 'processing' ? 'Generating...' : '▶ Generate video'}
+            {status === 'pending' || status === 'processing' ? 'Generating...' : 'Generate video'}
           </button>
-          {(mode === 'pro') && (
+          {mode === 'pro' && (
             <p className="text-center text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
-              Pro mode uses more units (~{Number(duration) * 8 / 5 * 2} units)
+              Pro uses ~{Number(duration) * 8 / 5 * 2} units
             </p>
           )}
         </div>
       </div>
 
-      {/* Right panel — result */}
+      {/* Right panel */}
       <div className="flex-1 flex items-center justify-center p-8">
+
         {status === 'idle' && (
           <div className="text-center">
             <div className="text-5xl mb-4">🎬</div>
-            <h2 className="text-xl font-semibold mb-2" style={{ color: 'var(--text)' }}>Kling 3.0 Video Generator</h2>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              Text to video or animate any image
-            </p>
+            <h2 className="text-xl font-semibold mb-2" style={{ color: 'var(--text)' }}>Kling Video Generator</h2>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Text to video or animate any image</p>
           </div>
         )}
 
@@ -361,4 +359,59 @@ export function VideoPage() {
             <p className="text-sm font-medium" style={{ color: 'var(--text)' }}>
               {status === 'pending' ? 'Submitting task...' : 'Generating video...'}
             </p>
-            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }
+            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+              {taskId ? 'Task submitted, please wait...' : 'Please wait...'}
+            </p>
+          </div>
+        )}
+
+        {status === 'done' && videoUrl && (
+          <div className="w-full max-w-2xl flex flex-col gap-4">
+            <video
+              src={videoUrl}
+              controls
+              autoPlay
+              loop
+              className="w-full rounded-2xl"
+              style={{ border: '1px solid var(--border)' }}
+            />
+            <div className="flex items-center justify-between">
+              {unitsUsed && (
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Units used: {unitsUsed}</p>
+              )}
+              <a
+                href={videoUrl}
+                download="video.mp4"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-4 py-2 rounded-xl text-sm font-medium"
+                style={{ background: 'var(--accent)', color: '#fff' }}
+              >
+                Download
+              </a>
+            </div>
+          </div>
+        )}
+
+        {status === 'error' && (
+          <div className="text-center max-w-md">
+            <div className="text-4xl mb-4">⚠️</div>
+            <p className="text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>Generation failed</p>
+            <p className="text-xs px-4 py-3 rounded-xl"
+              style={{ color: '#f87171', background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)' }}>
+              {error}
+            </p>
+            <button
+              onClick={() => setStatus('idle')}
+              className="mt-4 px-4 py-2 rounded-xl text-sm font-medium"
+              style={{ background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)' }}
+            >
+              Try again
+            </button>
+          </div>
+        )}
+
+      </div>
+    </div>
+  )
+}
