@@ -267,17 +267,20 @@ function PeopleFilter({ items, selectedEmails, onToggle, onClear }: {
 
 function StylePicker({ selected, onSelect }: { selected: string | null; onSelect: (id: string | null) => void }) {
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [atStart, setAtStart] = useState(true)
   const [atEnd, setAtEnd] = useState(false)
 
   function handleScroll() {
     const el = scrollRef.current
     if (!el) return
+    setAtStart(el.scrollLeft <= 8)
     setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 8)
   }
 
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
+    setAtStart(el.scrollLeft <= 8)
     setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 8)
   }, [])
 
@@ -317,7 +320,21 @@ function StylePicker({ selected, onSelect }: { selected: string | null; onSelect
             </button>
           ))}
         </div>
-        {/* Fade + clickable chevron — hidden when scrolled to end */}
+        {/* Left arrow */}
+        {!atStart && (
+          <div className="absolute top-0 left-0 h-full flex items-center justify-start"
+            style={{ width: 40, background: 'linear-gradient(to left, transparent, var(--surface) 70%)' }}>
+            <button
+              onClick={() => scrollRef.current?.scrollBy({ left: -120, behavior: 'smooth' })}
+              className="flex items-center justify-center w-6 h-6 rounded-full transition-all hover:bg-white/10"
+              style={{ marginLeft: 2, color: 'var(--text-muted)' }}>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M8 2L4 6l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          </div>
+        )}
+        {/* Right arrow */}
         {!atEnd && (
           <div className="absolute top-0 right-0 h-full flex items-center justify-end"
             style={{ width: 40, background: 'linear-gradient(to right, transparent, var(--surface) 70%)' }}>
