@@ -76,4 +76,11 @@ export const authOptions: NextAuthOptions = {
     async session({ session, token }) {
       if (session.user) session.user.id = token.id as string
       session.accessToken = token.accessToken as string | undefined
-      if ((token as any).error) session.error = (token as any).error as str
+      if ((token as any).error) session.error = (token as any).error as string
+      return session
+    },
+  },
+  pages: {
+    signIn: '/',
+  },
+}
