@@ -48,7 +48,7 @@ export const authOptions: NextAuthOptions = {
     async signIn({ account, profile }) {
       if (account?.provider === 'google') {
         const email = profile?.email || ''
-        if (!email.endsWith('@applyft.co')) return false
+        if (!email.endsWith('@applyft.co') && !email.endsWith('@geozilla.com')) return false
       }
       return true
     },
@@ -76,12 +76,4 @@ export const authOptions: NextAuthOptions = {
     async session({ session, token }) {
       if (session.user) session.user.id = token.id as string
       session.accessToken = token.accessToken as string | undefined
-      if ((token as any).error) session.error = (token as any).error as string
-      return session
-    },
-  },
-  pages: {
-    signIn: '/',
-    error: '/auth/error',
-  },
-}
+      if ((token as any).error) session.error = (token as any).error as str
