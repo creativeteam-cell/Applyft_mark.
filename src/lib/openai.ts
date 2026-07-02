@@ -1,6 +1,10 @@
 import OpenAI from 'openai'
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+let _openai: OpenAI | null = null
+function getOpenAI() {
+  if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  return _openai
+}
 
 interface AppInfo {
   code: string
@@ -55,7 +59,7 @@ Rules:
 - Total output: 3-5 sentences max
 - Return ONLY the prompt, no preamble`
 
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: 'gpt-4o',
       messages: [
         { role: 'system', content: fixSystemPrompt },
@@ -157,7 +161,7 @@ Return ONLY the Gemini image generation prompt (150-200 words). No explanations,
   userMessage += '\nNow write the Gemini image generation prompt.'
   contentParts.push({ type: 'text', text: userMessage })
 
-  const response = await openai.chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: 'gpt-4o',
     messages: [
       { role: 'system', content: systemPrompt },
@@ -171,7 +175,7 @@ Return ONLY the Gemini image generation prompt (150-200 words). No explanations,
 
 // Анализатор концептов — только абстрактный визуальный подход, без боли
 export async function analyzeConcept(imageBase64: string): Promise<string> {
-  const response = await openai.chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model: 'gpt-4o',
     messages: [
       {
