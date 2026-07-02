@@ -1,10 +1,13 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useSession } from 'next-auth/react'
 import { AppCard } from './AppCard'
 import { AddAppModal } from './AddAppModal'
 import { MarketersSection } from './MarketersSection'
 import { LanguagesSection } from './LanguagesSection'
+
+const ADMIN_EMAILS = ['valerii.lemberov@applyft.co', 'viktoriia.n@applyft.co']
 
 interface App {
   code: string
@@ -54,6 +57,9 @@ function SectionHeader({ title, count, expanded, onToggle }: {
 }
 
 export function SettingsPage() {
+  const { data: session } = useSession()
+  const isAdmin = ADMIN_EMAILS.includes(session?.user?.email ?? '')
+
   const [apps, setApps] = useState<App[]>([])
   const [marketers, setMarketers] = useState<Marketer[]>([])
   const [languages, setLanguages] = useState<Language[]>([])
@@ -172,6 +178,23 @@ export function SettingsPage() {
           <LanguagesSection languages={languages} onChange={handleSaveLanguages} />
         )}
       </div>
+
+      {/* Admin panel — visible only to admins */}
+      {isAdmin && (
+        <div className="mt-10">
+          <div className="flex items-center gap-3 mb-4">
+            <span className="text-xs font-semibold uppercase tracking-widest px-2 py-0.5 rounded"
+              style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)' }}>
+              Admin only
+            </span>
+            <h2 className="text-lg font-bold">Usage &amp; Limits</h2>
+          </div>
+          <div className="rounded-xl p-8 flex items-center justify-center"
+            style={{ border: '1px dashed var(--border)', color: 'var(--text-muted)' }}>
+            <p className="text-sm">Stats coming soon...</p>
+          </div>
+        </div>
+      )}
 
       {showAdd && <AddAppModal onAdd={handleAddApp} onClose={() => setShowAdd(false)} />}
     </div>
