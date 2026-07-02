@@ -13,7 +13,9 @@ interface App {
 }
 interface Marketer { code: string; name: string }
 interface Language { code: string; name: string }
-interface UserStat { email: string; name: string; image: string; imageCount: number }
+interface UserStat { email: string; name: string; image: string; imageCount: number; limit: number }
+interface MonthEntry { fileId: string; month: string }
+interface MonthlySnapshot { month: string; savedAt: string; users: Array<{ email: string; name: string; imageCount: number }> }
 
 function colorFromString(str: string) {
   const colors = ['#4f6ef7', '#e05c8a', '#34a853', '#fbbc05', '#e8453c', '#9c27b0', '#00acc1']
@@ -52,6 +54,157 @@ function SectionHeader({ title, count, expanded, onToggle, badge }: {
         <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
       </svg>
     </button>
+  )
+}
+
+function UserStatRow({ user }: { user: UserStat }) {
+  const [limit, setLimit] = useState(user.limit ?? 0)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  async function handleSaveLimit() {
+    setSaving(true)
+    try {
+      await fetch('/api/admin/limits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: user.email, limit }),
+      })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch {}
+    setSaving(false)
+  }
+
+  return (
+    <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
+      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+      <div className="flex items-center gap-2.5 flex-1 min-w-0">
+        {user.image ? (
+          <img src={user.image} alt={user.name} className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
+        ) : (
+          <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-semibold text-white"
+            style={{ background: colorFromString(user.email) }}>
+            {initials(user.name)}
+          </div>
+        )}
+        <div className="min-w-0">
+          <div className="text-sm font-medium truncate">{user.name}</div>
+          <div className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>{user.email}</div>
+        </div>
+      </div>
+      <div className="text-right flex-shrink-0">
+        <div className="text-sm font-semibold font-mono">{user.imageCount}</div>
+        <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>images</div>
+      </div>
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        <input
+          type="number"
+          min={0}
+          value={limit}
+          onChange={e => { setLimit(parseInt(e.target.value) || 0); setSaved(false) }}
+          placeholder="∞"
+          title="Limit (0 = unlimited)"
+          className="w-16 px-2 py-1 rounded-lg text-xs font-mono text-center outline-none"
+          style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', color: 'var(--text)' }}
+        />
+        <button onClick={handleSaveLimit} disabled={saving}
+          className="text-xs px-2 py-1 rounded-lg transition-all"
+          style={{
+            background: saved ? 'rgba(52,168,83,0.15)' : 'rgba(79,110,247,0.15)',
+            color: saved ? '#34a853' : 'var(--accent)'
+          }}>
+          {saved ? '✓' : saving ? '…' : 'Save'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function MonthlyReports() {
+  const [months, setMonths] = useState<MonthEntry[]>([])
+  const [loadingList, setLoadingList] = useState(true)
+  const [selected, setSelected] = useState<MonthEntry | null>(null)
+  const [snapshot, setSnapshot] = useState<MonthlySnapshot | null>(null)
+  const [loadingSnap, setLoadingSnap] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/admin/monthly-history')
+      .then(r => r.json())
+      .then(d => setMonths(d.months || []))
+      .catch(() => {})
+      .finally(() => setLoadingList(false))
+  }, [])
+
+  async function selectMonth(entry: MonthEntry) {
+    if (selected?.fileId === entry.fileId) { setSelected(null); setSnapshot(null); return }
+    setSelected(entry)
+    setSnapshot(null)
+    setLoadingSnap(true)
+    const res = await fetch(`/api/admin/monthly-history?fileId=${entry.fileId}`)
+    const data = await res.json()
+    setSnapshot(data)
+    setLoadingSnap(false)
+  }
+
+  function formatMonth(m: string) {
+    const [y, mo] = m.split('-')
+    const date = new Date(Number(y), Number(mo) - 1)
+    return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  }
+
+  if (loadingList) return <div className="text-sm px-2" style={{ color: 'var(--text-muted)' }}>Loading...</div>
+  if (months.length === 0) return <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No monthly reports yet. Reports are saved automatically at the start of each new month.</p>
+
+  return (
+    <div className="flex flex-col gap-2">
+      {months.map(entry => (
+        <div key={entry.fileId}>
+          <button
+            onClick={() => selectMonth(entry)}
+            className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all text-left"
+            style={{ background: selected?.fileId === entry.fileId ? 'rgba(79,110,247,0.1)' : 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+            <span className="text-sm font-medium">{formatMonth(entry.month)}</span>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"
+              className={`transition-transform ${selected?.fileId === entry.fileId ? 'rotate-180' : ''}`}
+              style={{ color: 'var(--text-muted)' }}>
+              <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          </button>
+          {selected?.fileId === entry.fileId && (
+            <div className="mt-1 ml-1 rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+              {loadingSnap ? (
+                <div className="px-4 py-3 text-sm" style={{ color: 'var(--text-muted)' }}>Loading...</div>
+              ) : snapshot ? (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border)' }}>
+                      <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>User</th>
+                      <th className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Images</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {snapshot.users.sort((a, b) => b.imageCount - a.imageCount).map((u, i) => (
+                      <tr key={u.email} style={{ borderTop: i > 0 ? '1px solid var(--border)' : undefined }}>
+                        <td className="px-4 py-2.5">
+                          <div className="font-medium">{u.name}</div>
+                          <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{u.email}</div>
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono font-semibold">{u.imageCount}</td>
+                      </tr>
+                    ))}
+                    <tr style={{ borderTop: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
+                      <td className="px-4 py-2 text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>Total</td>
+                      <td className="px-4 py-2 text-right font-mono font-semibold text-xs">{snapshot.users.reduce((s, u) => s + u.imageCount, 0)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              ) : null}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -163,31 +316,20 @@ function AdminPanel({ currentEmail }: { currentEmail: string }) {
         ) : (
           <div className="flex flex-col gap-2">
             {stats.map(u => (
-              <div key={u.email} className="flex items-center justify-between px-3 py-2.5 rounded-xl"
-                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
-                <div className="flex items-center gap-2.5">
-                  {u.image ? (
-                    <img src={u.image} alt={u.name} className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
-                  ) : (
-                    <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-semibold text-white"
-                      style={{ background: colorFromString(u.email) }}>
-                      {initials(u.name)}
-                    </div>
-                  )}
-                  <div>
-                    <div className="text-sm font-medium">{u.name}</div>
-                    <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{u.email}</div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm font-semibold font-mono">{u.imageCount}</div>
-                  <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>images</div>
-                </div>
-              </div>
+              <UserStatRow key={u.email} user={u} />
             ))}
           </div>
         )}
       </div>
+
+      {/* Monthly Reports */}
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>
+          Monthly Reports
+        </div>
+        <MonthlyReports />
+      </div>
+
     </div>
   )
 }

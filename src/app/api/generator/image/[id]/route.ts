@@ -32,3 +32,20 @@ export async function GET(
     return NextResponse.json({ error: e.message }, { status: 500 })
   }
 }
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const session = await getServerSession(authOptions)
+  if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  try {
+    const drive = getDriveClient()
+    await (drive.files.delete as any)({ fileId: params.id, supportsAllDrives: true })
+    return NextResponse.json({ success: true })
+  } catch (e: any) {
+    console.error('[generator/image/delete]', e)
+    return NextResponse.json({ error: e.message }, { status: 500 })
+  }
+}

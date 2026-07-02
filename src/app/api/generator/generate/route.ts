@@ -5,7 +5,7 @@ import { authOptions } from '@/lib/auth'
 import { generateImage, recomposeImage } from '@/lib/imagen'
 import { getDriveClient } from '@/lib/googleDrive'
 import { updateQueue } from '@/lib/queue'
-import { incrementImageCount } from '@/lib/adminStats'
+import { incrementImageCount, checkLimitExceeded } from '@/lib/adminStats'
 import OpenAI, { toFile } from 'openai'
 
 export const maxDuration = 120
@@ -192,6 +192,16 @@ export async function POST(req: NextRequest) {
     } catch (e: any) {
       console.error('[generator/recompose]', e)
       return NextResponse.json({ error: e.message }, { status: 500 })
+    }
+  }
+
+  // Check generation limit
+  if (session.user?.email) {
+    const exceeded = await checkLimitExceeded(session.user.email)
+    if (exceeded) {
+      return NextResponse.json({
+        error: 'Generation limit reached. Please contact your administrator.',
+      }, { status: 429 })
     }
   }
 

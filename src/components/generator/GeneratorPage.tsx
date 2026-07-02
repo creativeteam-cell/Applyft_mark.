@@ -521,6 +521,21 @@ function ImageCardModal({ item, onClose, onGenerated }: {
     link.click()
   }
 
+  const [deleting, setDeleting] = useState(false)
+  async function handleDelete() {
+    if (!confirm('Delete this image from Google Drive?')) return
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/generator/image/${item.id}`, { method: 'DELETE' })
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || 'Delete failed') }
+      onGenerated()
+      onClose()
+    } catch (e: any) {
+      setError(e.message)
+    }
+    setDeleting(false)
+  }
+
   function handleBackdrop(e: React.MouseEvent) {
     if (e.target === e.currentTarget) onClose()
   }
@@ -673,6 +688,21 @@ function ImageCardModal({ item, onClose, onGenerated }: {
                 <line x1="12" y1="15" x2="12" y2="3"/>
               </svg>
               Download
+            </button>
+            <button onClick={handleDelete} disabled={deleting}
+              className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-all"
+              style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171' }}
+              title="Delete from Google Drive">
+              {deleting ? (
+                <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                  <path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                </svg>
+              )}
             </button>
           </div>
         </div>
