@@ -5,6 +5,7 @@ import { authOptions } from '@/lib/auth'
 import { generateImage, recomposeImage } from '@/lib/imagen'
 import { getDriveClient } from '@/lib/googleDrive'
 import { updateQueue } from '@/lib/queue'
+import { incrementImageCount } from '@/lib/adminStats'
 import OpenAI, { toFile } from 'openai'
 
 export const maxDuration = 120
@@ -269,6 +270,11 @@ Rules:
       webViewLink = saved.webViewLink
     } catch (driveErr: any) {
       console.warn('[generator] Drive save failed:', driveErr.message)
+    }
+
+    // Increment persistent generation counter
+    if (session.user?.email) {
+      incrementImageCount(session.user.email).catch(() => {})
     }
 
     return NextResponse.json({ success: true, webViewLink })
