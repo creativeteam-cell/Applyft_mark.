@@ -127,6 +127,24 @@ async function fetchDriveFileAsBase64(fileId: string): Promise<string> {
   return `data:${contentType};base64,${buf.toString('base64')}`
 }
 
+function friendlyError(msg: string): { message: string; status: number } {
+  if (msg === 'CONTENT_FILTER')
+    return { message: 'The prompt was flagged by the content filter. Try rephrasing — avoid explicit, violent, or real-person references.', status: 422 }
+  if (msg === 'PROMPT_TOO_LONG')
+    return { message: 'Your prompt is too long. Try shortening it or splitting it into smaller parts.', status: 422 }
+  if (msg === 'BLOCKED_WORD')
+    return { message: 'Your prompt contains a blocked word or phrase. Try rephrasing.', status: 422 }
+  if (msg === 'RECITATION')
+    return { message: 'The request was blocked due to copyright concerns. Try a more original description.', status: 422 }
+  if (msg === 'RATE_LIMIT' || msg.includes('rate limit') || msg.includes('RATE_LIMIT'))
+    return { message: 'Servers are busy right now. Please try again in a few seconds.', status: 429 }
+  if (msg === 'TIMEOUT' || msg.includes('timed out') || msg.includes('TIMEOUT'))
+    return { message: 'Generation timed out — the server is under heavy load. Please try again.', status: 504 }
+  if (msg.includes('IMAGE_SAFETY') || msg.includes('No image in response'))
+    return { message: 'The prompt was flagged by the content filter. Try rephrasing your request.', status: 422 }
+  return { message: `Generation failed: ${msg}`, status: 500 }
+}
+
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -229,16 +247,8 @@ Rules:
         } catch (genErr: any) {
           console.error('[generator] generateImage failed:', genErr.message)
           const msg = genErr.message || 'Unknown error'
-          if (msg.includes('IMAGE_SAFETY') || msg.includes('No image in response')) {
-            return NextResponse.json({ error: `Gemini blocked the request (content filter). Try rephrasing the prompt. Details: ${msg}` }, { status: 422 })
-          }
-          if (msg.includes('RATE_LIMIT') || msg.includes('rate limit')) {
-            return NextResponse.json({ error: 'Gemini is busy, please try again in a moment.' }, { status: 429 })
-          }
-          if (msg.includes('TIMEOUT') || msg.includes('timed out')) {
-            return NextResponse.json({ error: 'Generation timed out. Please try again.' }, { status: 504 })
-          }
-          return NextResponse.json({ error: `Generation failed: ${msg}` }, { status: 500 })
+          const { message, status } = friendlyError(msg)
+          return NextResponse.json({ error: message }, { status })
         }
       }
     } finally {
@@ -246,25 +256,25 @@ Rules:
     }
 
     const userToken = (session as any).accessToken
-    let fileId: string | null = null
     let webViewLink: string | null = null
-
-    if (userToken) {
+    try {
       const saved = await saveToDrive(imageBase64, {
         prompt: finalPrompt,
-        engine: engine === 'dalle' ? 'GPT' : 'Banana',
-        size,
-        userName: session.user.name || '',
-        userEmail: session.user.email || '',
-        userImage: session.user.image || '',
+        engine: engine === 'dalle' ? 'GPT' : 'Gemini',
+        size: (size as string) || '4x5',
+        userName: session.user?.name || '',
+        userEmail: session.user?.email || '',
+        userImage: session.user?.image || '',
       }, userToken)
-      fileId = saved.fileId
       webViewLink = saved.webViewLink
+    } catch (driveErr: any) {
+      console.warn('[generator] Drive save failed:', driveErr.message)
     }
 
-    return NextResponse.json({ imageBase64, fileId, webViewLink })
+    return NextResponse.json({ success: true, webViewLink })
   } catch (e: any) {
     console.error('[generator/generate]', e)
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    const { message, status } = friendlyError(e.message || '')
+    return NextResponse.json({ error: message }, { status })
   }
 }

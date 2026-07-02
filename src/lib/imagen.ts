@@ -178,7 +178,19 @@ async function tryGenerate(prompt: string, referenceBase64?: string, logoBase64?
     const imagePart = responseParts.find((p: any) => p.inlineData)
     if (!imagePart) {
       const finishReason = data.candidates?.[0]?.finishReason || 'unknown'
-      throw new Error(`No image in response (finishReason: ${finishReason})`)
+      if (finishReason === 'IMAGE_SAFETY' || finishReason === 'SAFETY') {
+        throw new Error('CONTENT_FILTER')
+      }
+      if (finishReason === 'MAX_TOKENS') {
+        throw new Error('PROMPT_TOO_LONG')
+      }
+      if (finishReason === 'BLOCKLIST') {
+        throw new Error('BLOCKED_WORD')
+      }
+      if (finishReason === 'RECITATION') {
+        throw new Error('RECITATION')
+      }
+      throw new Error(`NO_IMAGE:${finishReason}`)
     }
 
     return `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`
@@ -197,13 +209,12 @@ async function withRetry(prompt: string, referenceBase64?: string, logoBase64?: 
       const msg: string = e.message || ''
       const isTimeout = msg === 'TIMEOUT'
       const isRateLimit = msg === 'RATE_LIMIT'
-      const isImageSafety = msg.includes('IMAGE_SAFETY')
-      const isNoImage = msg.includes('No image in response')
-      const isRetryable = (isTimeout || isRateLimit || isNoImage) && !isImageSafety
+      const isHardStop = msg === 'CONTENT_FILTER' || msg === 'PROMPT_TOO_LONG' || msg === 'BLOCKED_WORD' || msg === 'RECITATION'
+      const isRetryable = (isTimeout || isRateLimit || msg.startsWith('NO_IMAGE:')) && !isHardStop
 
       if (!isRetryable || attempt === maxAttempts) {
-        if (isTimeout) throw new Error('Image generation timed out. Gemini is under heavy load, please try again in a moment.')
-        if (isRateLimit) throw new Error('Gemini is busy (rate limit). Please try again in a moment.')
+        if (isTimeout) throw new Error('TIMEOUT')
+        if (isRateLimit) throw new Error('RATE_LIMIT')
         throw e
       }
       const retryDelay = isRateLimit ? 15000 : 2000
@@ -286,7 +297,7 @@ export async function recomposeImage(imageBase64: string, targetSize: string, fi
   if (!prompt) throw new Error(`Unknown target size: ${targetSize}`)
   const hint = SIZE_HINTS[targetSize] || ''
   const fix = fixNote
-    ? `\n\nFIX INSTRUCTION — HIGHEST PRIORITY — override everything else if needed:\n${fixNote}\nApply this fix precisely and literally.`
+    ? `\n\nFIX NOTES from previous attempt: ${fixNote}`
     : ''
   return withRetry(FICTIONAL_DISCLAIMER + '\n\n' + prompt + hint + fix, imageBase64, undefined, 3, targetSize, undefined, model)
 }

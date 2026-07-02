@@ -689,8 +689,11 @@ export function GeneratorPage() {
 
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [historyLoading, setHistoryLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [nextPageToken, setNextPageToken] = useState<string | null>(null)
   const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set())
   const [selectedItem, setSelectedItem] = useState<HistoryItem | null>(null)
+  const sentinelRef = useRef<HTMLDivElement>(null)
 
   const filteredHistory = selectedEmails.size === 0
     ? history
@@ -710,9 +713,33 @@ export function GeneratorPage() {
       const res = await fetch('/api/generator/history')
       const data = await res.json()
       setHistory(data.items || [])
+      setNextPageToken(data.nextPageToken || null)
     } catch { }
     setHistoryLoading(false)
   }, [])
+
+  const loadMore = useCallback(async () => {
+    if (!nextPageToken || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const res = await fetch(`/api/generator/history?pageToken=${encodeURIComponent(nextPageToken)}`)
+      const data = await res.json()
+      setHistory(prev => [...prev, ...(data.items || [])])
+      setNextPageToken(data.nextPageToken || null)
+    } catch { }
+    setLoadingMore(false)
+  }, [nextPageToken, loadingMore])
+
+  // Auto-load more when sentinel div enters viewport
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) loadMore()
+    }, { threshold: 0.1 })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [loadMore])
 
   useEffect(() => { fetchHistory() }, [fetchHistory])
 
@@ -996,7 +1023,17 @@ export function GeneratorPage() {
                 </svg>
               </div>
             ) : (
-              <HistoryGrid items={filteredHistory} onSelect={setSelectedItem} />
+              <>
+                <HistoryGrid items={filteredHistory} onSelect={setSelectedItem} />
+                <div ref={sentinelRef} className="h-8 flex items-center justify-center mt-2">
+                  {loadingMore && (
+                    <svg className="animate-spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                      style={{ color: 'rgba(255,255,255,0.2)' }}>
+                      <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
+                    </svg>
+                  )}
+                </div>
+              </>
             )}
           </div>
         </div>
