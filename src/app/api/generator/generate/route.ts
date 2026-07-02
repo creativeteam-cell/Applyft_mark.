@@ -188,6 +188,10 @@ export async function POST(req: NextRequest) {
         webViewLink = saved.webViewLink
       }
 
+      if (session.user?.email) {
+        incrementImageCount(session.user.email).catch(() => {})
+      }
+
       return NextResponse.json({ imageBase64: result, fileId, webViewLink })
     } catch (e: any) {
       console.error('[generator/recompose]', e)
