@@ -973,8 +973,16 @@ export async function runLocalizationJob(
       }
 
       // Step 3: Localize each image using per-image text subset from shared dict
-      patch(folder.id, { status: 'uploading' })
+      patch(folder.id, { status: ‘uploading’ })
       emit()
+
+      // Extract size label from filename (e.g. “4x5”, “9x16”)
+      function getSizeLabel(name: string): string | null {
+        for (const key of Object.keys(SIZE_MAP)) {
+          if (name.includes(`_${key}_`) || name.includes(`_${key}.`) || name.includes(`_${key.replace(‘.’, ‘,’)}`)) return key
+        }
+        return null
+      }
 
       let totalUploaded = 0
 
@@ -985,93 +993,88 @@ export async function runLocalizationJob(
         const dict = langDicts[lang] || {}
         const existingFiles = langExistingFiles[lang] || new Map()
 
-        const dictSize = Object.keys(dict).length
-        const dictKeys = Object.keys(dict)
-        console.log(`[loc] ${folder.name} / ${lang}: dict has ${dictSize} entries: ${dictKeys.slice(0, 5).join(' | ')}`)
+        // Match by SIZE LABEL — not by exact filename
+        // If SP already has any file with “_4x5_” — skip generating 4x5 for SP
+        const existingSizes = new Set(
+          Array.from(existingFiles.keys()).map(getSizeLabel).filter(Boolean) as string[]
+        )
 
-        // Normalized dict for fuzzy lookup (handles quote/whitespace/case differences from GPT)
-        function norm(s: string) { return s.trim().replace(/\s+/g, ' ').toLowerCase().replace(/[‘’“”]/g, "'") }
+        const dictSize = Object.keys(dict).length
+        console.log(`[loc] ${folder.name} / ${lang}: dict=${dictSize}, existingSizes=[${[...existingSizes].join(‘,’)}]`)
+
+        // Normalized dict lookup (handles quote/whitespace/case drift from GPT)
+        function norm(s: string) { return s.trim().replace(/\s+/g, ‘ ‘).toLowerCase().replace(/[‘’””]/g, “’”) }
         const dictNorm = new Map<string, { translated: string; role: string }>()
         for (const [k, v] of Object.entries(dict)) dictNorm.set(norm(k), v)
-
-        function dictLookup(en: string) {
-          return dict[en] || dictNorm.get(norm(en))
-        }
+        function dictLookup(en: string) { return dict[en] || dictNorm.get(norm(en)) }
 
         let uploadedThisLang = 0
         let skippedExistsThisLang = 0
 
         for (const { img, buffer, mime, texts, roles, types, properNouns } of imageDataList) {
+          const sizeLabel = getSizeLabel(img.name)
           const newName = buildNewName(img.name, lang, cp)
 
-          // Skip if this specific file already exists in the lang folder
-          if (existingFiles.has(newName)) {
+          // Skip if this SIZE already exists in the target lang folder
+          if (sizeLabel && existingSizes.has(sizeLabel)) {
             skippedExistsThisLang++
-            patch(folder.id, { uploadInfo: `${lang}: ${img.name} — skipped (exists)` })
+            patch(folder.id, { uploadInfo: `${lang}: ${img.name} — skipped (${sizeLabel} exists)` })
             emit()
             continue
           }
 
-          // Build langPhrases: all texts that have a translation AND were actually changed
-          // - logos/watermarks: still skip (Gemini can't reliably replace them)
-          // - properNouns: DON'T skip here — if translator returned a translation, trust it
-          // - skip if en === translated (translator left it unchanged — nothing to do)
-          const SKIP_TYPES = new Set(['logo', 'watermark'])
+          // Build langPhrases: translatable texts only
+          // - Skip logos/watermarks (unreliable to replace in Gemini)
+          // - Skip proper nouns (app/brand names must NOT be translated)
+          // - Skip if en === translated (nothing to change)
+          const SKIP_TYPES = new Set([‘logo’, ‘watermark’])
           const allTextsArr = Array.from(texts)
           const langPhrases = allTextsArr
             .map(en => {
               const entry = dictLookup(en)
               if (!entry) return null
               if (SKIP_TYPES.has(types[en])) return null
-              if (entry.translated === en) return null // unchanged — nothing to replace
+              if (properNouns.has(en)) return null          // NEVER translate brand/app names
+              if (entry.translated === en) return null      // unchanged — nothing to replace
               return { en, translated: entry.translated, role: roles[en] || entry.role }
             })
             .filter((x): x is { en: string; translated: string; role: string } => x !== null)
 
-          // Verbose debug log
-          const skippedProper = allTextsArr.filter(en => properNouns.has(en))
-          const skippedNoDict = allTextsArr.filter(en => !dictLookup(en))
-          const skippedUnchanged = allTextsArr.filter(en => { const e = dictLookup(en); return e && e.translated === en })
-          console.log(`[loc] ${img.name} → ${lang}: texts=${texts.size} | inDict=${allTextsArr.filter(en => dictLookup(en)).length} | phrases=${langPhrases.length} | noDict=${skippedNoDict.length} | unchanged=${skippedUnchanged.length} | properNouns(info only)=${skippedProper.length}`)
-
-          if (langPhrases.length === 0) {
-            if (dictSize === 0) {
-              patch(folder.id, { error: `${lang}: no translations returned — GPT translator may have failed` })
-              emit()
-            } else {
-              const textSample = allTextsArr.slice(0, 3).join(' | ')
-              const dictSample = dictKeys.slice(0, 3).join(' | ')
-              console.warn(`[loc] ${img.name}: 0 phrases. Image texts: [${textSample}] | Dict keys: [${dictSample}]`)
-              patch(folder.id, { uploadInfo: `${lang}: ${img.name} — no translatable phrases (dict=${dictSize})` })
-              emit()
-            }
-            continue
-          }
+          console.log(`[loc] ${img.name} → ${lang}: texts=${texts.size} phrases=${langPhrases.length} (properNouns=${[...properNouns].length})`)
 
           try {
-            const imgAspectRatio = getAspectRatioFromName(img.name)
             let finalBuffer = buffer
-            try {
-              finalBuffer = await localizeImage(buffer, mime, lang, langPhrases, (attempt, status) => {
-                const icon = status === 'ok' ? '✓' : status === 'retry' ? '↻' : '✗'
-                patch(folder.id, { uploadInfo: `${lang}: ${img.name} — attempt ${attempt}/5 ${icon}` })
-                emit()
-              }, imgAspectRatio)
-            } catch (locErr: any) {
-              console.warn(`[loc] Localization failed for ${img.name}:`, locErr.message)
+
+            if (langPhrases.length > 0) {
+              // Run Gemini localization
+              const imgAspectRatio = getAspectRatioFromName(img.name)
+              try {
+                finalBuffer = await localizeImage(buffer, mime, lang, langPhrases, (attempt, status) => {
+                  const icon = status === ‘ok’ ? ‘✓’ : status === ‘retry’ ? ‘↻’ : ‘✗’
+                  patch(folder.id, { uploadInfo: `${lang}: ${img.name} — attempt ${attempt}/5 ${icon}` })
+                  emit()
+                }, imgAspectRatio)
+              } catch (locErr: any) {
+                console.warn(`[loc] Localization failed for ${img.name}, uploading source:`, locErr.message)
+                // Fall through — upload source image as-is
+              }
+            } else {
+              // No translatable text (only brand names / logos) — copy source image as-is
+              patch(folder.id, { uploadInfo: `${lang}: ${img.name} — copying (no translatable text)` })
+              emit()
             }
 
             const targetSize = getSizeFromName(img.name)
             if (targetSize) {
               try {
-                            finalBuffer = await resizeToTarget(finalBuffer, targetSize.width, targetSize.height)
+                finalBuffer = await resizeToTarget(finalBuffer, targetSize.width, targetSize.height)
               } catch (resizeErr: any) {
                 console.warn(`[loc] Resize failed for ${img.name}:`, resizeErr.message)
               }
             }
 
             const userAccessToken = await getAccessToken?.()
-            await uploadToDrive(finalBuffer, 'image/jpeg', newName, langFolderId, userAccessToken)
+            await uploadToDrive(finalBuffer, ‘image/jpeg’, newName, langFolderId, userAccessToken)
             uploadedThisLang++
             totalUploaded++
             patch(folder.id, { uploadInfo: `${lang}: ${img.name} ✓ (${totalUploaded} total)` })
@@ -1084,19 +1087,17 @@ export async function runLocalizationJob(
           }
         }
 
-        // Only mark lang complete if files were actually uploaded or all already existed
         const allExisted = skippedExistsThisLang === imageDataList.length
         if (uploadedThisLang > 0 || allExisted) {
           completedLangs.push(lang)
           const info = allExisted
-            ? `${lang} ✓ (all ${imageDataList.length} already existed)`
+            ? `${lang} ✓ (all sizes already exist)`
             : `${lang} ✓ (${uploadedThisLang}/${imageDataList.length} uploaded)`
           patch(folder.id, { completedLangs: [...completedLangs], uploadInfo: info })
         } else {
-          // Nothing uploaded — report as error so user knows something is wrong
           patch(folder.id, {
-            status: 'error',
-            error: `${lang}: 0 files uploaded — dict keys: ${dictKeys.slice(0, 3).join(' | ')} | allTexts: ${imageDataList.map(d => d.texts.size).join(',')}`,
+            status: ‘error’,
+            error: `${lang}: 0 files uploaded — dict=${dictSize}, check server logs`,
           })
         }
         emit()
