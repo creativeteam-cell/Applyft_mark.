@@ -756,24 +756,44 @@ export async function runLocalizationJob(
       const subfolders = await listSubfolders(folder.id)
       const existingLangFolders = new Map(subfolders.map(f => [f.name.toUpperCase(), f.id]))
 
-      // Source priority: EN folder → any other subfolder
+      // Source priority:
+      // 1. EN folder (if not targeting EN)
+      // 2. Any non-target-language subfolder
+      // 3. Any subfolder that has images (even a target-lang folder)
+      // 4. Images directly in the variant folder
       const enIsTarget = targetLanguages.map(l => l.toUpperCase()).includes('EN')
       const targetLangSet = new Set(targetLanguages.map(l => l.toUpperCase()))
-      const sourceFolder = enIsTarget
-        ? subfolders.find(f => f.name.toUpperCase() !== 'EN')
-        : subfolders.find(f => f.name.toUpperCase() === 'EN')
-          ?? subfolders.find(f => !targetLangSet.has(f.name.toUpperCase()))
-          ?? subfolders[0]
 
-      if (!sourceFolder) {
-        patch(folder.id, { status: 'error', error: 'No source folder found' })
-        emit()
-        continue
+      async function findSourceImages(): Promise<{ id: string; name: string; mimeType: string }[]> {
+        // 1. EN folder
+        if (!enIsTarget) {
+          const enFolder = subfolders.find(f => f.name.toUpperCase() === 'EN')
+          if (enFolder) {
+            const imgs = await listImages(enFolder.id)
+            if (imgs.length > 0) return imgs
+          }
+        }
+        // 2. Any non-target subfolder
+        const nonTargetFolder = enIsTarget
+          ? subfolders.find(f => f.name.toUpperCase() !== 'EN')
+          : subfolders.find(f => !targetLangSet.has(f.name.toUpperCase()))
+        if (nonTargetFolder) {
+          const imgs = await listImages(nonTargetFolder.id)
+          if (imgs.length > 0) return imgs
+        }
+        // 3. Any subfolder with images (last resort among subfolders)
+        for (const sf of subfolders) {
+          const imgs = await listImages(sf.id)
+          if (imgs.length > 0) return imgs
+        }
+        // 4. Images directly in the variant folder
+        return listImages(folder.id)
       }
 
-      const allImages = await listImages(sourceFolder.id)
+      const allImages = await findSourceImages()
+
       if (allImages.length === 0) {
-        patch(folder.id, { status: 'error', error: `No images in ${sourceFolder.name} folder` })
+        patch(folder.id, { status: 'error', error: 'No source images found' })
         emit()
         continue
       }
