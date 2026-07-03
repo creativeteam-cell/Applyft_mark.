@@ -993,7 +993,7 @@ export async function runLocalizationJob(
         // Match by SIZE LABEL — not by exact filename
         // If SP already has any file with "_4x5_" — skip generating 4x5 for SP
         const existingSizes = new Set(
-          Array.from(existingFiles.keys()).map(getSizeLabel).filter(Boolean) as string[]
+          Array.from(existingFiles.keys()).map(getSizeLabelFromName).filter(Boolean) as string[]
         )
 
         const dictSize = Object.keys(dict).length
