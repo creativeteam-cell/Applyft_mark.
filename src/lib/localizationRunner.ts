@@ -985,11 +985,19 @@ export async function runLocalizationJob(
         const dict = langDicts[lang] || {}
         const existingFiles = langExistingFiles[lang] || new Map()
 
+        // Debug: log dict size so we know if translation produced anything
+        const dictSize = Object.keys(dict).length
+        console.log(`[loc] ${folder.name} / ${lang}: dict has ${dictSize} entries, ${imageDataList.length} images to process`)
+
+        let uploadedThisLang = 0
+        let skippedExistsThisLang = 0
+
         for (const { img, buffer, mime, texts, roles, types, properNouns } of imageDataList) {
           const newName = buildNewName(img.name, lang, cp)
 
           // Skip if this specific file already exists in the lang folder
           if (existingFiles.has(newName)) {
+            skippedExistsThisLang++
             patch(folder.id, { uploadInfo: `${lang}: ${img.name} — skipped (exists)` })
             emit()
             continue
@@ -1008,10 +1016,26 @@ export async function runLocalizationJob(
               role: roles[en] || dict[en].role,
             }))
 
-          if (langPhrases.length === 0) continue
+          // Log what's happening so we can debug skips
+          console.log(`[loc] ${img.name} → ${lang}: texts=${texts.size}, dictMatches=${langPhrases.length}, dictSize=${dictSize}`)
+
+          if (langPhrases.length === 0) {
+            // If dict is empty, translation step likely failed — surface a warning
+            if (dictSize === 0) {
+              patch(folder.id, { error: `${lang}: no translations available — translation step may have failed` })
+              emit()
+            } else {
+              // Dict has translations but none match this image's texts — log phrase keys for debug
+              const textSample = Array.from(texts).slice(0, 3).join(' | ')
+              const dictSample = Object.keys(dict).slice(0, 3).join(' | ')
+              console.warn(`[loc] ${img.name}: phrase mismatch. Image texts: [${textSample}] | Dict keys: [${dictSample}]`)
+              patch(folder.id, { uploadInfo: `${lang}: ${img.name} — no translatable text` })
+              emit()
+            }
+            continue
+          }
 
           try {
-
             const imgAspectRatio = getAspectRatioFromName(img.name)
             let finalBuffer = buffer
             try {
@@ -1027,7 +1051,7 @@ export async function runLocalizationJob(
             const targetSize = getSizeFromName(img.name)
             if (targetSize) {
               try {
-                finalBuffer = await resizeToTarget(finalBuffer, targetSize.width, targetSize.height)
+                            finalBuffer = await resizeToTarget(finalBuffer, targetSize.width, targetSize.height)
               } catch (resizeErr: any) {
                 console.warn(`[loc] Resize failed for ${img.name}:`, resizeErr.message)
               }
@@ -1035,6 +1059,7 @@ export async function runLocalizationJob(
 
             const userAccessToken = await getAccessToken?.()
             await uploadToDrive(finalBuffer, 'image/jpeg', newName, langFolderId, userAccessToken)
+            uploadedThisLang++
             totalUploaded++
             patch(folder.id, { uploadInfo: `${lang}: ${img.name} ✓ (${totalUploaded} total)` })
             emit()
@@ -1046,8 +1071,21 @@ export async function runLocalizationJob(
           }
         }
 
-        completedLangs.push(lang)
-        patch(folder.id, { completedLangs: [...completedLangs], uploadInfo: `${lang} ✓ (${imageDataList.length} images)` })
+        // Only mark lang complete if files were actually uploaded or all already existed
+        const allExisted = skippedExistsThisLang === imageDataList.length
+        if (uploadedThisLang > 0 || allExisted) {
+          completedLangs.push(lang)
+          const info = allExisted
+            ? `${lang} ✓ (all ${imageDataList.length} already existed)`
+            : `${lang} ✓ (${uploadedThisLang}/${imageDataList.length} uploaded)`
+          patch(folder.id, { completedLangs: [...completedLangs], uploadInfo: info })
+        } else {
+          // Nothing uploaded — report as error so user knows something is wrong
+          patch(folder.id, {
+            status: 'error',
+            error: `${lang}: 0 files uploaded — check server logs (dict size: ${dictSize})`,
+          })
+        }
         emit()
       }
 
