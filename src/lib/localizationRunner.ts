@@ -973,13 +973,13 @@ export async function runLocalizationJob(
       }
 
       // Step 3: Localize each image using per-image text subset from shared dict
-      patch(folder.id, { status: ‘uploading’ })
+      patch(folder.id, { status: 'uploading' })
       emit()
 
-      // Extract size label from filename (e.g. “4x5”, “9x16”)
+      // Extract size label from filename (e.g. "4x5", "9x16")
       function getSizeLabel(name: string): string | null {
         for (const key of Object.keys(SIZE_MAP)) {
-          if (name.includes(`_${key}_`) || name.includes(`_${key}.`) || name.includes(`_${key.replace(‘.’, ‘,’)}`)) return key
+          if (name.includes(`_${key}_`) || name.includes(`_${key}.`) || name.includes(`_${key.replace('.', ',')}`)) return key
         }
         return null
       }
@@ -994,16 +994,16 @@ export async function runLocalizationJob(
         const existingFiles = langExistingFiles[lang] || new Map()
 
         // Match by SIZE LABEL — not by exact filename
-        // If SP already has any file with “_4x5_” — skip generating 4x5 for SP
+        // If SP already has any file with "_4x5_" — skip generating 4x5 for SP
         const existingSizes = new Set(
           Array.from(existingFiles.keys()).map(getSizeLabel).filter(Boolean) as string[]
         )
 
         const dictSize = Object.keys(dict).length
-        console.log(`[loc] ${folder.name} / ${lang}: dict=${dictSize}, existingSizes=[${[...existingSizes].join(‘,’)}]`)
+        console.log(`[loc] ${folder.name} / ${lang}: dict=${dictSize}, existingSizes=[${[...existingSizes].join(',')}]`)
 
         // Normalized dict lookup (handles quote/whitespace/case drift from GPT)
-        function norm(s: string) { return s.trim().replace(/\s+/g, ‘ ‘).toLowerCase().replace(/[‘’””]/g, “’”) }
+        function norm(s: string) { return s.trim().replace(/\s+/g, ' ').toLowerCase().replace(/[''""]/g, "'") }
         const dictNorm = new Map<string, { translated: string; role: string }>()
         for (const [k, v] of Object.entries(dict)) dictNorm.set(norm(k), v)
         function dictLookup(en: string) { return dict[en] || dictNorm.get(norm(en)) }
@@ -1027,7 +1027,7 @@ export async function runLocalizationJob(
           // - Skip logos/watermarks (unreliable to replace in Gemini)
           // - Skip proper nouns (app/brand names must NOT be translated)
           // - Skip if en === translated (nothing to change)
-          const SKIP_TYPES = new Set([‘logo’, ‘watermark’])
+          const SKIP_TYPES = new Set(['logo', 'watermark'])
           const allTextsArr = Array.from(texts)
           const langPhrases = allTextsArr
             .map(en => {
@@ -1050,7 +1050,7 @@ export async function runLocalizationJob(
               const imgAspectRatio = getAspectRatioFromName(img.name)
               try {
                 finalBuffer = await localizeImage(buffer, mime, lang, langPhrases, (attempt, status) => {
-                  const icon = status === ‘ok’ ? ‘✓’ : status === ‘retry’ ? ‘↻’ : ‘✗’
+                  const icon = status === 'ok' ? '✓' : status === 'retry' ? '↻' : '✗'
                   patch(folder.id, { uploadInfo: `${lang}: ${img.name} — attempt ${attempt}/5 ${icon}` })
                   emit()
                 }, imgAspectRatio)
@@ -1074,7 +1074,7 @@ export async function runLocalizationJob(
             }
 
             const userAccessToken = await getAccessToken?.()
-            await uploadToDrive(finalBuffer, ‘image/jpeg’, newName, langFolderId, userAccessToken)
+            await uploadToDrive(finalBuffer, 'image/jpeg', newName, langFolderId, userAccessToken)
             uploadedThisLang++
             totalUploaded++
             patch(folder.id, { uploadInfo: `${lang}: ${img.name} ✓ (${totalUploaded} total)` })
@@ -1096,7 +1096,7 @@ export async function runLocalizationJob(
           patch(folder.id, { completedLangs: [...completedLangs], uploadInfo: info })
         } else {
           patch(folder.id, {
-            status: ‘error’,
+            status: 'error',
             error: `${lang}: 0 files uploaded — dict=${dictSize}, check server logs`,
           })
         }
