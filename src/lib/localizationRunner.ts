@@ -1037,7 +1037,12 @@ export async function runLocalizationJob(
             })
             .filter((x): x is { en: string; translated: string; role: string } => x !== null)
 
-          console.log(`[loc] ${img.name} → ${lang}: texts=${texts.size} phrases=${langPhrases.length} (properNouns=${[...properNouns].length})`)
+          const debugReason = texts.size === 0
+            ? 'no texts extracted (analysis may have failed)'
+            : langPhrases.length === 0
+              ? `all ${texts.size} texts are brand names or unchanged`
+              : ''
+          console.log(`[loc] ${img.name} → ${lang}: texts=${texts.size} phrases=${langPhrases.length} (properNouns=${[...properNouns].length})${debugReason ? ' COPY: ' + debugReason : ''}`)
 
           try {
             let finalBuffer = buffer
@@ -1057,7 +1062,8 @@ export async function runLocalizationJob(
               }
             } else {
               // No translatable text (only brand names / logos) — copy source image as-is
-              patch(folder.id, { uploadInfo: `${lang}: ${img.name} — copying (no translatable text)` })
+              const copyReason = texts.size === 0 ? 'analysis returned 0 texts' : `all texts are brand names`
+              patch(folder.id, { uploadInfo: `${lang}: ${img.name} — copying (${copyReason})` })
               emit()
             }
 
