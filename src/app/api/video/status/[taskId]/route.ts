@@ -8,7 +8,7 @@ export async function GET(
   { params }: { params: { taskId: string } }
 ) {
   try {
-    const type = (req.nextUrl.searchParams.get('type') ?? 'text2video') as 'text2video' | 'image2video'
+    const type = (req.nextUrl.searchParams.get('type') ?? 'text2video') as 'text2video' | 'image2video' | 'video-extend'
     const data = await getVideoTaskStatus(type, params.taskId)
     return NextResponse.json(data)
   } catch (e: any) {
