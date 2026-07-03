@@ -798,15 +798,11 @@ export async function runLocalizationJob(
         continue
       }
 
-      patch(folder.id, { status: 'uploading', uploadInfo: `0/${allImages.length} images` })
-      emit()
-
       const completedLangs: string[] = []
 
-      // For each language: reuse existing folder or create new one
-      // Store existing files as Map<name, id> so we can download them if needed
+      // Create target lang folders and list existing files
       const langFolderMap: Record<string, string> = {}
-      const langExistingFiles: Record<string, Map<string, string>> = {} // name → id
+      const langExistingFiles: Record<string, Map<string, string>> = {}
 
       for (const lang of targetLanguages) {
         const existingFolderId = existingLangFolders.get(lang.toUpperCase())
@@ -820,97 +816,113 @@ export async function runLocalizationJob(
         }
       }
 
-      // Pre-check: compute missing files per lang
-      const langMissing: Record<string, typeof allImages> = {}
+      // Helper: extract size label from filename
+      function getSizeLabelFromName(name: string): string | null {
+        for (const key of Object.keys(SIZE_MAP)) {
+          if (name.includes(`_${key}_`) || name.includes(`_${key}.`) || name.includes(`_${key.replace('.', ',')}`)) return key
+        }
+        return null
+      }
+
+      // Compute missing sizes per lang (match by size label, not filename)
+      const allSourceSizes = allImages.map(img => getSizeLabelFromName(img.name)).filter(Boolean) as string[]
+      const langMissingSizes: Record<string, string[]> = {}
       let anyMissing = false
+
       for (const lang of targetLanguages) {
-        const existing = langExistingFiles[lang]
-        const missing = allImages.filter(img => !existing.has(buildNewName(img.name, lang, cp)))
-        langMissing[lang] = missing
+        const existingSizes = new Set(
+          Array.from(langExistingFiles[lang].keys()).map(getSizeLabelFromName).filter(Boolean) as string[]
+        )
+        const missing = allSourceSizes.filter(s => !existingSizes.has(s))
+        langMissingSizes[lang] = missing
         if (missing.length > 0) anyMissing = true
       }
 
       if (!anyMissing) {
-        patch(folder.id, { status: 'done', uploadInfo: 'All files already exist' })
+        patch(folder.id, { status: 'done', uploadInfo: 'All sizes already present' })
         emit()
         continue
       }
 
-      // Separate langs by strategy:
-      // - needFresh: no existing files → full analyze+translate
-      // - canReuse: has some existing → OCR-extract translations from existing image
-      const langsNeedFresh = targetLanguages.filter(l => langMissing[l].length > 0 && langExistingFiles[l].size === 0)
-      const langsCanReuse = targetLanguages.filter(l => langMissing[l].length > 0 && langExistingFiles[l].size > 0)
-
-      // Step 1: Analyze all source images (needed for needFresh langs + for per-image phrase filtering)
+      // === STEP 1: Download all source images ===
       type ImageData = {
         img: typeof allImages[0]
         buffer: Buffer
         mime: string
         texts: Set<string>
         roles: Record<string, string>
-        types: Record<string, string>       // text → type (logo, watermark, headline, etc.)
-        properNouns: Set<string>            // texts that are brand/app names — never translate
+        types: Record<string, string>
+        properNouns: Set<string>
       }
 
-      const imageDataList: ImageData[] = []
-      const allTextsMap = new Map<string, { text: string; role: string }>()
-
-      patch(folder.id, { status: 'analyzing', uploadInfo: `Analyzing ${allImages.length} images…` })
+      patch(folder.id, { status: 'analyzing', uploadInfo: 'Downloading source images...' })
       emit()
 
+      const imageDataList: ImageData[] = []
       for (const img of allImages) {
         const buffer = await downloadFileAsBuffer(img.id)
         const mime = img.mimeType || 'image/jpeg'
-        const base64 = `data:${mime};base64,${buffer.toString('base64')}`
+        imageDataList.push({ img, buffer, mime, texts: new Set(), roles: {}, types: {}, properNouns: new Set() })
+      }
 
-        patch(folder.id, { uploadInfo: `Analyzing ${img.name}…` })
+      // === STEP 2: Analyze ONLY the 9x16 image (most text visible) ===
+      // One analysis -> one translation dict -> applied to all sizes
+      const repImage = imageDataList.find(d => getSizeLabelFromName(d.img.name) === '9x16')
+        ?? imageDataList.find(d => getSizeLabelFromName(d.img.name) === '4x5')
+        ?? imageDataList[0]
+
+      const allTextsMap = new Map<string, { text: string; role: string }>()
+      const globalProperNouns = new Set<string>()
+      const globalTypes: Record<string, string> = {}
+      const globalRoles: Record<string, string> = {}
+
+      if (repImage) {
+        patch(folder.id, { uploadInfo: `Analyzing ${repImage.img.name}...` })
         emit()
-
-        let analysis: any
         try {
           await updateQueue('openai', 1)
+          let analysis: any
           try {
+            const base64 = `data:${repImage.mime};base64,${repImage.buffer.toString('base64')}`
             analysis = await analyzeImage(base64)
           } finally {
             await updateQueue('openai', -1)
           }
-        } catch (err: any) {
-          console.warn(`[loc] analyzeImage failed for ${img.name}:`, err.message)
-          imageDataList.push({ img, buffer, mime, texts: new Set(), roles: {}, types: {}, properNouns: new Set() })
-          continue
-        }
-
-        const texts = new Set<string>()
-        const roles: Record<string, string> = {}
-        const types: Record<string, string> = {}
-        const properNouns = new Set<string>()
-
-        // Collect proper nouns (app names, brand names) — these must never be translated
-        const UNTRANSLATABLE_KINDS = new Set(['app_name', 'brand_name', 'product_name', 'platform_name'])
-        for (const pn of (analysis?.proper_nouns || [])) {
-          if (UNTRANSLATABLE_KINDS.has(pn.kind)) properNouns.add(pn.text)
-        }
-
-        for (const t of (analysis?.texts || [])) {
-          texts.add(t.text)
-          roles[t.text] = t.role_in_composition || t.type || ''
-          types[t.text] = t.type || ''
-          if (!allTextsMap.has(t.text)) {
-            allTextsMap.set(t.text, { text: t.text, role: roles[t.text] })
+          const UNTRANSLATABLE_KINDS = new Set(['app_name', 'brand_name', 'product_name', 'platform_name'])
+          for (const pn of (analysis?.proper_nouns || [])) {
+            if (UNTRANSLATABLE_KINDS.has(pn.kind)) globalProperNouns.add(pn.text)
           }
+          for (const t of (analysis?.texts || [])) {
+            allTextsMap.set(t.text, { text: t.text, role: t.role_in_composition || t.type || '' })
+            globalRoles[t.text] = t.role_in_composition || t.type || ''
+            globalTypes[t.text] = t.type || ''
+          }
+        } catch (err: any) {
+          console.warn(`[loc] analyzeImage failed:`, err.message)
         }
-        imageDataList.push({ img, buffer, mime, texts, roles, types, properNouns })
       }
 
-      // Step 2: Build langDicts
+      // Apply extracted texts/properNouns to ALL images (same translation for all sizes)
+      for (const imgData of imageDataList) {
+        for (const [text] of allTextsMap.entries()) {
+          imgData.texts.add(text)
+          imgData.roles[text] = globalRoles[text] || ''
+          imgData.types[text] = globalTypes[text] || ''
+        }
+        for (const pn of globalProperNouns) imgData.properNouns.add(pn)
+      }
+
+      // === STEP 3: Build translation dict per lang ===
       const langDicts: Record<string, Record<string, { translated: string; role: string }>> = {}
 
-      // 2a: Fresh translate for langs with no existing files
-      if (langsNeedFresh.length > 0) {
-        patch(folder.id, { status: 'translating', uploadInfo: `Translating for ${langsNeedFresh.join(', ')}…` })
-        emit()
+      // No existing files -> fresh GPT translate from 9x16 analysis
+      const langsNeedFresh = targetLanguages.filter(l => langMissingSizes[l].length > 0 && langExistingFiles[l].size === 0)
+      // Has some existing files -> OCR-extract translation from existing translated image
+      const langsCanReuse = targetLanguages.filter(l => langMissingSizes[l].length > 0 && langExistingFiles[l].size > 0)
 
+      if (langsNeedFresh.length > 0) {
+        patch(folder.id, { status: 'translating', uploadInfo: `Translating for ${langsNeedFresh.join(', ')}...` })
+        emit()
         const mergedAnalysis = { texts: Array.from(allTextsMap.values()).map(t => ({ text: t.text, role_in_composition: t.role })) }
         try {
           const translationResult = await translateTexts(mergedAnalysis, langsNeedFresh)
@@ -928,61 +940,46 @@ export async function runLocalizationJob(
         }
       }
 
-      // 2b: Reuse translations via OCR from existing translated images
       for (const lang of langsCanReuse) {
-        patch(folder.id, { status: 'analyzing', uploadInfo: `Extracting existing ${lang} translations…` })
+        patch(folder.id, { status: 'analyzing', uploadInfo: `Extracting existing ${lang} translations...` })
         emit()
-
-        // Pick the first existing translated file and its source counterpart
+        // Prefer 9x16 translated image for OCR (most text visible)
         const existingMap = langExistingFiles[lang]
-        const [existingName, existingId] = Array.from(existingMap.entries())[0]
-
-        // Find corresponding source image
-        const sourceImg = imageDataList.find(d => buildNewName(d.img.name, lang, cp) === existingName)
-
-        if (sourceImg) {
+        const prefer9x16 = Array.from(existingMap.entries()).find(([name]) => getSizeLabelFromName(name) === '9x16')
+        const [existingName, existingId] = prefer9x16 ?? Array.from(existingMap.entries())[0]
+        // Find the matching source image by size
+        const sourceImg = imageDataList.find(d => getSizeLabelFromName(d.img.name) === getSizeLabelFromName(existingName))
+          ?? imageDataList[0]
+        try {
+          const sourceDataUrl = `data:${sourceImg.mime};base64,${sourceImg.buffer.toString('base64')}`
+          const translatedBuffer = await downloadFileAsBuffer(existingId)
+          const translatedDataUrl = `data:image/jpeg;base64,${translatedBuffer.toString('base64')}`
+          const pairs = await extractTranslationsFromExisting(sourceDataUrl, translatedDataUrl, lang)
+          langDicts[lang] = {}
+          for (const p of pairs) {
+            if (p.en && p.translated) {
+              langDicts[lang][p.en] = { translated: p.translated, role: allTextsMap.get(p.en)?.role || '' }
+            }
+          }
+          console.log(`[loc] Reused ${pairs.length} translations for ${lang} from ${existingName}`)
+        } catch (err: any) {
+          console.warn(`[loc] OCR reuse failed for ${lang}, falling back to fresh translate:`, err.message)
           try {
-            const sourceMime = sourceImg.mime
-            const sourceDataUrl = `data:${sourceMime};base64,${sourceImg.buffer.toString('base64')}`
-            const translatedBuffer = await downloadFileAsBuffer(existingId)
-            const translatedDataUrl = `data:image/jpeg;base64,${translatedBuffer.toString('base64')}`
-
-            const pairs = await extractTranslationsFromExisting(sourceDataUrl, translatedDataUrl, lang)
-            langDicts[lang] = {}
-            for (const p of pairs) {
-              if (p.en && p.translated) {
-                langDicts[lang][p.en] = { translated: p.translated, role: allTextsMap.get(p.en)?.role || '' }
+            const mergedAnalysis = { texts: Array.from(allTextsMap.values()).map(t => ({ text: t.text, role_in_composition: t.role })) }
+            const translationResult = await translateTexts(mergedAnalysis, [lang])
+            for (const t of (translationResult.translations || [])) {
+              langDicts[t.language] = {}
+              for (const p of t.phrases) {
+                langDicts[t.language][p.en] = { translated: p.translated, role: allTextsMap.get(p.en)?.role || '' }
               }
             }
-            console.log(`[loc] Reused ${pairs.length} translations for ${lang} from existing image`)
-          } catch (err: any) {
-            console.warn(`[loc] OCR reuse failed for ${lang}, falling back to fresh translate:`, err.message)
-            // Fallback: fresh translate for this lang
-            try {
-              const mergedAnalysis = { texts: Array.from(allTextsMap.values()).map(t => ({ text: t.text, role_in_composition: t.role })) }
-              const translationResult = await translateTexts(mergedAnalysis, [lang])
-              for (const t of (translationResult.translations || [])) {
-                langDicts[t.language] = {}
-                for (const p of t.phrases) {
-                  langDicts[t.language][p.en] = { translated: p.translated, role: allTextsMap.get(p.en)?.role || '' }
-                }
-              }
-            } catch {}
-          }
+          } catch {}
         }
       }
 
       // Step 3: Localize each image using per-image text subset from shared dict
       patch(folder.id, { status: 'uploading' })
       emit()
-
-      // Extract size label from filename (e.g. "4x5", "9x16")
-      function getSizeLabel(name: string): string | null {
-        for (const key of Object.keys(SIZE_MAP)) {
-          if (name.includes(`_${key}_`) || name.includes(`_${key}.`) || name.includes(`_${key.replace('.', ',')}`)) return key
-        }
-        return null
-      }
 
       let totalUploaded = 0
 
@@ -1012,11 +1009,11 @@ export async function runLocalizationJob(
         let skippedExistsThisLang = 0
 
         for (const { img, buffer, mime, texts, roles, types, properNouns } of imageDataList) {
-          const sizeLabel = getSizeLabel(img.name)
+          const sizeLabel = getSizeLabelFromName(img.name)
           const newName = buildNewName(img.name, lang, cp)
 
-          // Skip if this SIZE already exists in the target lang folder
-          if (sizeLabel && existingSizes.has(sizeLabel)) {
+          // Skip if this size is not in the missing list for this lang
+          if (sizeLabel && !langMissingSizes[lang].includes(sizeLabel)) {
             skippedExistsThisLang++
             patch(folder.id, { uploadInfo: `${lang}: ${img.name} — skipped (${sizeLabel} exists)` })
             emit()
