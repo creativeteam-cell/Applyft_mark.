@@ -35,9 +35,22 @@ Copy every headline, subheadline, body copy, and CTA button WORD FOR WORD, CHARA
 If the headline says "Your J is on a Liar List." - it must say exactly "Your J is on a Liar List." in the output. Nothing more. Nothing less.
 Adding even one extra word is a critical failure.`
 
+const VISUAL_FIDELITY_RULE = `
+CRITICAL - VISUAL FIDELITY — DO NOT CHANGE ANYTHING EXCEPT LAYOUT:
+You are a LAYOUT TOOL, not a designer. Your ONLY job is to reposition elements to fit the new canvas. You must NOT:
+- Change any colors (button color, text color, background color, gradient, overlay)
+- Change any fonts, font weights, font sizes, or letter spacing
+- Change border radius, shadows, or any UI styling
+- Add, remove, or redesign any visual element
+- "Improve" or "modernize" the design in any way
+Every color, style, and visual property must be pixel-perfect identical to the reference image.
+If the CTA button is orange — it must remain exactly that same orange. If the background is beige — it stays beige.
+Changing colors or styles is a critical failure.`
+
 const RECOMPOSE_PROMPTS: Record<string, string> = {
   '1x1': `Recompose this exact ad creative for a square 1:1 aspect ratio.
 ${TEXT_RULE}
+${VISUAL_FIDELITY_RULE}
 
 EXPANSION RULE — MOST IMPORTANT:
 - EXPAND the background/environment outward to fill the new canvas — do NOT crop or cut off any existing visual element
@@ -57,6 +70,7 @@ SAFE ZONE — NON-NEGOTIABLE:
 
   '9x16': `Recompose this exact ad creative for a tall vertical 9:16 aspect ratio.
 ${TEXT_RULE}
+${VISUAL_FIDELITY_RULE}
 
 EXPANSION RULE — MOST IMPORTANT:
 - EXPAND the background/environment outward to fill the new canvas — do NOT crop or cut off any existing visual element
@@ -64,18 +78,26 @@ EXPANSION RULE — MOST IMPORTANT:
 - To fill the extra vertical space: naturally extend the background scene above and/or below (sky, floor, environment)
 - Think of it as "outpainting" — you are adding more canvas around the existing content, not zooming in
 
+CRITICAL VERTICAL LAYOUT — 9:16 SPECIFIC — THIS IS THE MOST IMPORTANT RULE:
+- This format is shown on MOBILE PHONE screens. Social platforms (Instagram Stories, TikTok, Reels, Facebook) permanently display UI chrome (profile name, like/comment/share buttons, caption text) over the BOTTOM 35% of the screen
+- ALL headlines, subheadlines, body copy, CTA buttons, logos, and key visual elements MUST be placed in the TOP 55% of the frame
+- The BOTTOM 40% of the frame is a DEAD ZONE — it must contain ONLY background/environment (sky, blur, scenery). NEVER place any text, CTA, logo, or interactive element there
+- If the original has text at the bottom — MOVE IT TO THE TOP HALF. This is mandatory, not optional
+- Correct layout: visual scene fills the full frame as background, all text and CTAs anchored to the upper portion (top 55%)
+
 LAYOUT RULES:
 - Keep the main subject at roughly the same scale as the original
-- Stack elements naturally: visual scene fills the frame, text and CTA positioned with breathing room
 - Maintain the same overall mood, style, colors, typography, and composition hierarchy
 
 SAFE ZONE — NON-NEGOTIABLE:
-- Every text element, button, and UI element MUST have at least 160px clearance from EVERY edge (top, bottom, left, right)
-- If in doubt, push elements further toward the center — never toward any edge
+- Every text element, button, and UI element MUST have at least 160px clearance from TOP, LEFT, and RIGHT edges
+- Every text element, button, and UI element MUST have at least 400px clearance from the BOTTOM edge (platform UI zone)
+- If in doubt, push elements higher — never toward the bottom
 - Nothing may touch or cross the safe zone boundary — not even partially`,
 
   '1.91x1': `Recompose this exact ad creative for a wide horizontal 1.91:1 aspect ratio.
 ${TEXT_RULE}
+${VISUAL_FIDELITY_RULE}
 
 EXPANSION RULE — MOST IMPORTANT:
 - EXPAND the background/environment outward to fill the new canvas — do NOT crop or cut off any existing visual element
@@ -237,13 +259,6 @@ const NO_LOGO_RULE = '\n\n[CRITICAL - LOGOS]: Do NOT generate, draw, or reproduc
 const TEXT_FROM_REF_RULE = '\n\n[CRITICAL - TEXT]: If a reference image is provided, copy ALL visible text from it EXACTLY — same words, same spelling, same capitalisation, same punctuation, same line breaks. Do NOT rewrite, translate, expand, or invent any text. Visually you may re-style the text (font, color, size) to match the new composition, but the wording must be identical to the reference. Only change the wording if the generation prompt below explicitly requests it.'
 
 // Per-size aspect ratio hints + crop-aware safe-zone instructions.
-// Sharp resizes with `fit: 'cover'`. For sizes where Gemini's native ratio differs
-// from the target, some pixels ARE cropped:
-//   4x5    → Gemini 4:5,  target 4:5   → 0 px crop  → safe zone ≥ 34 px from all edges
-//   1x1    → Gemini 1:1,  target 1:1   → 0 px crop  → safe zone ≥ 34 px from all edges
-//   9x16   → Gemini 9:16, target 9:16  → 0 px crop  → safe zone ≥ 34 px from all edges
-//   1.91x1 → Gemini 16:9 (1.78:1), target 1.91:1 → ~40 px cropped top & bottom
-//            → safe zone ≥ 74 px from top/bottom, ≥ 34 px from left/right
 const SIZE_HINTS: Record<string, string> = {
   '4x5':
     '\n\n[CRITICAL - OUTPUT FORMAT]: PORTRAIT image, aspect ratio 4:5 (4 wide by 5 tall). ' +
@@ -257,8 +272,10 @@ const SIZE_HINTS: Record<string, string> = {
 
   '9x16':
     '\n\n[CRITICAL - OUTPUT FORMAT]: TALL PORTRAIT image, aspect ratio 9:16 (phone screen). ' +
-    'SAFE ZONE: ALL text, buttons, logos, and UI elements MUST be at least 100 pixels from EVERY edge. ' +
-    'Elements near edges risk being cut off — push them toward the center.',
+    'VERTICAL POSITIONING — MANDATORY: ALL text, headlines, CTAs, and key elements MUST be in the TOP 55% of the frame. ' +
+    'The bottom 40% is a NO-CONTENT zone (reserved for platform UI chrome on mobile) — background only there. ' +
+    'SAFE ZONE: at least 100px from top, left, and right edges; at least 400px from the bottom edge. ' +
+    'If any element is near the bottom — move it upward immediately. No exceptions.',
 
   '1.91x1':
     '\n\n[CRITICAL - OUTPUT FORMAT]: LANDSCAPE image, aspect ratio 16:9 (wide horizontal). ' +
@@ -297,7 +314,7 @@ export async function recomposeImage(imageBase64: string, targetSize: string, fi
   if (!prompt) throw new Error(`Unknown target size: ${targetSize}`)
   const hint = SIZE_HINTS[targetSize] || ''
   const fix = fixNote
-    ? `\n\nFIX NOTES from previous attempt: ${fixNote}`
+    ? `\n\nFIX NOTES from previous attempt — FOLLOW THESE EXACTLY: ${fixNote}`
     : ''
   return withRetry(FICTIONAL_DISCLAIMER + '\n\n' + prompt + hint + fix, imageBase64, undefined, 3, targetSize, undefined, model)
 }

@@ -155,7 +155,7 @@ export async function POST(req: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { prompt, engine, modelId, size, referenceBase64: referenceBase64Body, referenceFileId, aiPrompt, recomposeFileId, recomposeBase64, targetSize } = body
+  const { prompt, engine, modelId, size, referenceBase64: referenceBase64Body, referenceFileId, aiPrompt, recomposeFileId, recomposeBase64, targetSize, fixNote } = body
 
   // Check generation limit (applies to all generation modes)
   if (session.user?.email) {
@@ -184,7 +184,7 @@ export async function POST(req: NextRequest) {
       const imageBase64 = recomposeFileId
         ? await fetchDriveFileAsBase64(recomposeFileId)
         : recomposeBase64 as string
-      const result = await recomposeImage(imageBase64, sizeCode)
+      const result = await recomposeImage(imageBase64, sizeCode, fixNote as string | undefined)
 
       const userToken = (session as any).accessToken
       let fileId: string | null = null

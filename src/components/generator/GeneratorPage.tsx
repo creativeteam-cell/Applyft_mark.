@@ -483,6 +483,7 @@ function ImageCardModal({ item, onClose, onGenerated }: {
     setError(null)
     try {
       if (!newPrompt.trim()) {
+        // Pure recompose — no instructions
         const res = await fetch('/api/generator/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -492,19 +493,18 @@ function ImageCardModal({ item, onClose, onGenerated }: {
         if (!res.ok) throw new Error(data.error || 'Recompose failed')
         onGenerated(); onClose()
       } else {
+        // Recompose WITH fix notes — treat user text as layout/style instructions, not a new prompt
         const res = await fetch('/api/generator/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            prompt: newPrompt.trim(),
-            engine: currentModel.provider === 'openai' ? 'dalle' : 'gemini',
-            modelId: selectedModelId,
-            size: selectedSize,
-            referenceFileId: item.id,
+            recomposeFileId: item.id,
+            targetSize: selectedSize,
+            fixNote: newPrompt.trim(),
           }),
         })
         const data = await res.json()
-        if (!res.ok) throw new Error(data.error || 'Generation failed')
+        if (!res.ok) throw new Error(data.error || 'Recompose failed')
         onGenerated(); onClose()
       }
     } catch (e: any) {

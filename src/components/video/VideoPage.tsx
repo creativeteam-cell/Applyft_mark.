@@ -322,6 +322,7 @@ function ImagePickerModal({ onSelect, onClose }: { onSelect: (b64: string) => vo
 
 function VideoCard({ item, onSelect, featured = false }: { item: VideoItem; onSelect: () => void; featured?: boolean }) {
   const [thumbErr, setThumbErr] = useState(false)
+  const thumbSrc = `/api/video/thumb/${item.id}`
   return (
     <div onClick={onSelect}
       className="relative rounded-xl overflow-hidden cursor-pointer group"
@@ -330,8 +331,8 @@ function VideoCard({ item, onSelect, featured = false }: { item: VideoItem; onSe
         aspectRatio: featured ? '21/9' : '16/10',
         gridColumn: featured ? 'span 2' : undefined,
       }}>
-      {item.thumbnailLink && !thumbErr ? (
-        <img src={item.thumbnailLink} alt={item.prompt} className="w-full h-full object-cover"
+      {!thumbErr ? (
+        <img src={thumbSrc} alt={item.prompt} className="w-full h-full object-cover"
           onError={() => setThumbErr(true)} />
       ) : (
         <div className="w-full h-full flex items-center justify-center"
