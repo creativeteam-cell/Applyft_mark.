@@ -1,22 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { getDriveClient } from '@/lib/googleDrive'
-import { Readable } from 'stream'
 
 const VIDEO_FOLDER_ID = process.env.VIDEO_DRIVE_FOLDER_ID!
-
 export const maxDuration = 60
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  const userToken = (session as any).accessToken
+  if (!userToken) return NextResponse.json({ error: 'No access token' }, { status: 401 })
+
   const { videoUrl, klingVideoId, prompt, model, duration, aspectRatio, sound, inputType } = await req.json()
   if (!videoUrl) return NextResponse.json({ error: 'videoUrl required' }, { status: 400 })
 
   try {
-    // Download video from Kling CDN
     const videoRes = await fetch(videoUrl)
     if (!videoRes.ok) throw new Error(`Failed to fetch video: ${videoRes.status}`)
     const videoBuffer = Buffer.from(await videoRes.arrayBuffer())
@@ -29,7 +28,7 @@ export async function POST(req: NextRequest) {
       prompt: prompt || '',
       model: model || 'kling-v3',
       duration: duration || '5',
-      aspectRatio: aspectRatio || '16:9',
+      aspectRatio: aspectRatio || '',
       sound: sound || 'off',
       inputType: inputType || 'text',
       klingVideoId: klingVideoId || '',
@@ -38,23 +37,33 @@ export async function POST(req: NextRequest) {
       userImage: session.user.image || '',
     }
 
-    const drive = getDriveClient()
-    const res = await (drive.files.create as any)({
-      requestBody: {
-        name: fileName,
-        parents: [VIDEO_FOLDER_ID],
-        mimeType: 'video/mp4',
-        description: JSON.stringify(metadata),
-      },
-      media: {
-        mimeType: 'video/mp4',
-        body: Readable.from(videoBuffer),
-      },
-      supportsAllDrives: true,
-      fields: 'id,webViewLink,thumbnailLink',
-    })
+    const boundary = 'vidboundary123'
+    const metaPart = Buffer.from(
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
+      JSON.stringify({ name: fileName, parents: [VIDEO_FOLDER_ID], description: JSON.stringify(metadata) }) +
+      `\r\n--${boundary}\r\nContent-Type: video/mp4\r\n\r\n`
+    )
+    const endPart = Buffer.from(`\r\n--${boundary}--`)
+    const body = Buffer.concat([metaPart, videoBuffer, endPart])
 
-    const file = res.data as any
+    const uploadRes = await fetch(
+      `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink,thumbnailLink`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${userToken}`,
+          'Content-Type': `multipart/related; boundary=${boundary}`,
+        },
+        body,
+      }
+    )
+
+    if (!uploadRes.ok) {
+      const err = await uploadRes.text()
+      throw new Error(`Drive upload failed: ${err}`)
+    }
+
+    const file = await uploadRes.json()
     return NextResponse.json({
       fileId: file.id,
       webViewLink: file.webViewLink || null,

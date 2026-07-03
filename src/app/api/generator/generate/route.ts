@@ -12,7 +12,11 @@ export const maxDuration = 120
 
 const FOLDER_ID = process.env.GENERATOR_DRIVE_FOLDER_ID!
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+let _openai: OpenAI | null = null
+function getOpenAI() {
+  if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  return _openai
+}
 
 // gpt-image-1 supported sizes
 const GPT_IMAGE_SIZES: Record<string, '1024x1024' | '1024x1536' | '1536x1024'> = {
@@ -49,7 +53,7 @@ async function generateWithGptImage(prompt: string, size: string, referenceBase6
     const ext = mimeType.includes('jpeg') || mimeType.includes('jpg') ? 'jpg' : 'png'
     const buf = Buffer.from(base64Data, 'base64')
     const imageFile = await toFile(buf, `reference.${ext}`, { type: mimeType })
-    res = await (openai.images.edit as any)({
+    res = await (getOpenAI().images.edit as any)({
       model,
       image: imageFile,
       prompt: fullPrompt,
@@ -58,7 +62,7 @@ async function generateWithGptImage(prompt: string, size: string, referenceBase6
     })
   } else {
     // Generate from scratch
-    res = await (openai.images.generate as any)({
+    res = await (getOpenAI().images.generate as any)({
       model,
       prompt: fullPrompt,
       n: 1,
@@ -216,7 +220,7 @@ export async function POST(req: NextRequest) {
     let finalPrompt = prompt.trim()
     if (aiPrompt) {
       try {
-        const enhanced = await openai.chat.completions.create({
+        const enhanced = await getOpenAI().chat.completions.create({
           model: 'gpt-4o-mini',
           messages: [
             {
