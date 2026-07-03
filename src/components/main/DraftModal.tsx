@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 interface DraftFile {
   id: string
@@ -24,6 +24,7 @@ export function DraftModal({ apps, currentAppCode, onSelect, onClose }: DraftMod
   const [selected, setSelected] = useState<DraftFile | null>(null)
   const [fetchingImage, setFetchingImage] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     fetch('/api/draft/list')
@@ -35,6 +36,17 @@ export function DraftModal({ apps, currentAppCode, onSelect, onClose }: DraftMod
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [])
+
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      onSelect(reader.result as string, currentAppCode)
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }
 
   const draftAppCodes = [...new Set(files.map(f => f.appCode).filter(Boolean))]
   const filteredFiles = filterApp === 'all' ? files : files.filter(f => f.appCode === filterApp)
@@ -62,6 +74,30 @@ export function DraftModal({ apps, currentAppCode, onSelect, onClose }: DraftMod
     }
   }
 
+  const UploadCard = () => (
+    <>
+      <button
+        onClick={() => fileInputRef.current?.click()}
+        className="relative rounded-xl overflow-hidden transition-all flex flex-col items-center justify-center gap-2 hover:opacity-80"
+        style={{
+          aspectRatio: '4/5',
+          border: '2px dashed var(--border)',
+          background: 'var(--bg)',
+          color: 'var(--text-muted, #9ca3af)',
+        }}>
+        <span style={{ fontSize: 28 }}>⊕</span>
+        <span className="text-xs font-medium text-center px-2">Upload from computer</span>
+      </button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFileUpload}
+      />
+    </>
+  )
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: 'rgba(0,0,0,0.85)' }}>
@@ -72,7 +108,7 @@ export function DraftModal({ apps, currentAppCode, onSelect, onClose }: DraftMod
         <div className="flex items-center justify-between px-8 pt-7 pb-5 flex-shrink-0">
           <div>
             <h2 className="text-xl font-bold">Draft for Design</h2>
-            <p className="text-sm text-gray-500 mt-0.5">Select a draft to continue editing</p>
+            <p className="text-sm text-gray-500 mt-0.5">Select a draft or upload an image from your computer</p>
           </div>
           <button onClick={onClose}
             className="w-8 h-8 rounded-full flex items-center justify-center text-gray-500 hover:text-white"
@@ -123,11 +159,15 @@ export function DraftModal({ apps, currentAppCode, onSelect, onClose }: DraftMod
           ) : error ? (
             <div className="text-center py-24 text-red-400">{error}</div>
           ) : filteredFiles.length === 0 ? (
-            <div className="text-center py-24 text-gray-500">
-              {files.length === 0 ? 'No drafts yet' : `No drafts for ${filterApp}`}
+            <div className="grid grid-cols-3 gap-4 sm:grid-cols-4">
+              <UploadCard />
+              <div className="col-span-2 sm:col-span-3 flex items-center text-sm text-gray-500 pl-2">
+                {files.length === 0 ? 'No drafts yet' : `No drafts for ${filterApp}`}
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-3 gap-4 sm:grid-cols-4">
+              <UploadCard />
               {filteredFiles.map(file => {
                 const isSelected = selected?.id === file.id
                 return (
