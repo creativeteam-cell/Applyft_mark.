@@ -8,7 +8,7 @@ type Mode = 'std' | 'pro'
 type Duration = '5' | '10' | '15'
 type AspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '3:4'
 type TaskStatus = 'idle' | 'pending' | 'processing' | 'done' | 'error'
-type KlingModel = 'kling-v3' | 'kling-v3-turbo' | 'kling-v2-6' | 'kling-v2-5-turbo'
+type KlingModel = 'kling-v3' | 'kling-v2-master' | 'kling-v2-5' | 'kling-v1-6'
 
 interface VideoItem {
   id: string; prompt: string; model: string; duration: string
@@ -17,13 +17,18 @@ interface VideoItem {
   thumbnailLink: string | null; webViewLink: string | null; createdTime: string
 }
 
+interface GenItem {
+  id: string; prompt: string; thumbnailLink: string | null
+  engine: string; size: string; createdTime: string
+}
+
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const MODELS: { id: KlingModel; label: string; description: string; tags: string[]; supportsSound: boolean }[] = [
-  { id: 'kling-v3',         label: 'Kling 3.0',        description: 'Best quality, audio sync, storyboarding', tags: ['Best', 'HOT'],  supportsSound: true  },
-  { id: 'kling-v3-turbo',   label: 'Kling 3.0 Turbo',  description: 'Same quality, 2× faster generation',     tags: ['Fast', 'NEW'],  supportsSound: true  },
-  { id: 'kling-v2-6',       label: 'Kling 2.6',        description: 'Stable, great for realistic content',     tags: ['Stable'],       supportsSound: false },
-  { id: 'kling-v2-5-turbo', label: 'Kling 2.5 Turbo',  description: 'Quick drafts and fast previews',          tags: ['Draft'],        supportsSound: false },
+  { id: 'kling-v3',        label: 'Kling 3.0',      description: 'Latest model, audio sync, storyboarding', tags: ['Best', 'HOT'], supportsSound: true  },
+  { id: 'kling-v2-master', label: 'Kling 2 Master',  description: 'High quality, cinematic realism',          tags: ['HD'],          supportsSound: false },
+  { id: 'kling-v2-5',      label: 'Kling 2.5',       description: 'Balanced quality and speed',               tags: ['Stable'],      supportsSound: false },
+  { id: 'kling-v1-6',      label: 'Kling 1.6',       description: 'Fast and reliable, great for drafts',      tags: ['Fast'],        supportsSound: false },
 ]
 
 const ASPECT_RATIOS: AspectRatio[] = ['16:9', '9:16', '1:1', '4:3', '3:4']
@@ -44,6 +49,68 @@ function UserAvatar({ name, email, image, size = 28 }: { name: string; email: st
       className="rounded-full flex items-center justify-center flex-shrink-0 font-semibold text-white">
       {initials(name)}
     </div>
+  )
+}
+
+// ── Try parse JSON prompt ──────────────────────────────────────────────────
+
+function JsonPromptDisplay({ prompt }: { prompt: string }) {
+  const trimmed = prompt.trim()
+  let parsed: any = null
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try { parsed = JSON.parse(trimmed) } catch {}
+  }
+
+  if (!parsed) {
+    return <p className="text-sm leading-relaxed" style={{ color: 'var(--text)' }}>{prompt}</p>
+  }
+
+  function renderValue(val: any, depth = 0): React.ReactNode {
+    if (val === null) return <span style={{ color: '#94a3b8' }}>null</span>
+    if (typeof val === 'boolean') return <span style={{ color: '#f59e0b' }}>{String(val)}</span>
+    if (typeof val === 'number') return <span style={{ color: '#34a853' }}>{val}</span>
+    if (typeof val === 'string') return <span style={{ color: '#a5f3fc' }}>"{val}"</span>
+    if (Array.isArray(val)) {
+      if (val.length === 0) return <span style={{ color: 'var(--text-muted)' }}>[]</span>
+      return (
+        <span>
+          {'['}
+          <div style={{ paddingLeft: 16 }}>
+            {val.map((item, i) => (
+              <div key={i}>{renderValue(item, depth + 1)}{i < val.length - 1 ? ',' : ''}</div>
+            ))}
+          </div>
+          {']'}
+        </span>
+      )
+    }
+    if (typeof val === 'object') {
+      const keys = Object.keys(val)
+      return (
+        <span>
+          {'{'}
+          <div style={{ paddingLeft: 16 }}>
+            {keys.map((k, i) => (
+              <div key={k}>
+                <span style={{ color: '#c084fc' }}>"{k}"</span>
+                <span style={{ color: 'var(--text-muted)' }}>: </span>
+                {renderValue(val[k], depth + 1)}
+                {i < keys.length - 1 ? ',' : ''}
+              </div>
+            ))}
+          </div>
+          {'}'}
+        </span>
+      )
+    }
+    return <span>{String(val)}</span>
+  }
+
+  return (
+    <pre className="text-xs leading-relaxed overflow-auto rounded-lg p-3"
+      style={{ background: 'rgba(0,0,0,0.3)', color: 'var(--text)', fontFamily: 'monospace', maxHeight: 260, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+      {renderValue(parsed)}
+    </pre>
   )
 }
 
@@ -108,14 +175,161 @@ function ModelDropdown({ model, onSelect }: { model: KlingModel; onSelect: (m: K
   )
 }
 
+// ── Image Picker Modal ─────────────────────────────────────────────────────
+
+function ImagePickerModal({ onSelect, onClose }: { onSelect: (b64: string) => void; onClose: () => void }) {
+  const [items, setItems] = useState<GenItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [nextPageToken, setNextPageToken] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [fetchingId, setFetchingId] = useState<string | null>(null)
+  const sentinelRef = useRef<HTMLDivElement>(null)
+
+  const fetchPage = useCallback(async (token?: string) => {
+    const url = token ? `/api/generator/history?pageToken=${encodeURIComponent(token)}` : '/api/generator/history'
+    const res = await fetch(url)
+    return res.json()
+  }, [])
+
+  useEffect(() => {
+    fetchPage().then(data => {
+      setItems(data.items || [])
+      setNextPageToken(data.nextPageToken || null)
+      setLoading(false)
+    })
+  }, [fetchPage])
+
+  const loadMore = useCallback(async () => {
+    if (!nextPageToken || loadingMore) return
+    setLoadingMore(true)
+    const data = await fetchPage(nextPageToken)
+    setItems(prev => [...prev, ...(data.items || [])])
+    setNextPageToken(data.nextPageToken || null)
+    setLoadingMore(false)
+  }, [nextPageToken, loadingMore, fetchPage])
+
+  useEffect(() => {
+    const el = sentinelRef.current; if (!el) return
+    const obs = new IntersectionObserver(entries => { if (entries[0].isIntersecting) loadMore() }, { threshold: 0.1 })
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [loadMore])
+
+  async function handleSelect(item: GenItem) {
+    if (fetchingId) return
+    setFetchingId(item.id)
+    try {
+      const res = await fetch(`/api/generator/image/${item.id}`)
+      const blob = await res.blob()
+      const b64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve((reader.result as string).split(',')[1])
+        reader.readAsDataURL(blob)
+      })
+      onSelect(b64)
+      onClose()
+    } catch (e) {
+      console.error('Failed to load image', e)
+    }
+    setFetchingId(null)
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-6"
+      style={{ background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(6px)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="relative flex flex-col rounded-2xl overflow-hidden"
+        style={{ background: 'var(--surface)', border: '1px solid var(--border)', width: 640, maxHeight: '80vh' }}>
+        <div className="flex items-center justify-between px-5 py-4 flex-shrink-0"
+          style={{ borderBottom: '1px solid var(--border)' }}>
+          <div>
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--text)' }}>Pick from library</h3>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>Select an image from your generations</p>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/10">
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+              <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"
+                style={{ color: 'var(--text-muted)' }}/>
+            </svg>
+          </button>
+        </div>
+        <div className="overflow-y-auto flex-1 p-4">
+          {loading ? (
+            <div className="grid gap-2.5" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+              {Array.from({ length: 12 }).map((_, i) => (
+                <div key={i} className="rounded-xl animate-pulse"
+                  style={{ aspectRatio: '1', background: 'rgba(255,255,255,0.04)' }} />
+              ))}
+            </div>
+          ) : items.length === 0 ? (
+            <div className="flex items-center justify-center h-40">
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No generated images yet</p>
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-2.5" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+                {items.map(item => (
+                  <button key={item.id} onClick={() => handleSelect(item)} disabled={!!fetchingId}
+                    className="relative rounded-xl overflow-hidden group transition-all"
+                    style={{ aspectRatio: '1', background: 'rgba(255,255,255,0.04)', border: '2px solid transparent' }}>
+                    {item.thumbnailLink ? (
+                      <img src={item.thumbnailLink} alt={item.prompt} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1"
+                          style={{ color: 'rgba(255,255,255,0.15)' }}>
+                          <rect x="3" y="3" width="18" height="18" rx="3"/>
+                          <circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+                        </svg>
+                      </div>
+                    )}
+                    {fetchingId === item.id && (
+                      <div className="absolute inset-0 flex items-center justify-center"
+                        style={{ background: 'rgba(0,0,0,0.6)' }}>
+                        <svg className="animate-spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                          <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/>
+                          <path d="M12 2a10 10 0 0 1 10 10"/>
+                        </svg>
+                      </div>
+                    )}
+                    {fetchingId !== item.id && (
+                      <div className="absolute inset-0 flex items-end opacity-0 group-hover:opacity-100 transition-opacity"
+                        style={{ background: 'linear-gradient(transparent 40%, rgba(79,110,247,0.7))' }}>
+                        <div className="w-full p-2">
+                          <span className="text-[9px] text-white font-medium truncate block">{item.prompt || 'No prompt'}</span>
+                        </div>
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <div ref={sentinelRef} className="h-6 flex items-center justify-center mt-2">
+                {loadingMore && (
+                  <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--text-muted)' }}>
+                    <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
+                  </svg>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── VideoCard ──────────────────────────────────────────────────────────────
 
-function VideoCard({ item, onSelect }: { item: VideoItem; onSelect: () => void }) {
+function VideoCard({ item, onSelect, featured = false }: { item: VideoItem; onSelect: () => void; featured?: boolean }) {
   const [thumbErr, setThumbErr] = useState(false)
   return (
     <div onClick={onSelect}
       className="relative rounded-xl overflow-hidden cursor-pointer group"
-      style={{ background: 'var(--surface)', border: '1px solid var(--border)', aspectRatio: '16/10' }}>
+      style={{
+        background: 'var(--surface)', border: '1px solid var(--border)',
+        aspectRatio: featured ? '21/9' : '16/10',
+        gridColumn: featured ? 'span 2' : undefined,
+      }}>
       {item.thumbnailLink && !thumbErr ? (
         <img src={item.thumbnailLink} alt={item.prompt} className="w-full h-full object-cover"
           onError={() => setThumbErr(true)} />
@@ -133,6 +347,12 @@ function VideoCard({ item, onSelect }: { item: VideoItem; onSelect: () => void }
           <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
         </div>
       </div>
+      {featured && (
+        <div className="absolute top-2 left-2">
+          <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold"
+            style={{ background: 'rgba(79,110,247,0.8)', color: '#fff' }}>Latest</span>
+        </div>
+      )}
       <div className="absolute bottom-0 left-0 right-0 p-2 flex items-end justify-between"
         style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.7))' }}>
         <div className="flex gap-1 flex-wrap">
@@ -160,9 +380,24 @@ function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose
   const [extError, setExtError] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [err, setErr] = useState('')
+  const [enhancingExt, setEnhancingExt] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval>|null>(null)
 
   function stopPoll() { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null } }
+
+  async function handleEnhanceExt() {
+    if (!extPrompt.trim() || enhancingExt) return
+    setEnhancingExt(true)
+    try {
+      const res = await fetch('/api/video/enhance-prompt', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: extPrompt, duration: '5' }),
+      })
+      const data = await res.json()
+      if (data.prompt) setExtPrompt(data.prompt)
+    } catch {}
+    setEnhancingExt(false)
+  }
 
   async function handleExtend() {
     if (!item.klingVideoId) { setExtError('No Kling video ID — cannot extend.'); return }
@@ -261,11 +496,11 @@ function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose
             )}
           </div>
 
-          {/* Prompt */}
+          {/* Prompt — JSON-aware display */}
           {item.prompt && (
             <div className="mb-4">
               <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Prompt</div>
-              <p className="text-sm leading-relaxed" style={{ color: 'var(--text)' }}>{item.prompt}</p>
+              <JsonPromptDisplay prompt={item.prompt} />
             </div>
           )}
 
@@ -273,8 +508,24 @@ function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose
 
           {/* Extend */}
           <div className="mb-4">
-            <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
-              Extend video <span className="font-normal normal-case" style={{ color: 'rgba(255,255,255,0.2)' }}>~5s</span>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                Extend video <span className="font-normal normal-case" style={{ color: 'rgba(255,255,255,0.2)' }}>~5s</span>
+              </div>
+              <button onClick={handleEnhanceExt} disabled={enhancingExt || !extPrompt.trim()}
+                className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition-all font-medium"
+                style={{
+                  background: extPrompt.trim() ? 'rgba(79,110,247,0.12)' : 'rgba(255,255,255,0.04)',
+                  color: extPrompt.trim() ? 'var(--accent)' : 'rgba(255,255,255,0.2)',
+                  border: '1px solid var(--border)',
+                }}
+                title="Convert to professional JSON prompt">
+                {enhancingExt ? (
+                  <svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
+                  </svg>
+                ) : '✦'} JSON
+              </button>
             </div>
             <textarea value={extPrompt} onChange={e => setExtPrompt(e.target.value)}
               placeholder="Optional: describe the continuation..." rows={2}
@@ -327,8 +578,9 @@ function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose
 
 // ── ImageUploadBox ─────────────────────────────────────────────────────────
 
-function ImageUploadBox({ label, preview, onUpload, onClear }: {
-  label: string; preview: string | null; onUpload: (b64: string) => void; onClear: () => void
+function ImageUploadBox({ label, preview, onUpload, onClear, onPickFromLibrary }: {
+  label: string; preview: string | null
+  onUpload: (b64: string) => void; onClear: () => void; onPickFromLibrary: () => void
 }) {
   const ref = useRef<HTMLInputElement>(null)
   function handle(e: React.ChangeEvent<HTMLInputElement>) {
@@ -339,13 +591,28 @@ function ImageUploadBox({ label, preview, onUpload, onClear }: {
   }
   return (
     <div>
-      <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>{label}</div>
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{label}</div>
+        {!preview && (
+          <button onClick={onPickFromLibrary}
+            className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition-all font-medium"
+            style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+            title="Pick from your image library">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="3" width="18" height="18" rx="3"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+            </svg>
+            Library
+          </button>
+        )}
+      </div>
       <div onClick={() => ref.current?.click()}
         className="rounded-xl border-2 border-dashed cursor-pointer flex items-center justify-center transition-all hover:border-[var(--accent)] overflow-hidden"
         style={{ borderColor: preview ? 'transparent' : 'var(--border)', minHeight: 80 }}>
         {preview ? (
           <div className="relative w-full">
-            <img src={`data:image/jpeg;base64,${preview}`} alt={label} className="w-full object-cover rounded-xl" style={{ maxHeight: 130 }} />
+            <img src={`data:image/jpeg;base64,${preview}`} alt={label}
+              className="w-full object-cover rounded-xl" style={{ maxHeight: 130 }} />
             <button onClick={e => { e.stopPropagation(); onClear(); if (ref.current) ref.current.value = '' }}
               className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full flex items-center justify-center"
               style={{ background: 'rgba(0,0,0,0.6)' }}>
@@ -384,10 +651,10 @@ export function VideoPage() {
   const [firstFrame, setFirstFrame] = useState<string | null>(null)
   const [lastFrame, setLastFrame] = useState<string | null>(null)
   const [enhancing, setEnhancing] = useState(false)
+  const [pickerTarget, setPickerTarget] = useState<'first' | 'last' | null>(null)
 
   const [status, setStatus] = useState<TaskStatus>('idle')
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
-  const [klingVideoId, setKlingVideoId] = useState<string | null>(null)
   const [savingToDrive, setSavingToDrive] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval>|null>(null)
@@ -397,10 +664,18 @@ export function VideoPage() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [nextPageToken, setNextPageToken] = useState<string | null>(null)
   const [selectedItem, setSelectedItem] = useState<VideoItem | null>(null)
+  const [filterEmail, setFilterEmail] = useState<string | null>(null)
   const sentinelRef = useRef<HTMLDivElement>(null)
 
   const currentModel = MODELS.find(m => m.id === model)!
   const canGenerate = status !== 'pending' && status !== 'processing' && prompt.trim().length > 0
+
+  // Unique users from history for filter
+  const historyUsers = Array.from(
+    new Map(history.filter(v => v.userEmail).map(v => [v.userEmail, v])).values()
+  ).map(v => ({ email: v.userEmail, name: v.userName, image: v.userImage }))
+
+  const filteredHistory = filterEmail ? history.filter(v => v.userEmail === filterEmail) : history
 
   const fetchHistory = useCallback(async () => {
     setHistoryLoading(true)
@@ -448,7 +723,7 @@ export function VideoPage() {
           stopPolling()
           const url = data.task_result?.videos?.[0]?.url ?? null
           const vid = data.task_result?.videos?.[0]?.id ?? null
-          setVideoUrl(url); setKlingVideoId(vid); setStatus('done')
+          setVideoUrl(url); setStatus('done')
           if (url) {
             setSavingToDrive(true)
             fetch('/api/video/save', {
@@ -471,7 +746,7 @@ export function VideoPage() {
 
   const handleGenerate = async () => {
     if (!canGenerate) return
-    setStatus('pending'); setVideoUrl(null); setKlingVideoId(null); setError(null)
+    setStatus('pending'); setVideoUrl(null); setError(null)
     try {
       const type = firstFrame ? 'image2video' : 'text2video'
       const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
@@ -502,6 +777,12 @@ export function VideoPage() {
     setEnhancing(false)
   }
 
+  function handlePickerSelect(b64: string) {
+    if (pickerTarget === 'first') setFirstFrame(b64)
+    else if (pickerTarget === 'last') setLastFrame(b64)
+    setPickerTarget(null)
+  }
+
   return (
     <div className="flex flex-1 min-h-0">
 
@@ -510,21 +791,20 @@ export function VideoPage() {
         style={{ width: 340, borderRight: '1px solid var(--border)', background: 'var(--surface)' }}>
         <div className="flex flex-col gap-0 p-4">
 
-          {/* Model dropdown */}
           <div className="mb-4">
             <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Model</div>
             <ModelDropdown model={model} onSelect={setModel} />
           </div>
 
-          {/* Image inputs */}
           <div className="mb-4 flex flex-col gap-3">
             <ImageUploadBox label="First frame (optional)" preview={firstFrame}
-              onUpload={setFirstFrame} onClear={() => setFirstFrame(null)} />
+              onUpload={setFirstFrame} onClear={() => setFirstFrame(null)}
+              onPickFromLibrary={() => setPickerTarget('first')} />
             <ImageUploadBox label="Last frame (optional)" preview={lastFrame}
-              onUpload={setLastFrame} onClear={() => setLastFrame(null)} />
+              onUpload={setLastFrame} onClear={() => setLastFrame(null)}
+              onPickFromLibrary={() => setPickerTarget('last')} />
           </div>
 
-          {/* Prompt */}
           <div className="mb-3">
             <div className="flex items-center justify-between mb-1.5">
               <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
@@ -551,7 +831,6 @@ export function VideoPage() {
               style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${prompt ? 'var(--accent)' : 'var(--border)'}`, color: 'var(--text)', caretColor: 'var(--accent)', fontFamily: 'inherit' }} />
           </div>
 
-          {/* Negative prompt — collapsible */}
           <div className="mb-4">
             <button onClick={() => setNegOpen(o => !o)}
               className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider mb-1.5 transition-all"
@@ -570,7 +849,6 @@ export function VideoPage() {
             )}
           </div>
 
-          {/* Quality */}
           <div className="mb-4">
             <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Quality</div>
             <div className="flex gap-2">
@@ -584,7 +862,6 @@ export function VideoPage() {
             </div>
           </div>
 
-          {/* Duration */}
           <div className="mb-4">
             <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Duration</div>
             <div className="flex gap-2">
@@ -598,7 +875,6 @@ export function VideoPage() {
             </div>
           </div>
 
-          {/* Aspect ratio — only without first frame */}
           {!firstFrame && (
             <div className="mb-4">
               <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Aspect ratio</div>
@@ -614,7 +890,6 @@ export function VideoPage() {
             </div>
           )}
 
-          {/* Sound */}
           <div className="mb-5 flex items-center justify-between">
             <div>
               <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Sound</span>
@@ -630,7 +905,6 @@ export function VideoPage() {
             </button>
           </div>
 
-          {/* Generate */}
           <button onClick={handleGenerate} disabled={!canGenerate}
             className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
             style={{ background: canGenerate ? 'var(--accent)' : 'rgba(255,255,255,0.05)', color: canGenerate ? '#fff' : 'var(--text-muted)', cursor: canGenerate ? 'pointer' : 'not-allowed' }}>
@@ -698,20 +972,34 @@ export function VideoPage() {
           </div>
         )}
 
-        {status === 'idle' && history.length === 0 && !historyLoading && (
-          <div className="flex items-center justify-center p-10" style={{ minHeight: 160 }}>
-            <div className="text-center">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="0.8"
-                className="mx-auto mb-3" style={{ color: 'rgba(255,255,255,0.1)' }}>
-                <polygon points="5 3 19 12 5 21 5 3"/>
-              </svg>
-              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Generate a video or browse history below</p>
-            </div>
-          </div>
-        )}
-
-        {/* History grid */}
+        {/* History */}
         <div className="p-5">
+          {/* User filter */}
+          {historyUsers.length > 1 && (
+            <div className="flex items-center gap-2 mb-4">
+              {historyUsers.map(u => (
+                <button key={u.email} onClick={() => setFilterEmail(filterEmail === u.email ? null : u.email)}
+                  title={u.name}
+                  className="transition-all"
+                  style={{
+                    borderRadius: '50%',
+                    outline: filterEmail === u.email ? '2px solid var(--accent)' : '2px solid transparent',
+                    outlineOffset: 2,
+                    opacity: filterEmail && filterEmail !== u.email ? 0.4 : 1,
+                  }}>
+                  <UserAvatar name={u.name} email={u.email} image={u.image} size={32} />
+                </button>
+              ))}
+              {filterEmail && (
+                <button onClick={() => setFilterEmail(null)}
+                  className="text-[10px] px-2 py-1 rounded-lg ml-1"
+                  style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
+
           {historyLoading ? (
             <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
               {Array.from({ length: 6 }).map((_, i) => (
@@ -719,11 +1007,25 @@ export function VideoPage() {
                   style={{ aspectRatio: '16/10', background: 'rgba(255,255,255,0.04)' }} />
               ))}
             </div>
-          ) : history.length > 0 ? (
+          ) : filteredHistory.length === 0 && status === 'idle' ? (
+            <div className="flex items-center justify-center" style={{ minHeight: 140 }}>
+              <div className="text-center">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="0.8"
+                  className="mx-auto mb-3" style={{ color: 'rgba(255,255,255,0.1)' }}>
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                  {filterEmail ? 'No videos from this user' : 'Generate a video to get started'}
+                </p>
+              </div>
+            </div>
+          ) : filteredHistory.length > 0 ? (
             <>
               <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
-                {history.map(item => (
-                  <VideoCard key={item.id} item={item} onSelect={() => setSelectedItem(item)} />
+                {filteredHistory.map((item, idx) => (
+                  <VideoCard key={item.id} item={item}
+                    featured={idx === 0}
+                    onSelect={() => setSelectedItem(item)} />
                 ))}
               </div>
               <div ref={sentinelRef} className="h-8 flex items-center justify-center mt-2">
@@ -740,6 +1042,9 @@ export function VideoPage() {
 
       {selectedItem && (
         <VideoCardModal item={selectedItem} onClose={() => setSelectedItem(null)} onRefresh={fetchHistory} />
+      )}
+      {pickerTarget && (
+        <ImagePickerModal onSelect={handlePickerSelect} onClose={() => setPickerTarget(null)} />
       )}
     </div>
   )

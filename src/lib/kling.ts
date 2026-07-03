@@ -3,7 +3,7 @@
 
 const KLING_BASE_URL = 'https://api-singapore.klingai.com'
 
-export type KlingModel = 'kling-v3' | 'kling-v3-turbo' | 'kling-v2-6' | 'kling-v2-5-turbo'
+export type KlingModel = 'kling-v3' | 'kling-v2-master' | 'kling-v2-5' | 'kling-v1-6'
 export type KlingMode = 'std' | 'pro' | '4k'
 export type KlingDuration = '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | '11' | '12' | '13' | '14' | '15'
 export type KlingAspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '3:4' | '3:2' | '2:3'
