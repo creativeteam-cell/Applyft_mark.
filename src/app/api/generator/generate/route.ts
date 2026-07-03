@@ -153,6 +153,16 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const { prompt, engine, modelId, size, referenceBase64: referenceBase64Body, referenceFileId, aiPrompt, recomposeFileId, recomposeBase64, targetSize } = body
 
+  // Check generation limit (applies to all generation modes)
+  if (session.user?.email) {
+    const exceeded = await checkLimitExceeded(session.user.email)
+    if (exceeded) {
+      return NextResponse.json({
+        error: 'Generation limit reached. Please contact your administrator.',
+      }, { status: 429 })
+    }
+  }
+
   // If a Drive file ID is passed as reference, fetch it server-side
   let referenceBase64 = referenceBase64Body as string | undefined
   if (referenceFileId && !referenceBase64) {
@@ -196,16 +206,6 @@ export async function POST(req: NextRequest) {
     } catch (e: any) {
       console.error('[generator/recompose]', e)
       return NextResponse.json({ error: e.message }, { status: 500 })
-    }
-  }
-
-  // Check generation limit
-  if (session.user?.email) {
-    const exceeded = await checkLimitExceeded(session.user.email)
-    if (exceeded) {
-      return NextResponse.json({
-        error: 'Generation limit reached. Please contact your administrator.',
-      }, { status: 429 })
     }
   }
 
