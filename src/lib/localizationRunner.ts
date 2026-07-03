@@ -985,9 +985,18 @@ export async function runLocalizationJob(
         const dict = langDicts[lang] || {}
         const existingFiles = langExistingFiles[lang] || new Map()
 
-        // Debug: log dict size so we know if translation produced anything
         const dictSize = Object.keys(dict).length
-        console.log(`[loc] ${folder.name} / ${lang}: dict has ${dictSize} entries, ${imageDataList.length} images to process`)
+        const dictKeys = Object.keys(dict)
+        console.log(`[loc] ${folder.name} / ${lang}: dict has ${dictSize} entries: ${dictKeys.slice(0, 5).join(' | ')}`)
+
+        // Normalized dict for fuzzy lookup (handles quote/whitespace/case differences from GPT)
+        function norm(s: string) { return s.trim().replace(/\s+/g, ' ').toLowerCase().replace(/[‘’“”]/g, "'") }
+        const dictNorm = new Map<string, { translated: string; role: string }>()
+        for (const [k, v] of Object.entries(dict)) dictNorm.set(norm(k), v)
+
+        function dictLookup(en: string) {
+          return dict[en] || dictNorm.get(norm(en))
+        }
 
         let uploadedThisLang = 0
         let skippedExistsThisLang = 0
@@ -1003,33 +1012,37 @@ export async function runLocalizationJob(
             continue
           }
 
-          // Only phrases that actually appear in this image
-          // Exclude: logos, watermarks, and proper nouns (app/brand names) — never translate these
+          // Build langPhrases: all texts that have a translation AND were actually changed
+          // - logos/watermarks: still skip (Gemini can't reliably replace them)
+          // - properNouns: DON'T skip here — if translator returned a translation, trust it
+          // - skip if en === translated (translator left it unchanged — nothing to do)
           const SKIP_TYPES = new Set(['logo', 'watermark'])
-          const langPhrases = Array.from(texts)
-            .filter(en => dict[en])
-            .filter(en => !SKIP_TYPES.has(types[en]))
-            .filter(en => !properNouns.has(en))
-            .map(en => ({
-              en,
-              translated: dict[en].translated,
-              role: roles[en] || dict[en].role,
-            }))
+          const allTextsArr = Array.from(texts)
+          const langPhrases = allTextsArr
+            .map(en => {
+              const entry = dictLookup(en)
+              if (!entry) return null
+              if (SKIP_TYPES.has(types[en])) return null
+              if (entry.translated === en) return null // unchanged — nothing to replace
+              return { en, translated: entry.translated, role: roles[en] || entry.role }
+            })
+            .filter((x): x is { en: string; translated: string; role: string } => x !== null)
 
-          // Log what's happening so we can debug skips
-          console.log(`[loc] ${img.name} → ${lang}: texts=${texts.size}, dictMatches=${langPhrases.length}, dictSize=${dictSize}`)
+          // Verbose debug log
+          const skippedProper = allTextsArr.filter(en => properNouns.has(en))
+          const skippedNoDict = allTextsArr.filter(en => !dictLookup(en))
+          const skippedUnchanged = allTextsArr.filter(en => { const e = dictLookup(en); return e && e.translated === en })
+          console.log(`[loc] ${img.name} → ${lang}: texts=${texts.size} | inDict=${allTextsArr.filter(en => dictLookup(en)).length} | phrases=${langPhrases.length} | noDict=${skippedNoDict.length} | unchanged=${skippedUnchanged.length} | properNouns(info only)=${skippedProper.length}`)
 
           if (langPhrases.length === 0) {
-            // If dict is empty, translation step likely failed — surface a warning
             if (dictSize === 0) {
-              patch(folder.id, { error: `${lang}: no translations available — translation step may have failed` })
+              patch(folder.id, { error: `${lang}: no translations returned — GPT translator may have failed` })
               emit()
             } else {
-              // Dict has translations but none match this image's texts — log phrase keys for debug
-              const textSample = Array.from(texts).slice(0, 3).join(' | ')
-              const dictSample = Object.keys(dict).slice(0, 3).join(' | ')
-              console.warn(`[loc] ${img.name}: phrase mismatch. Image texts: [${textSample}] | Dict keys: [${dictSample}]`)
-              patch(folder.id, { uploadInfo: `${lang}: ${img.name} — no translatable text` })
+              const textSample = allTextsArr.slice(0, 3).join(' | ')
+              const dictSample = dictKeys.slice(0, 3).join(' | ')
+              console.warn(`[loc] ${img.name}: 0 phrases. Image texts: [${textSample}] | Dict keys: [${dictSample}]`)
+              patch(folder.id, { uploadInfo: `${lang}: ${img.name} — no translatable phrases (dict=${dictSize})` })
               emit()
             }
             continue
@@ -1083,7 +1096,7 @@ export async function runLocalizationJob(
           // Nothing uploaded — report as error so user knows something is wrong
           patch(folder.id, {
             status: 'error',
-            error: `${lang}: 0 files uploaded — check server logs (dict size: ${dictSize})`,
+            error: `${lang}: 0 files uploaded — dict keys: ${dictKeys.slice(0, 3).join(' | ')} | allTexts: ${imageDataList.map(d => d.texts.size).join(',')}`,
           })
         }
         emit()
