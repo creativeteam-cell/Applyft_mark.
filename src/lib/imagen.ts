@@ -52,11 +52,12 @@ const RECOMPOSE_PROMPTS: Record<string, string> = {
 ${TEXT_RULE}
 ${VISUAL_FIDELITY_RULE}
 
-EXPANSION RULE — MOST IMPORTANT:
-- EXPAND the background/environment outward to fill the new canvas — do NOT crop or cut off any existing visual element
-- All people, objects, logos, text, and UI elements from the original must remain FULLY VISIBLE and intact
-- To fill the extra space: naturally extend the background scene (sky, room, street, blurred environment) in whatever direction is needed
-- Think of it as "outpainting" — you are adding more canvas around the existing content, not zooming in
+CANVAS FILL RULE — MOST IMPORTANT:
+- The original image must remain 100% intact at its original size — DO NOT zoom out, shrink, or crop it
+- Place the original image centered in the new 1:1 canvas
+- Fill the extra space ONLY with a blurred/faded extension of the image's edge pixels — NO new scene content, NO showing more of the environment or background
+- The new areas must look like a smooth color/gradient blur, NOT like a wider view of the scene
+- If the original has a solid or gradient background, extend that color/gradient into the new space
 
 LAYOUT RULES:
 - Keep the main subject and all elements at roughly the same scale as the original
@@ -72,11 +73,12 @@ SAFE ZONE — NON-NEGOTIABLE:
 ${TEXT_RULE}
 ${VISUAL_FIDELITY_RULE}
 
-EXPANSION RULE — MOST IMPORTANT:
-- EXPAND the background/environment outward to fill the new canvas — do NOT crop or cut off any existing visual element
-- All people, objects, logos, text, and UI elements from the original must remain FULLY VISIBLE and intact
-- To fill the extra vertical space: naturally extend the background scene above and/or below (sky, floor, environment)
-- Think of it as "outpainting" — you are adding more canvas around the existing content, not zooming in
+CANVAS FILL RULE — MOST IMPORTANT:
+- The original image must remain 100% intact at its original size — DO NOT zoom out, shrink, or crop it
+- Place the original image in the upper-center area of the new 9:16 canvas
+- Fill the extra space ONLY with a blurred/faded extension of the image's edge pixels — NO new scene content, NO showing more of the environment or background, NO extending car interiors, rooms, streets, or any physical space
+- The new areas must look like a smooth color/gradient blur, NOT like a wider view of the scene
+- If the original has a solid or gradient background, extend that color/gradient into the new space
 
 CRITICAL VERTICAL LAYOUT — 9:16 SPECIFIC — THIS IS THE MOST IMPORTANT RULE:
 - This format is shown on MOBILE PHONE screens. Social platforms (Instagram Stories, TikTok, Reels, Facebook) permanently display UI chrome (profile name, like/comment/share buttons, caption text) over the BOTTOM 35% of the screen
@@ -99,11 +101,12 @@ SAFE ZONE — NON-NEGOTIABLE:
 ${TEXT_RULE}
 ${VISUAL_FIDELITY_RULE}
 
-EXPANSION RULE — MOST IMPORTANT:
-- EXPAND the background/environment outward to fill the new canvas — do NOT crop or cut off any existing visual element
-- All people, objects, logos, text, and UI elements from the original must remain FULLY VISIBLE and intact
-- To fill the extra horizontal space: naturally extend the background scene left and/or right (environment, background, blur)
-- Think of it as "outpainting" — you are adding more canvas around the existing content, not zooming in
+CANVAS FILL RULE — MOST IMPORTANT:
+- The original image must remain 100% intact at its original size — DO NOT zoom out, shrink, or crop it
+- Place the original image centered in the new 1.91:1 canvas
+- Fill the extra horizontal space ONLY with a blurred/faded extension of the image's edge pixels — NO new scene content, NO showing more of the environment or background
+- The new areas must look like a smooth color/gradient blur, NOT like a wider view of the scene
+- If the original has a solid or gradient background, extend that color/gradient into the new space
 
 LAYOUT RULES:
 - Keep the main subject at roughly the same scale as the original

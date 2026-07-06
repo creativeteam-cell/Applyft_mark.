@@ -25,10 +25,13 @@ export async function GET(req: NextRequest) {
 
     const buffer = Buffer.from(response.data as ArrayBuffer)
     
+    const isDownload = searchParams.get('download') === '1'
+    const fileName = searchParams.get('name') || `image_${fileId}.jpg`
     return new NextResponse(buffer, {
       headers: {
         'Content-Type': response.headers['content-type'] || 'image/jpeg',
-        'Cache-Control': 'public, max-age=86400', // кешируем на 24 часа
+        'Cache-Control': 'public, max-age=86400',
+        ...(isDownload ? { 'Content-Disposition': `attachment; filename="${fileName}"` } : {}),
       },
     })
   } catch (error: any) {
