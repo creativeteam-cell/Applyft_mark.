@@ -320,7 +320,7 @@ const RECOMPOSE_ASPECT: Record<string, [number, number]> = {
   '4x5':    [4, 5],
 }
 
-export async function recomposeImage(imageBase64: string, targetSize: string, _fixNote?: string, _model?: string): Promise<string> {
+export async function recomposeImage(imageBase64: string, targetSize: string, _fixNote?: string, model = DEFAULT_GEMINI_MODEL): Promise<string> {
   const aspect = RECOMPOSE_ASPECT[targetSize]
   if (!aspect) throw new Error(`Unknown target size: ${targetSize}`)
 
@@ -334,19 +334,15 @@ export async function recomposeImage(imageBase64: string, targetSize: string, _f
   const targetRatio = aw / ah
   const origRatio  = origW / origH
 
-  // Compute canvas size: keep the original fully visible, expand the shorter dimension
   let targetW: number, targetH: number
   if (targetRatio > origRatio) {
-    // Wider target → expand width, keep height
     targetH = origH
     targetW = Math.round(origH * targetRatio)
   } else {
-    // Taller target → expand height, keep width
     targetW = origW
     targetH = Math.round(origW / targetRatio)
   }
 
-  // If dimensions are already (nearly) the same, return as-is
   if (Math.abs(targetW - origW) <= 4 && Math.abs(targetH - origH) <= 4) {
     return cleanB64
   }
@@ -354,18 +350,39 @@ export async function recomposeImage(imageBase64: string, targetSize: string, _f
   const left = Math.floor((targetW - origW) / 2)
   const top  = Math.floor((targetH - origH) / 2)
 
-  // 1. Scale original to fill the whole canvas, apply heavy blur → natural background
+  // Step 1: build a canvas with the original centred + soft blurred context in extended areas
+  // The blur gives Gemini colour/tone context so it extends the scene naturally
   const blurredBg = await sharp(buf)
     .resize(targetW, targetH, { fit: 'cover', position: 'centre' })
-    .blur(28)
-    .jpeg({ quality: 85 })
+    .blur(18)
+    .jpeg({ quality: 88 })
     .toBuffer()
 
-  // 2. Composite the original on top, perfectly centred
-  const result = await sharp(blurredBg)
+  const canvas = await sharp(blurredBg)
     .composite([{ input: buf, left, top }])
-    .jpeg({ quality: 92 })
+    .jpeg({ quality: 95 })
     .toBuffer()
 
-  return result.toString('base64')
+  const canvasB64 = canvas.toString('base64')
+
+  // Step 2: describe what needs to be extended
+  const extendedSides: string[] = []
+  if (left > 20)              extendedSides.push(`${left}px on the left`)
+  if (targetW - origW - left > 20) extendedSides.push(`${targetW - origW - left}px on the right`)
+  if (top > 20)               extendedSides.push(`${top}px on the top`)
+  if (targetH - origH - top > 20)  extendedSides.push(`${targetH - origH - top}px on the bottom`)
+
+  const hint = SIZE_HINTS[targetSize] || ''
+
+  const prompt = `OUTPAINTING TASK — seamlessly extend this image.
+
+The original photo sits centred in this ${targetW}x${targetH}px frame. The blurred regions outside it (${extendedSides.join(', ')}) are placeholders — replace them with a natural, seamless continuation of the scene.
+
+RULES:
+- The central subject (person, product, character) must stay COMPLETELY UNCHANGED — same face, body, lighting, colours, every detail
+- The extended areas must show more of the same environment/background — same lighting direction, same colour grade, same atmosphere — as if the camera simply pulled back
+- No hard seams or visible edges between original and extended areas
+- Do NOT add any text, UI elements, watermarks, or new objects that weren't implied by the original scene${hint}`
+
+  return withRetry(prompt, canvasB64, undefined, 3, targetSize, undefined, model)
 }
