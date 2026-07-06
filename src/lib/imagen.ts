@@ -312,12 +312,60 @@ export async function generateImage(prompt: string, referenceBase64?: string, lo
   return withRetry(FICTIONAL_DISCLAIMER + '\n\n' + prompt + TEXT_FROM_REF_RULE + logoRule + hint + assetRule, referenceBase64, logoBase64, 3, size, assets, model)
 }
 
-export async function recomposeImage(imageBase64: string, targetSize: string, fixNote?: string, model = DEFAULT_GEMINI_MODEL): Promise<string> {
-  const prompt = RECOMPOSE_PROMPTS[targetSize]
-  if (!prompt) throw new Error(`Unknown target size: ${targetSize}`)
-  const hint = SIZE_HINTS[targetSize] || ''
-  const fix = fixNote
-    ? `\n\nFIX NOTES from previous attempt — FOLLOW THESE EXACTLY: ${fixNote}`
-    : ''
-  return withRetry(FICTIONAL_DISCLAIMER + '\n\n' + prompt + hint + fix, imageBase64, undefined, 3, targetSize, undefined, model)
+// Target canvas aspect ratios
+const RECOMPOSE_ASPECT: Record<string, [number, number]> = {
+  '1x1':    [1, 1],
+  '9x16':   [9, 16],
+  '1.91x1': [1.91, 1],
+  '4x5':    [4, 5],
+}
+
+export async function recomposeImage(imageBase64: string, targetSize: string, _fixNote?: string, _model?: string): Promise<string> {
+  const aspect = RECOMPOSE_ASPECT[targetSize]
+  if (!aspect) throw new Error(`Unknown target size: ${targetSize}`)
+
+  const cleanB64 = imageBase64.replace(/^data:image\/\w+;base64,/, '')
+  const buf = Buffer.from(cleanB64, 'base64')
+  const meta = await sharp(buf).metadata()
+  const origW = meta.width!
+  const origH = meta.height!
+
+  const [aw, ah] = aspect
+  const targetRatio = aw / ah
+  const origRatio  = origW / origH
+
+  // Compute canvas size: keep the original fully visible, expand the shorter dimension
+  let targetW: number, targetH: number
+  if (targetRatio > origRatio) {
+    // Wider target → expand width, keep height
+    targetH = origH
+    targetW = Math.round(origH * targetRatio)
+  } else {
+    // Taller target → expand height, keep width
+    targetW = origW
+    targetH = Math.round(origW / targetRatio)
+  }
+
+  // If dimensions are already (nearly) the same, return as-is
+  if (Math.abs(targetW - origW) <= 4 && Math.abs(targetH - origH) <= 4) {
+    return cleanB64
+  }
+
+  const left = Math.floor((targetW - origW) / 2)
+  const top  = Math.floor((targetH - origH) / 2)
+
+  // 1. Scale original to fill the whole canvas, apply heavy blur → natural background
+  const blurredBg = await sharp(buf)
+    .resize(targetW, targetH, { fit: 'cover', position: 'centre' })
+    .blur(28)
+    .jpeg({ quality: 85 })
+    .toBuffer()
+
+  // 2. Composite the original on top, perfectly centred
+  const result = await sharp(blurredBg)
+    .composite([{ input: buf, left, top }])
+    .jpeg({ quality: 92 })
+    .toBuffer()
+
+  return result.toString('base64')
 }

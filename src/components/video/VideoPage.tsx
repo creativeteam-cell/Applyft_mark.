@@ -8,7 +8,7 @@ type Mode = 'std' | 'pro'
 type Duration = '5' | '10' | '15'
 type AspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '3:4'
 type TaskStatus = 'idle' | 'pending' | 'processing' | 'done' | 'error'
-type KlingModel = 'kling-v3' | 'kling-v2-master' | 'kling-v2-5' | 'kling-v1-6'
+type KlingModel = 'kling-v3' | 'kling-v2-6' | 'kling-v2-5-turbo' | 'kling-v2-master' | 'kling-v2-1-master' | 'kling-v1-6'
 
 interface VideoItem {
   id: string; prompt: string; model: string; duration: string
@@ -25,10 +25,12 @@ interface GenItem {
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const MODELS: { id: KlingModel; label: string; description: string; tags: string[]; supportsSound: boolean }[] = [
-  { id: 'kling-v3',        label: 'Kling 3.0',      description: 'Latest model, audio sync, storyboarding', tags: ['Best', 'HOT'], supportsSound: true  },
-  { id: 'kling-v2-master', label: 'Kling 2 Master',  description: 'High quality, cinematic realism',          tags: ['HD'],          supportsSound: false },
-  { id: 'kling-v2-5',      label: 'Kling 2.5',       description: 'Balanced quality and speed',               tags: ['Stable'],      supportsSound: false },
-  { id: 'kling-v1-6',      label: 'Kling 1.6',       description: 'Fast and reliable, great for drafts',      tags: ['Fast'],        supportsSound: false },
+  { id: 'kling-v3',          label: 'Kling 3.0',        description: 'Latest model, audio sync, storyboarding',   tags: ['Best', 'HOT'], supportsSound: true  },
+  { id: 'kling-v2-6',        label: 'Kling 2.6',        description: 'See the sound, hear the visual',             tags: ['Audio', 'NEW'], supportsSound: true  },
+  { id: 'kling-v2-5-turbo',  label: 'Kling 2.5 Turbo',  description: 'Max creativity with exceptional value',      tags: ['Stable'],       supportsSound: false },
+  { id: 'kling-v2-master',   label: 'Kling 2 Master',   description: 'High quality, cinematic realism',            tags: ['HD'],           supportsSound: false },
+  { id: 'kling-v2-1-master', label: 'Kling 2.1 Master', description: 'Enhanced quality and motion control',        tags: [],               supportsSound: false },
+  { id: 'kling-v1-6',        label: 'Kling 1.6',        description: 'Fast and reliable, great for drafts',        tags: ['Fast'],         supportsSound: false },
 ]
 
 const ASPECT_RATIOS: AspectRatio[] = ['16:9', '9:16', '1:1', '4:3', '3:4']
@@ -579,9 +581,10 @@ function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose
 
 // ── ImageUploadBox ─────────────────────────────────────────────────────────
 
-function ImageUploadBox({ label, preview, onUpload, onClear, onPickFromLibrary }: {
+function ImageUploadBox({ label, preview, onUpload, onClear, onPickFromLibrary, compact }: {
   label: string; preview: string | null
   onUpload: (b64: string) => void; onClear: () => void; onPickFromLibrary: () => void
+  compact?: boolean
 }) {
   const ref = useRef<HTMLInputElement>(null)
   function handle(e: React.ChangeEvent<HTMLInputElement>) {
@@ -609,11 +612,11 @@ function ImageUploadBox({ label, preview, onUpload, onClear, onPickFromLibrary }
       </div>
       <div onClick={() => ref.current?.click()}
         className="rounded-xl border-2 border-dashed cursor-pointer flex items-center justify-center transition-all hover:border-[var(--accent)] overflow-hidden"
-        style={{ borderColor: preview ? 'transparent' : 'var(--border)', minHeight: 80 }}>
+        style={{ borderColor: preview ? 'transparent' : 'var(--border)', minHeight: compact ? 70 : 80 }}>
         {preview ? (
           <div className="relative w-full">
             <img src={`data:image/jpeg;base64,${preview}`} alt={label}
-              className="w-full object-cover rounded-xl" style={{ maxHeight: 130 }} />
+              className="w-full object-cover rounded-xl" style={{ maxHeight: compact ? 70 : 130 }} />
             <button onClick={e => { e.stopPropagation(); onClear(); if (ref.current) ref.current.value = '' }}
               className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full flex items-center justify-center"
               style={{ background: 'rgba(0,0,0,0.6)' }}>
@@ -653,6 +656,12 @@ export function VideoPage() {
   const [lastFrame, setLastFrame] = useState<string | null>(null)
   const [enhancing, setEnhancing] = useState(false)
   const [pickerTarget, setPickerTarget] = useState<'first' | 'last' | null>(null)
+
+  const [assets, setAssets] = useState<{ id: string; name: string; base64: string }[]>([])
+  const assetInputRef = useRef<HTMLInputElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [atPopup, setAtPopup] = useState(false)
+  const [atQuery, setAtQuery] = useState('')
 
   const [status, setStatus] = useState<TaskStatus>('idle')
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
@@ -770,7 +779,7 @@ export function VideoPage() {
     try {
       const res = await fetch('/api/video/enhance-prompt', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, aspectRatio: firstFrame ? '' : aspectRatio, duration }),
+        body: JSON.stringify({ prompt, aspectRatio: firstFrame ? '' : aspectRatio, duration, assets: assets.map(a => ({ name: a.name, base64: a.base64 })) }),
       })
       const data = await res.json()
       if (data.prompt) setPrompt(data.prompt)
@@ -783,6 +792,53 @@ export function VideoPage() {
     else if (pickerTarget === 'last') setLastFrame(b64)
     setPickerTarget(null)
   }
+
+  function handleAssetUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || [])
+    files.forEach(file => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const base64 = reader.result as string
+        const name = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 20)
+        setAssets(prev => [...prev, { id: Math.random().toString(36).slice(2), name, base64 }])
+      }
+      reader.readAsDataURL(file)
+    })
+    e.target.value = ''
+  }
+
+  function handlePromptKeyUp(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Escape') { setAtPopup(false); setAtQuery(''); return }
+    const ta = e.currentTarget
+    const val = ta.value
+    const pos = ta.selectionStart ?? 0
+    const before = val.slice(0, pos)
+    const atIdx = before.lastIndexOf('@')
+    if (atIdx !== -1 && !before.slice(atIdx).includes(' ')) {
+      const query = before.slice(atIdx + 1)
+      setAtQuery(query)
+      setAtPopup(true)
+    } else {
+      setAtPopup(false)
+      setAtQuery('')
+    }
+  }
+
+  function insertAssetMention(name: string) {
+    const ta = textareaRef.current
+    if (!ta) return
+    const val = ta.value
+    const pos = ta.selectionStart ?? 0
+    const before = val.slice(0, pos)
+    const atIdx = before.lastIndexOf('@')
+    const newVal = val.slice(0, atIdx) + `@${name}` + val.slice(pos)
+    setPrompt(newVal)
+    setAtPopup(false)
+    setAtQuery('')
+    setTimeout(() => { ta.focus(); ta.setSelectionRange(atIdx + name.length + 1, atIdx + name.length + 1) }, 0)
+  }
+
+  const filteredAtAssets = assets.filter(a => a.name.toLowerCase().includes(atQuery.toLowerCase()))
 
   return (
     <div className="flex flex-1 min-h-0">
@@ -797,15 +853,7 @@ export function VideoPage() {
             <ModelDropdown model={model} onSelect={setModel} />
           </div>
 
-          <div className="mb-4 flex flex-col gap-3">
-            <ImageUploadBox label="First frame (optional)" preview={firstFrame}
-              onUpload={setFirstFrame} onClear={() => setFirstFrame(null)}
-              onPickFromLibrary={() => setPickerTarget('first')} />
-            <ImageUploadBox label="Last frame (optional)" preview={lastFrame}
-              onUpload={setLastFrame} onClear={() => setLastFrame(null)}
-              onPickFromLibrary={() => setPickerTarget('last')} />
-          </div>
-
+          {/* Prompt section */}
           <div className="mb-3">
             <div className="flex items-center justify-between mb-1.5">
               <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
@@ -826,10 +874,64 @@ export function VideoPage() {
                 ) : '✦'} JSON
               </button>
             </div>
-            <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
-              placeholder={firstFrame ? 'Describe how it should move...' : 'Describe the video...'}
-              rows={5} className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none"
-              style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${prompt ? 'var(--accent)' : 'var(--border)'}`, color: 'var(--text)', caretColor: 'var(--accent)', fontFamily: 'inherit' }} />
+            <div className="relative">
+              <textarea ref={textareaRef} value={prompt} onChange={e => setPrompt(e.target.value)} onKeyUp={handlePromptKeyUp}
+                placeholder={firstFrame ? 'Describe how it should move...' : 'Describe the video...'}
+                rows={6} className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none"
+                style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${prompt ? 'var(--accent)' : 'var(--border)'}`, color: 'var(--text)', caretColor: 'var(--accent)', fontFamily: 'inherit' }} />
+              {atPopup && filteredAtAssets.length > 0 && (
+                <div className="absolute bottom-full left-0 right-0 mb-1 rounded-xl overflow-hidden z-40"
+                  style={{ background: 'var(--bg)', border: '1px solid var(--border)', boxShadow: '0 -4px 20px rgba(0,0,0,0.4)' }}>
+                  {filteredAtAssets.map(asset => (
+                    <button key={asset.id} onMouseDown={e => { e.preventDefault(); insertAssetMention(asset.name) }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-left transition-all hover:bg-white/5">
+                      <img src={asset.base64} alt={asset.name} className="w-5 h-5 rounded object-cover flex-shrink-0" />
+                      <span className="text-xs font-mono" style={{ color: 'var(--accent)' }}>@{asset.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Assets panel */}
+          <div className="mb-3">
+            <div className="flex flex-wrap gap-1.5 mb-1.5">
+              {assets.map(asset => (
+                <div key={asset.id} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs"
+                  style={{ background: 'rgba(79,110,247,0.12)', border: '1px solid rgba(79,110,247,0.25)', color: 'var(--text)' }}>
+                  <img src={asset.base64} alt={asset.name} className="w-4 h-4 rounded object-cover" />
+                  <span className="font-mono" style={{ color: 'var(--accent)' }}>@{asset.name}</span>
+                  <button onClick={() => setAssets(prev => prev.filter(a => a.id !== asset.id))}
+                    className="ml-0.5 opacity-50 hover:opacity-100" style={{ color: 'var(--text-muted)' }}>×</button>
+                </div>
+              ))}
+              <button onClick={() => assetInputRef.current?.click()}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                <span style={{ fontSize: 14, lineHeight: 1 }}>＋</span> Asset
+              </button>
+              <input ref={assetInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleAssetUpload} />
+            </div>
+            {assets.length > 0 && !firstFrame && (
+              <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.25)' }}>
+                Assets are used for AI prompt enhancement. Set a First Frame to use image2video.
+              </p>
+            )}
+          </div>
+
+          {/* First/Last frame side by side */}
+          <div className="mb-4 flex gap-2">
+            <div className="flex-1">
+              <ImageUploadBox label="First frame" preview={firstFrame}
+                onUpload={setFirstFrame} onClear={() => setFirstFrame(null)}
+                onPickFromLibrary={() => setPickerTarget('first')} compact />
+            </div>
+            <div className="flex-1">
+              <ImageUploadBox label="Last frame" preview={lastFrame}
+                onUpload={setLastFrame} onClear={() => setLastFrame(null)}
+                onPickFromLibrary={() => setPickerTarget('last')} compact />
+            </div>
           </div>
 
           <div className="mb-4">

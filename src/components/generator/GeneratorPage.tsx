@@ -186,6 +186,73 @@ const SIZE_ASPECT: Record<string, string> = {
   '1.91x1': '1.91 / 1',
 }
 
+function HistoryCard({ item, onSelect }: { item: HistoryItem; onSelect?: (item: HistoryItem) => void }) {
+  const [hovered, setHovered] = useState(false)
+  const aspect = SIZE_ASPECT[item.size] ?? '4 / 5'
+
+  function handleDownload(e: React.MouseEvent) {
+    e.stopPropagation()
+    const a = document.createElement('a')
+    a.href = `/api/generator/image/${item.id}?download=1`
+    a.download = `generated-${item.id}.jpg`
+    a.click()
+  }
+
+  return (
+    <div onClick={() => onSelect?.(item)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="rounded-xl overflow-hidden cursor-pointer transition-all hover:scale-[1.02]"
+      style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      <div className="w-full overflow-hidden relative"
+        style={{ aspectRatio: aspect, background: 'rgba(255,255,255,0.02)' }}>
+        {item.thumbnailLink ? (
+          <img src={item.thumbnailLink} alt={item.prompt} className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="0.8"
+              style={{ color: 'rgba(255,255,255,0.1)' }}>
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <path d="M21 15l-5-5L5 21"/>
+            </svg>
+          </div>
+        )}
+        {hovered && item.thumbnailLink && (
+          <button onClick={handleDownload}
+            className="absolute top-2 right-2 w-7 h-7 rounded-lg flex items-center justify-center transition-all"
+            style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)' }}
+            title="Download">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+              <path d="M12 3v13M5 16l7 7 7-7"/><path d="M3 21h18"/>
+            </svg>
+          </button>
+        )}
+      </div>
+      <div className="p-2.5">
+        <p className="text-xs leading-snug mb-2 line-clamp-2" style={{ color: 'var(--text-muted)' }}>
+          {item.prompt || item.id}
+        </p>
+        <div className="flex items-center justify-between gap-1">
+          <div className="flex items-center gap-1">
+            <span className="rounded px-1.5 py-0.5 font-mono"
+              style={{ fontSize: 10, background: 'rgba(79,110,247,0.15)', color: 'var(--accent)' }}>
+              {item.engine}
+            </span>
+            <span className="rounded px-1.5 py-0.5 font-mono"
+              style={{ fontSize: 10, background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}>
+              {item.size}
+            </span>
+          </div>
+          {item.userName && (
+            <UserAvatar name={item.userName} email={item.userEmail} image={item.userImage} size={20} />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function HistoryGrid({ items, onSelect }: { items: HistoryItem[]; onSelect?: (item: HistoryItem) => void }) {
   if (items.length === 0) {
     return (
@@ -196,48 +263,9 @@ function HistoryGrid({ items, onSelect }: { items: HistoryItem[]; onSelect?: (it
   }
   return (
     <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
-      {items.map(item => {
-        const aspect = SIZE_ASPECT[item.size] ?? '4 / 5'
-        return (
-        <div key={item.id} onClick={() => onSelect?.(item)}
-          className="rounded-xl overflow-hidden cursor-pointer transition-all hover:scale-[1.02]"
-          style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-          <div className="w-full overflow-hidden flex items-center justify-center"
-            style={{ aspectRatio: aspect, background: 'rgba(255,255,255,0.02)' }}>
-            {item.thumbnailLink ? (
-              <img src={item.thumbnailLink} alt={item.prompt} className="w-full h-full object-fill" />
-            ) : (
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="0.8"
-                style={{ color: 'rgba(255,255,255,0.1)' }}>
-                <rect x="3" y="3" width="18" height="18" rx="2"/>
-                <circle cx="8.5" cy="8.5" r="1.5"/>
-                <path d="M21 15l-5-5L5 21"/>
-              </svg>
-            )}
-          </div>
-          <div className="p-2.5">
-            <p className="text-xs leading-snug mb-2 line-clamp-2" style={{ color: 'var(--text-muted)' }}>
-              {item.prompt || item.id}
-            </p>
-            <div className="flex items-center justify-between gap-1">
-              <div className="flex items-center gap-1">
-                <span className="rounded px-1.5 py-0.5 font-mono"
-                  style={{ fontSize: 10, background: 'rgba(79,110,247,0.15)', color: 'var(--accent)' }}>
-                  {item.engine}
-                </span>
-                <span className="rounded px-1.5 py-0.5 font-mono"
-                  style={{ fontSize: 10, background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}>
-                  {item.size}
-                </span>
-              </div>
-              {item.userName && (
-                <UserAvatar name={item.userName} email={item.userEmail} image={item.userImage} size={20} />
-              )}
-            </div>
-          </div>
-        </div>
-        )
-      })}
+      {items.map(item => (
+        <HistoryCard key={item.id} item={item} onSelect={onSelect} />
+      ))}
     </div>
   )
 }
