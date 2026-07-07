@@ -73,6 +73,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
   const [draftSaving, setDraftSaving] = useState(false)
   const [draftSaved, setDraftSaved] = useState(false)
   const [draftError, setDraftError] = useState<string | null>(null)
+  const [autoDraftFileId, setAutoDraftFileId] = useState<string | null>(null)
   const [savedFolder, setSavedFolder] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [nextFolderName, setNextFolderName] = useState<string | null>(null)
@@ -200,10 +201,34 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
     await generateFirst(undefined, undefined, currentPrompt || undefined)
   }
 
+  async function deleteDraft(fileId: string) {
+    try {
+      await fetch('/api/draft/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId }),
+      })
+    } catch {}
+    setAutoDraftFileId(null)
+  }
+
   async function handleApprove() {
     if (!previewImage) return
     setStage('generating-all')
     setQueueActive('gemini', true)
+
+    // Auto-save draft so creative isn't lost if resize hangs
+    if (appCode) {
+      try {
+        const res = await fetch('/api/draft/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: previewImage, appCode }),
+        })
+        const data = await res.json()
+        if (data.fileId) setAutoDraftFileId(data.fileId)
+      } catch {}
+    }
 
     try {
       const results: Record<string, string> = { '4x5': previewImage }
@@ -323,6 +348,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
       if (data.error) throw new Error(data.error)
       setSavedFolder(data.folderName)
       onSaved?.()
+      if (autoDraftFileId) deleteDraft(autoDraftFileId)
     } catch (e: any) {
       setSaveError(e.message)
     } finally {
@@ -479,6 +505,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
         link.click()
       }, i * 200)
     })
+    if (autoDraftFileId) deleteDraft(autoDraftFileId)
   }
 
   return (
