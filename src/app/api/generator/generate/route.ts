@@ -1,4 +1,4 @@
-// Generator API — Gemini Image & OpenAI gpt-image-1
+// Generator API — Gemini Image & OpenAI gpt-image-1 / gpt-image-2
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
@@ -37,6 +37,7 @@ const GEMINI_MODEL_MAP: Record<string, string> = {
 // Maps frontend modelId → OpenAI model string
 const OPENAI_MODEL_MAP: Record<string, string> = {
   'gptimage1': 'gpt-image-1',
+  'gptimage2': 'gpt-image-2',
 }
 
 async function generateWithGptImage(prompt: string, size: string, referenceBase64?: string, model = 'gpt-image-1'): Promise<string> {

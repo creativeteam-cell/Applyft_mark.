@@ -80,6 +80,17 @@ const MODELS: ModelDef[] = [
     supportsReference: true,
     sizes: [{ label: '1x1' }, { label: '16x9' }, { label: '9x16' }],
   },
+  {
+    id: 'gptimage2',
+    provider: 'openai',
+    apiModel: 'gpt-image-2',
+    label: 'GPT Image 2',
+    providerLabel: 'OpenAI',
+    description: 'Latest model, stronger instruction following, world knowledge',
+    tags: ['Best', 'NEW'],
+    supportsReference: true,
+    sizes: [{ label: '1x1' }, { label: '16x9' }, { label: '9x16' }],
+  },
 ]
 
 const PROVIDERS = [
