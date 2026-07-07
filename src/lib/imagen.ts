@@ -320,69 +320,30 @@ const RECOMPOSE_ASPECT: Record<string, [number, number]> = {
   '4x5':    [4, 5],
 }
 
-export async function recomposeImage(imageBase64: string, targetSize: string, _fixNote?: string, model = DEFAULT_GEMINI_MODEL): Promise<string> {
+export async function recomposeImage(imageBase64: string, targetSize: string, fixNote?: string, model = DEFAULT_GEMINI_MODEL): Promise<string> {
   const aspect = RECOMPOSE_ASPECT[targetSize]
   if (!aspect) throw new Error(`Unknown target size: ${targetSize}`)
 
   const cleanB64 = imageBase64.replace(/^data:image\/\w+;base64,/, '')
-  const buf = Buffer.from(cleanB64, 'base64')
-  const meta = await sharp(buf).metadata()
-  const origW = meta.width!
-  const origH = meta.height!
+  const hint = SIZE_HINTS[targetSize] || ''
+  const fix = fixNote ? `\n\nFIX from previous attempt: ${fixNote}` : ''
 
   const [aw, ah] = aspect
-  const targetRatio = aw / ah
-  const origRatio  = origW / origH
-
-  let targetW: number, targetH: number
-  if (targetRatio > origRatio) {
-    targetH = origH
-    targetW = Math.round(origH * targetRatio)
-  } else {
-    targetW = origW
-    targetH = Math.round(origW / targetRatio)
+  const directions: Record<string, string> = {
+    '1x1':    'square (1:1)',
+    '9x16':   'tall vertical (9:16)',
+    '1.91x1': 'wide horizontal (1.91:1)',
+    '4x5':    'portrait (4:5)',
   }
 
-  if (Math.abs(targetW - origW) <= 4 && Math.abs(targetH - origH) <= 4) {
-    return cleanB64
-  }
+  const prompt = `SCENE EXTENSION TASK: Redraw this image for a ${directions[targetSize] || targetSize} aspect ratio.
 
-  const left = Math.floor((targetW - origW) / 2)
-  const top  = Math.floor((targetH - origH) / 2)
+HOW TO DO IT:
+- Keep the main subject (person, face, body) EXACTLY as in the original — same appearance, same lighting, same pose, same expression
+- Extend the background/environment naturally to fill the new canvas — show more of the same scene as if the camera zoomed out or panned
+- The extension must be seamless — no visible borders, no seams, no collage effect
+- Match the original's colour grade, lighting direction, atmosphere, and style perfectly
+- Do NOT add text, UI elements, watermarks, or logos${hint}${fix}`
 
-  // Step 1: build a canvas with the original centred + soft blurred context in extended areas
-  // The blur gives Gemini colour/tone context so it extends the scene naturally
-  const blurredBg = await sharp(buf)
-    .resize(targetW, targetH, { fit: 'cover', position: 'centre' })
-    .blur(18)
-    .jpeg({ quality: 88 })
-    .toBuffer()
-
-  const canvas = await sharp(blurredBg)
-    .composite([{ input: buf, left, top }])
-    .jpeg({ quality: 95 })
-    .toBuffer()
-
-  const canvasB64 = canvas.toString('base64')
-
-  // Step 2: describe what needs to be extended
-  const extendedSides: string[] = []
-  if (left > 20)              extendedSides.push(`${left}px on the left`)
-  if (targetW - origW - left > 20) extendedSides.push(`${targetW - origW - left}px on the right`)
-  if (top > 20)               extendedSides.push(`${top}px on the top`)
-  if (targetH - origH - top > 20)  extendedSides.push(`${targetH - origH - top}px on the bottom`)
-
-  const hint = SIZE_HINTS[targetSize] || ''
-
-  const prompt = `OUTPAINTING TASK — seamlessly extend this image.
-
-The original photo sits centred in this ${targetW}x${targetH}px frame. The blurred regions outside it (${extendedSides.join(', ')}) are placeholders — replace them with a natural, seamless continuation of the scene.
-
-RULES:
-- The central subject (person, product, character) must stay COMPLETELY UNCHANGED — same face, body, lighting, colours, every detail
-- The extended areas must show more of the same environment/background — same lighting direction, same colour grade, same atmosphere — as if the camera simply pulled back
-- No hard seams or visible edges between original and extended areas
-- Do NOT add any text, UI elements, watermarks, or new objects that weren't implied by the original scene${hint}`
-
-  return withRetry(prompt, canvasB64, undefined, 3, targetSize, undefined, model)
+  return withRetry(prompt, cleanB64, undefined, 3, targetSize, undefined, model)
 }
