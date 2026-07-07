@@ -372,7 +372,7 @@ function ImagePickerModal({ onSelect, onClose }: { onSelect: (b64: string) => vo
   )
 }
 
-// ── VideoCard ──────────────────────────────────────────────────────────────
+// ── VideoCard ─────────────────────────────────────────────────────────────
 
 function VideoCard({ item, onSelect, featured = false }: { item: VideoItem; onSelect: () => void; featured?: boolean }) {
   const [thumbErr, setThumbErr] = useState(false)
