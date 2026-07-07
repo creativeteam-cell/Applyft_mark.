@@ -132,3 +132,87 @@ export async function extendVideo(params: {
   if (data.code !== 0) throw new Error(`Kling error: ${data.message}`)
   return { task_id: data.data.task_id }
 }
+
+// ── New model API functions ────────────────────────────────────────────────
+
+export type KlingModelAll = KlingModel | 'kling-v3-turbo' | 'kling-v3-omni' | 'kling-video-o1'
+
+// Turbo / Omni / O1 — uses "contents" array format
+export async function createTurboVideoTask(params: {
+  model_name: string
+  prompt?: string
+  first_frame?: string    // base64 or URL
+  duration?: number
+  resolution?: '720p' | '1080p'
+}): Promise<{ task_id: string }> {
+  const contents: any[] = []
+  if (params.prompt) contents.push({ type: 'prompt', text: params.prompt })
+  if (params.first_frame) contents.push({ type: 'first_frame', url: params.first_frame.startsWith('http') ? params.first_frame : `data:image/jpeg;base64,${params.first_frame}` })
+  if (!contents.length) throw new Error('Prompt or first_frame required')
+  const res = await fetch(`${KLING_BASE_URL}/image-to-video/${params.model_name}`, {
+    method: 'POST', headers: headers(),
+    body: JSON.stringify({
+      contents,
+      settings: { resolution: params.resolution ?? '1080p', duration: params.duration ?? 5 },
+    }),
+  })
+  const data = await res.json()
+  if (data.code !== 0) throw new Error(`Kling error: ${data.message}`)
+  return { task_id: data.data.id }
+}
+
+export async function getTurboTaskStatus(task_id: string): Promise<{ status: string; videoUrl?: string; videoId?: string }> {
+  const res = await fetch(`${KLING_BASE_URL}/tasks?task_ids=${task_id}`, { headers: headers() })
+  const data = await res.json()
+  if (data.code !== 0) throw new Error(`Kling error: ${data.message}`)
+  const task = data.data?.[0]
+  if (!task) throw new Error('Task not found')
+  const video = task.outputs?.find((o: any) => o.type === 'video')
+  return { status: task.status, videoUrl: video?.url, videoId: video?.id }
+}
+
+export async function createMotionControlTask(params: {
+  image_url: string       // base64 or URL
+  video_url: string       // URL only
+  prompt?: string
+  model_name?: 'kling-v2-6' | 'kling-v3'
+  character_orientation: 'image' | 'video'
+  keep_original_sound?: 'yes' | 'no'
+  mode?: 'std' | 'pro'
+}): Promise<{ task_id: string }> {
+  const res = await fetch(`${KLING_BASE_URL}/v1/videos/motion-control`, {
+    method: 'POST', headers: headers(),
+    body: JSON.stringify({
+      model_name: params.model_name ?? 'kling-v2-6',
+      image_url: params.image_url,
+      video_url: params.video_url,
+      prompt: params.prompt ?? '',
+      character_orientation: params.character_orientation,
+      keep_original_sound: params.keep_original_sound ?? 'no',
+      mode: params.mode ?? 'std',
+    }),
+  })
+  const data: KlingResponse = await res.json()
+  if (data.code !== 0) throw new Error(`Kling error: ${data.message}`)
+  return { task_id: data.data.task_id }
+}
+
+export async function createAvatarTask(params: {
+  image: string           // base64 (no prefix)
+  sound_file: string      // base64 (no prefix) or URL
+  prompt?: string
+  mode?: 'std' | 'pro'
+}): Promise<{ task_id: string }> {
+  const res = await fetch(`${KLING_BASE_URL}/v1/videos/avatar/image2video`, {
+    method: 'POST', headers: headers(),
+    body: JSON.stringify({
+      image: params.image,
+      sound_file: params.sound_file,
+      prompt: params.prompt ?? '',
+      mode: params.mode ?? 'std',
+    }),
+  })
+  const data: KlingResponse = await res.json()
+  if (data.code !== 0) throw new Error(`Kling error: ${data.message}`)
+  return { task_id: data.data.task_id }
+}

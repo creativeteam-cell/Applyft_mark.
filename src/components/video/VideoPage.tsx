@@ -1,22 +1,28 @@
 'use client'
 
-import { useState, useRef, useCallback, useEffect } from 'react'
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type Mode = 'std' | 'pro'
-type Duration = '5' | '10' | '15'
-type AspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '3:4'
+type VideoMode = 'standard' | 'multishot' | 'motionControl' | 'avatar'
+type Mode = 'std' | 'pro' | '4k'
+type AspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '3:4' | '3:2' | '2:3'
 type TaskStatus = 'idle' | 'pending' | 'processing' | 'done' | 'error'
-type KlingModel = 'kling-v3' | 'kling-v2-6' | 'kling-v2-5-turbo' | 'kling-v2-master' | 'kling-v2-1-master' | 'kling-v1-6'
+type KlingModel = 'kling-v3' | 'kling-v3-turbo' | 'kling-v3-omni' | 'kling-video-o1' | 'kling-v2-6' | 'kling-v2-5-turbo' | 'kling-v2-master' | 'kling-v2-1-master' | 'kling-v1-6' | 'avatar'
 
+interface ShotItem { id: string; prompt: string; duration: number }
+interface ModelDef {
+  id: KlingModel; label: string; description: string; tags: string[]
+  supportsSound: boolean; supports4K: boolean; supportsLastFrame: boolean
+  supportsMultishot: boolean; supportsMotionControl: boolean; isAvatar: boolean
+  modes: VideoMode[]; aspectRatios: AspectRatio[]
+}
 interface VideoItem {
   id: string; prompt: string; model: string; duration: string
   aspectRatio: string; sound: string; inputType: string
   klingVideoId: string; userName: string; userEmail: string; userImage: string
   thumbnailLink: string | null; webViewLink: string | null; createdTime: string
 }
-
 interface GenItem {
   id: string; prompt: string; thumbnailLink: string | null
   engine: string; size: string; createdTime: string
@@ -24,16 +30,69 @@ interface GenItem {
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const MODELS: { id: KlingModel; label: string; description: string; tags: string[]; supportsSound: boolean }[] = [
-  { id: 'kling-v3',          label: 'Kling 3.0',        description: 'Latest model, audio sync, storyboarding',   tags: ['Best', 'HOT'], supportsSound: true  },
-  { id: 'kling-v2-6',        label: 'Kling 2.6',        description: 'See the sound, hear the visual',             tags: ['Audio', 'NEW'], supportsSound: true  },
-  { id: 'kling-v2-5-turbo',  label: 'Kling 2.5 Turbo',  description: 'Max creativity with exceptional value',      tags: ['Stable'],       supportsSound: false },
-  { id: 'kling-v2-master',   label: 'Kling 2 Master',   description: 'High quality, cinematic realism',            tags: ['HD'],           supportsSound: false },
-  { id: 'kling-v2-1-master', label: 'Kling 2.1 Master', description: 'Enhanced quality and motion control',        tags: [],               supportsSound: false },
-  { id: 'kling-v1-6',        label: 'Kling 1.6',        description: 'Fast and reliable, great for drafts',        tags: ['Fast'],         supportsSound: false },
+const ALL_ASPECT_RATIOS: AspectRatio[] = ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3']
+
+const MODELS: ModelDef[] = [
+  {
+    id: 'kling-v3', label: 'Kling 3.0', description: 'Latest model, audio sync, storyboarding', tags: ['Best', 'HOT'],
+    supportsSound: true, supports4K: false, supportsLastFrame: true, supportsMultishot: true, supportsMotionControl: false, isAvatar: false,
+    modes: ['standard', 'multishot'], aspectRatios: ALL_ASPECT_RATIOS,
+  },
+  {
+    id: 'kling-v3-turbo', label: 'Kling 3.0 Turbo', description: 'Faster output, lower cost, reliable quality', tags: ['NEW'],
+    supportsSound: false, supports4K: false, supportsLastFrame: false, supportsMultishot: true, supportsMotionControl: false, isAvatar: false,
+    modes: ['standard', 'multishot'], aspectRatios: ['16:9', '9:16', '1:1'],
+  },
+  {
+    id: 'kling-v3-omni', label: 'Kling 3.0 Omni', description: 'Multi-asset, motion control, 4K output', tags: ['Pro', 'HOT'],
+    supportsSound: true, supports4K: true, supportsLastFrame: true, supportsMultishot: true, supportsMotionControl: true, isAvatar: false,
+    modes: ['standard', 'multishot', 'motionControl'], aspectRatios: ['16:9', '9:16', '1:1'],
+  },
+  {
+    id: 'kling-video-o1', label: 'Kling O1', description: 'Reasoning model, precise prompt adherence', tags: [],
+    supportsSound: false, supports4K: false, supportsLastFrame: false, supportsMultishot: false, supportsMotionControl: false, isAvatar: false,
+    modes: ['standard'], aspectRatios: ['16:9', '9:16', '1:1'],
+  },
+  {
+    id: 'kling-v2-6', label: 'Kling 2.6', description: 'See the sound, hear the visual', tags: ['Audio'],
+    supportsSound: true, supports4K: false, supportsLastFrame: true, supportsMultishot: false, supportsMotionControl: true, isAvatar: false,
+    modes: ['standard', 'motionControl'], aspectRatios: ALL_ASPECT_RATIOS,
+  },
+  {
+    id: 'kling-v2-5-turbo', label: 'Kling 2.5 Turbo', description: 'Max creativity with exceptional value', tags: ['Stable'],
+    supportsSound: false, supports4K: false, supportsLastFrame: true, supportsMultishot: false, supportsMotionControl: false, isAvatar: false,
+    modes: ['standard'], aspectRatios: ALL_ASPECT_RATIOS,
+  },
+  {
+    id: 'kling-v2-master', label: 'Kling 2 Master', description: 'High quality, cinematic realism', tags: ['HD'],
+    supportsSound: false, supports4K: false, supportsLastFrame: true, supportsMultishot: false, supportsMotionControl: false, isAvatar: false,
+    modes: ['standard'], aspectRatios: ALL_ASPECT_RATIOS,
+  },
+  {
+    id: 'kling-v2-1-master', label: 'Kling 2.1 Master', description: 'Enhanced quality and motion control', tags: [],
+    supportsSound: false, supports4K: false, supportsLastFrame: true, supportsMultishot: false, supportsMotionControl: false, isAvatar: false,
+    modes: ['standard'], aspectRatios: ALL_ASPECT_RATIOS,
+  },
+  {
+    id: 'kling-v1-6', label: 'Kling 1.6', description: 'Fast and reliable, great for drafts', tags: ['Fast'],
+    supportsSound: false, supports4K: false, supportsLastFrame: true, supportsMultishot: false, supportsMotionControl: false, isAvatar: false,
+    modes: ['standard'], aspectRatios: ALL_ASPECT_RATIOS,
+  },
+  {
+    id: 'avatar', label: 'Avatar', description: 'Talking head video from photo + audio', tags: ['NEW'],
+    supportsSound: false, supports4K: false, supportsLastFrame: false, supportsMultishot: false, supportsMotionControl: false, isAvatar: true,
+    modes: ['avatar'], aspectRatios: [],
+  },
 ]
 
-const ASPECT_RATIOS: AspectRatio[] = ['16:9', '9:16', '1:1', '4:3', '3:4']
+const MODE_LABELS: Record<VideoMode, string> = {
+  standard: 'Standard',
+  multishot: 'Multishot',
+  motionControl: 'Motion Control',
+  avatar: 'Avatar',
+}
+
+const TURBO_MODELS = new Set(['kling-v3-turbo', 'kling-v3-omni', 'kling-video-o1'])
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -54,7 +113,7 @@ function UserAvatar({ name, email, image, size = 28 }: { name: string; email: st
   )
 }
 
-// ── Try parse JSON prompt ──────────────────────────────────────────────────
+// ── JsonPromptDisplay (kept for history modal) ─────────────────────────────
 
 function JsonPromptDisplay({ prompt }: { prompt: string }) {
   const trimmed = prompt.trim()
@@ -62,10 +121,7 @@ function JsonPromptDisplay({ prompt }: { prompt: string }) {
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try { parsed = JSON.parse(trimmed) } catch {}
   }
-
-  if (!parsed) {
-    return <p className="text-sm leading-relaxed" style={{ color: 'var(--text)' }}>{prompt}</p>
-  }
+  if (!parsed) return <p className="text-sm leading-relaxed" style={{ color: 'var(--text)' }}>{prompt}</p>
 
   function renderValue(val: any, depth = 0): React.ReactNode {
     if (val === null) return <span style={{ color: '#94a3b8' }}>null</span>
@@ -75,34 +131,22 @@ function JsonPromptDisplay({ prompt }: { prompt: string }) {
     if (Array.isArray(val)) {
       if (val.length === 0) return <span style={{ color: 'var(--text-muted)' }}>[]</span>
       return (
-        <span>
-          {'['}
-          <div style={{ paddingLeft: 16 }}>
-            {val.map((item, i) => (
-              <div key={i}>{renderValue(item, depth + 1)}{i < val.length - 1 ? ',' : ''}</div>
-            ))}
-          </div>
-          {']'}
-        </span>
+        <span>{'['}<div style={{ paddingLeft: 16 }}>{val.map((item, i) => (
+          <div key={i}>{renderValue(item, depth + 1)}{i < val.length - 1 ? ',' : ''}</div>
+        ))}</div>{']'}</span>
       )
     }
     if (typeof val === 'object') {
       const keys = Object.keys(val)
       return (
-        <span>
-          {'{'}
-          <div style={{ paddingLeft: 16 }}>
-            {keys.map((k, i) => (
-              <div key={k}>
-                <span style={{ color: '#c084fc' }}>"{k}"</span>
-                <span style={{ color: 'var(--text-muted)' }}>: </span>
-                {renderValue(val[k], depth + 1)}
-                {i < keys.length - 1 ? ',' : ''}
-              </div>
-            ))}
+        <span>{'{'}<div style={{ paddingLeft: 16 }}>{keys.map((k, i) => (
+          <div key={k}>
+            <span style={{ color: '#c084fc' }}>"{k}"</span>
+            <span style={{ color: 'var(--text-muted)' }}>: </span>
+            {renderValue(val[k], depth + 1)}
+            {i < keys.length - 1 ? ',' : ''}
           </div>
-          {'}'}
-        </span>
+        ))}</div>{'}'}</span>
       )
     }
     return <span>{String(val)}</span>
@@ -166,9 +210,6 @@ function ModelDropdown({ model, onSelect }: { model: KlingModel; onSelect: (m: K
                 </div>
               </div>
               <p className="text-[11px] ml-4" style={{ color: 'var(--text-muted)' }}>{m.description}</p>
-              {!m.supportsSound && (
-                <p className="text-[10px] ml-4 mt-0.5" style={{ color: 'rgba(255,255,255,0.2)' }}>No sound support</p>
-              )}
             </button>
           ))}
         </div>
@@ -194,11 +235,7 @@ function ImagePickerModal({ onSelect, onClose }: { onSelect: (b64: string) => vo
   }, [])
 
   useEffect(() => {
-    fetchPage().then(data => {
-      setItems(data.items || [])
-      setNextPageToken(data.nextPageToken || null)
-      setLoading(false)
-    })
+    fetchPage().then(data => { setItems(data.items || []); setNextPageToken(data.nextPageToken || null); setLoading(false) })
   }, [fetchPage])
 
   const loadMore = useCallback(async () => {
@@ -213,8 +250,7 @@ function ImagePickerModal({ onSelect, onClose }: { onSelect: (b64: string) => vo
   useEffect(() => {
     const el = sentinelRef.current; if (!el) return
     const obs = new IntersectionObserver(entries => { if (entries[0].isIntersecting) loadMore() }, { threshold: 0.1 })
-    obs.observe(el)
-    return () => obs.disconnect()
+    obs.observe(el); return () => obs.disconnect()
   }, [loadMore])
 
   async function handleSelect(item: GenItem) {
@@ -228,11 +264,8 @@ function ImagePickerModal({ onSelect, onClose }: { onSelect: (b64: string) => vo
         reader.onload = () => resolve((reader.result as string).split(',')[1])
         reader.readAsDataURL(blob)
       })
-      onSelect(b64)
-      onClose()
-    } catch (e) {
-      console.error('Failed to load image', e)
-    }
+      onSelect(b64); onClose()
+    } catch (e) { console.error('Failed to load image', e) }
     setFetchingId(null)
   }
 
@@ -250,8 +283,7 @@ function ImagePickerModal({ onSelect, onClose }: { onSelect: (b64: string) => vo
           </div>
           <button onClick={onClose} className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/10">
             <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
-              <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"
-                style={{ color: 'var(--text-muted)' }}/>
+              <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" style={{ color: 'var(--text-muted)' }}/>
             </svg>
           </button>
         </div>
@@ -259,8 +291,7 @@ function ImagePickerModal({ onSelect, onClose }: { onSelect: (b64: string) => vo
           {loading ? (
             <div className="grid gap-2.5" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
               {Array.from({ length: 12 }).map((_, i) => (
-                <div key={i} className="rounded-xl animate-pulse"
-                  style={{ aspectRatio: '1', background: 'rgba(255,255,255,0.04)' }} />
+                <div key={i} className="rounded-xl animate-pulse" style={{ aspectRatio: '1', background: 'rgba(255,255,255,0.04)' }} />
               ))}
             </div>
           ) : items.length === 0 ? (
@@ -278,19 +309,15 @@ function ImagePickerModal({ onSelect, onClose }: { onSelect: (b64: string) => vo
                       <img src={item.thumbnailLink} alt={item.prompt} className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1"
-                          style={{ color: 'rgba(255,255,255,0.15)' }}>
-                          <rect x="3" y="3" width="18" height="18" rx="3"/>
-                          <circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'rgba(255,255,255,0.15)' }}>
+                          <rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
                         </svg>
                       </div>
                     )}
                     {fetchingId === item.id && (
-                      <div className="absolute inset-0 flex items-center justify-center"
-                        style={{ background: 'rgba(0,0,0,0.6)' }}>
+                      <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
                         <svg className="animate-spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                          <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/>
-                          <path d="M12 2a10 10 0 0 1 10 10"/>
+                          <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
                         </svg>
                       </div>
                     )}
@@ -326,49 +353,31 @@ function VideoCard({ item, onSelect, featured = false }: { item: VideoItem; onSe
   const [thumbErr, setThumbErr] = useState(false)
   const thumbSrc = `/api/video/thumb/${item.id}`
   return (
-    <div onClick={onSelect}
-      className="relative rounded-xl overflow-hidden cursor-pointer group"
-      style={{
-        background: 'var(--surface)', border: '1px solid var(--border)',
-        aspectRatio: featured ? '21/9' : '16/10',
-        gridColumn: featured ? 'span 2' : undefined,
-      }}>
+    <div onClick={onSelect} className="relative rounded-xl overflow-hidden cursor-pointer group"
+      style={{ background: 'var(--surface)', border: '1px solid var(--border)', aspectRatio: featured ? '21/9' : '16/10', gridColumn: featured ? 'span 2' : undefined }}>
       {!thumbErr ? (
-        <img src={thumbSrc} alt={item.prompt} className="w-full h-full object-cover"
-          onError={() => setThumbErr(true)} />
+        <img src={thumbSrc} alt={item.prompt} className="w-full h-full object-cover" onError={() => setThumbErr(true)} />
       ) : (
-        <div className="w-full h-full flex items-center justify-center"
-          style={{ background: 'rgba(255,255,255,0.03)' }}>
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1"
-            style={{ color: 'rgba(255,255,255,0.15)' }}><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <div className="w-full h-full flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.03)' }}>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'rgba(255,255,255,0.15)' }}><polygon points="5 3 19 12 5 21 5 3"/></svg>
         </div>
       )}
-      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-        style={{ background: 'rgba(0,0,0,0.5)' }}>
-        <div className="w-10 h-10 rounded-full flex items-center justify-center"
-          style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(4px)' }}>
+      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: 'rgba(0,0,0,0.5)' }}>
+        <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(4px)' }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
         </div>
       </div>
       {featured && (
         <div className="absolute top-2 left-2">
-          <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold"
-            style={{ background: 'rgba(79,110,247,0.8)', color: '#fff' }}>Latest</span>
+          <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold" style={{ background: 'rgba(79,110,247,0.8)', color: '#fff' }}>Latest</span>
         </div>
       )}
-      <div className="absolute bottom-0 left-0 right-0 p-2 flex items-end justify-between"
-        style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.7))' }}>
+      <div className="absolute bottom-0 left-0 right-0 p-2 flex items-end justify-between" style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.7))' }}>
         <div className="flex gap-1 flex-wrap">
-          <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-medium"
-            style={{ background: 'rgba(79,110,247,0.8)', color: '#fff' }}>{item.duration}s</span>
-          <span className="text-[9px] px-1.5 py-0.5 rounded font-medium"
-            style={{ background: 'rgba(0,0,0,0.6)', color: 'rgba(255,255,255,0.7)' }}>
-            {item.model.replace('kling-','')}
-          </span>
+          <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-medium" style={{ background: 'rgba(79,110,247,0.8)', color: '#fff' }}>{item.duration}s</span>
+          <span className="text-[9px] px-1.5 py-0.5 rounded font-medium" style={{ background: 'rgba(0,0,0,0.6)', color: 'rgba(255,255,255,0.7)' }}>{item.model.replace('kling-','')}</span>
         </div>
-        {item.userName && (
-          <UserAvatar name={item.userName} email={item.userEmail} image={item.userImage} size={20} />
-        )}
+        {item.userName && <UserAvatar name={item.userName} email={item.userEmail} image={item.userImage} size={20} />}
       </div>
     </div>
   )
@@ -394,7 +403,7 @@ function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose
     try {
       const res = await fetch('/api/video/enhance-prompt', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: extPrompt, duration: '5' }),
+        body: JSON.stringify({ prompt: extPrompt, duration: 5 }),
       })
       const data = await res.json()
       if (data.prompt) setExtPrompt(data.prompt)
@@ -457,40 +466,18 @@ function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose
       <div className="relative flex rounded-2xl overflow-hidden max-h-[90vh] w-full max-w-3xl"
         style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
         onClick={e => e.stopPropagation()}>
-
-        <button onClick={onClose}
-          className="absolute top-4 right-4 z-10 w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10"
-          style={{ background: 'rgba(0,0,0,0.4)' }}>
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path d="M1 1l10 10M11 1L1 11" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
-          </svg>
+        <button onClick={onClose} className="absolute top-4 right-4 z-10 w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10" style={{ background: 'rgba(0,0,0,0.4)' }}>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1l10 10M11 1L1 11" stroke="white" strokeWidth="1.5" strokeLinecap="round"/></svg>
         </button>
-
-        {/* Video player */}
-        <div className="flex-shrink-0 flex items-center justify-center"
-          style={{ width: 360, background: 'rgba(0,0,0,0.5)' }}>
+        <div className="flex-shrink-0 flex items-center justify-center" style={{ width: 360, background: 'rgba(0,0,0,0.5)' }}>
           <video src={`/api/video/file/${item.id}`} controls autoPlay loop className="w-full max-h-[90vh] object-contain" />
         </div>
-
-        {/* Right panel */}
         <div className="flex flex-col flex-1 min-w-0 overflow-y-auto p-5">
-          {/* Meta */}
           <div className="flex items-center gap-2 mb-4 flex-wrap">
-            <span className="rounded px-2 py-1 text-xs font-mono font-medium"
-              style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)' }}>
-              {item.model.replace('kling-','')}
-            </span>
-            <span className="rounded px-2 py-1 text-xs font-mono"
-              style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>{item.duration}s</span>
-            {item.aspectRatio && (
-              <span className="rounded px-2 py-1 text-xs font-mono"
-                style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>{item.aspectRatio}</span>
-            )}
-            {item.createdTime && (
-              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                {new Date(item.createdTime).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}
-              </span>
-            )}
+            <span className="rounded px-2 py-1 text-xs font-mono font-medium" style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)' }}>{item.model.replace('kling-','')}</span>
+            <span className="rounded px-2 py-1 text-xs font-mono" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>{item.duration}s</span>
+            {item.aspectRatio && <span className="rounded px-2 py-1 text-xs font-mono" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>{item.aspectRatio}</span>}
+            {item.createdTime && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{new Date(item.createdTime).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}</span>}
             {item.userName && (
               <div className="flex items-center gap-1.5 ml-auto">
                 <UserAvatar name={item.userName} email={item.userEmail} image={item.userImage} size={22} />
@@ -498,18 +485,13 @@ function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose
               </div>
             )}
           </div>
-
-          {/* Prompt — JSON-aware display */}
           {item.prompt && (
             <div className="mb-4">
               <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Prompt</div>
               <JsonPromptDisplay prompt={item.prompt} />
             </div>
           )}
-
           <div className="mb-4" style={{ height: 1, background: 'var(--border)' }} />
-
-          {/* Extend */}
           <div className="mb-4">
             <div className="flex items-center justify-between mb-2">
               <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
@@ -517,21 +499,13 @@ function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose
               </div>
               <button onClick={handleEnhanceExt} disabled={enhancingExt || !extPrompt.trim()}
                 className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition-all font-medium"
-                style={{
-                  background: extPrompt.trim() ? 'rgba(79,110,247,0.12)' : 'rgba(255,255,255,0.04)',
-                  color: extPrompt.trim() ? 'var(--accent)' : 'rgba(255,255,255,0.2)',
-                  border: '1px solid var(--border)',
-                }}
-                title="Convert to professional JSON prompt">
+                style={{ background: extPrompt.trim() ? 'rgba(79,110,247,0.12)' : 'rgba(255,255,255,0.04)', color: extPrompt.trim() ? 'var(--accent)' : 'rgba(255,255,255,0.2)', border: '1px solid var(--border)' }}>
                 {enhancingExt ? (
-                  <svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
-                  </svg>
-                ) : '✦'} JSON
+                  <svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>
+                ) : '✦'} Enhance
               </button>
             </div>
-            <textarea value={extPrompt} onChange={e => setExtPrompt(e.target.value)}
-              placeholder="Optional: describe the continuation..." rows={2}
+            <textarea value={extPrompt} onChange={e => setExtPrompt(e.target.value)} placeholder="Optional: describe the continuation..." rows={2}
               className="w-full rounded-lg resize-none outline-none text-sm p-3 mb-2"
               style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }} />
             {extStatus === 'done' && <p className="text-xs mb-2" style={{ color: '#34a853' }}>✓ Extended and saved</p>}
@@ -540,36 +514,22 @@ function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose
               className="w-full py-2 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2"
               style={{ background: 'rgba(79,110,247,0.12)', color: 'var(--accent)', border: '1px solid var(--border)' }}>
               {extending ? (
-                <><svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
-                </svg>Extending...</>
+                <><svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>Extending...</>
               ) : '⚡ Extend'}
             </button>
           </div>
-
           {err && <p className="text-xs mb-3" style={{ color: '#f87171' }}>{err}</p>}
-
           <div className="flex gap-2 mt-auto">
-            <a href={`/api/video/file/${item.id}?download=1`}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium"
-              style={{ background: 'var(--accent)', color: '#fff' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-              </svg>Download
+            <a href={`/api/video/file/${item.id}?download=1`} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium" style={{ background: 'var(--accent)', color: '#fff' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download
             </a>
             <button onClick={handleDelete} disabled={deleting}
               className="flex items-center justify-center px-3 py-2.5 rounded-lg text-sm transition-all"
               style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171' }}>
               {deleting ? (
-                <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
-                </svg>
+                <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>
               ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-                  <path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
-                </svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
               )}
             </button>
           </div>
@@ -594,17 +554,15 @@ function ImageUploadBox({ label, preview, onUpload, onClear, onPickFromLibrary, 
     reader.readAsDataURL(file)
   }
   return (
-    <div>
+    <div className="mb-3">
       <div className="flex items-center justify-between mb-1.5">
         <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{label}</div>
         {!preview && (
           <button onClick={onPickFromLibrary}
             className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition-all font-medium"
-            style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
-            title="Pick from your image library">
+            style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="3" width="18" height="18" rx="3"/>
-              <circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+              <rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
             </svg>
             Library
           </button>
@@ -615,22 +573,16 @@ function ImageUploadBox({ label, preview, onUpload, onClear, onPickFromLibrary, 
         style={{ borderColor: preview ? 'transparent' : 'var(--border)', minHeight: compact ? 70 : 80 }}>
         {preview ? (
           <div className="relative w-full">
-            <img src={`data:image/jpeg;base64,${preview}`} alt={label}
-              className="w-full object-cover rounded-xl" style={{ maxHeight: compact ? 70 : 130 }} />
+            <img src={`data:image/jpeg;base64,${preview}`} alt={label} className="w-full object-cover rounded-xl" style={{ maxHeight: compact ? 70 : 130 }} />
             <button onClick={e => { e.stopPropagation(); onClear(); if (ref.current) ref.current.value = '' }}
-              className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full flex items-center justify-center"
-              style={{ background: 'rgba(0,0,0,0.6)' }}>
-              <svg width="8" height="8" viewBox="0 0 12 12" fill="none">
-                <path d="M1 1l10 10M11 1L1 11" stroke="white" strokeWidth="1.8" strokeLinecap="round"/>
-              </svg>
+              className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
+              <svg width="8" height="8" viewBox="0 0 12 12" fill="none"><path d="M1 1l10 10M11 1L1 11" stroke="white" strokeWidth="1.8" strokeLinecap="round"/></svg>
             </button>
           </div>
         ) : (
           <div className="text-center p-3">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
-              className="mx-auto mb-1" style={{ color: 'var(--text-muted)' }}>
-              <rect x="3" y="3" width="18" height="18" rx="3"/>
-              <circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto mb-1" style={{ color: 'var(--text-muted)' }}>
+              <rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
             </svg>
             <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Upload</div>
           </div>
@@ -644,31 +596,53 @@ function ImageUploadBox({ label, preview, onUpload, onClear, onPickFromLibrary, 
 // ── Main VideoPage ─────────────────────────────────────────────────────────
 
 export function VideoPage() {
+  // ── Model & Mode ──
   const [model, setModel] = useState<KlingModel>('kling-v3')
+  const [videoMode, setVideoMode] = useState<VideoMode>('standard')
+
+  // ── Standard mode state ──
   const [prompt, setPrompt] = useState('')
   const [negPrompt, setNegPrompt] = useState('')
   const [negOpen, setNegOpen] = useState(false)
   const [mode, setMode] = useState<Mode>('std')
-  const [duration, setDuration] = useState<Duration>('5')
+  const [duration, setDuration] = useState(5)
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9')
   const [sound, setSound] = useState(false)
   const [firstFrame, setFirstFrame] = useState<string | null>(null)
   const [lastFrame, setLastFrame] = useState<string | null>(null)
-  const [enhancing, setEnhancing] = useState(false)
-  const [pickerTarget, setPickerTarget] = useState<'first' | 'last' | null>(null)
-
   const [assets, setAssets] = useState<{ id: string; name: string; base64: string }[]>([])
-  const assetInputRef = useRef<HTMLInputElement>(null)
+  const [enhancing, setEnhancing] = useState(false)
+  const [pickerTarget, setPickerTarget] = useState<'first' | 'last' | 'motion' | 'avatar' | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const assetInputRef = useRef<HTMLInputElement>(null)
   const [atPopup, setAtPopup] = useState(false)
   const [atQuery, setAtQuery] = useState('')
 
+  // ── Multishot state ──
+  const [shots, setShots] = useState<ShotItem[]>([{ id: '1', prompt: '', duration: 3 }])
+  const [shotDescription, setShotDescription] = useState('')
+  const [enhancingShots, setEnhancingShots] = useState(false)
+
+  // ── Motion Control state ──
+  const [motionImage, setMotionImage] = useState<string | null>(null)
+  const [motionVideoUrl, setMotionVideoUrl] = useState('')
+  const [motionOrientation, setMotionOrientation] = useState<'image' | 'video'>('image')
+  const [motionKeepSound, setMotionKeepSound] = useState(false)
+
+  // ── Avatar state ──
+  const [avatarImage, setAvatarImage] = useState<string | null>(null)
+  const [avatarAudioBase64, setAvatarAudioBase64] = useState<string | null>(null)
+  const [avatarAudioName, setAvatarAudioName] = useState('')
+  const avatarAudioRef = useRef<HTMLInputElement>(null)
+
+  // ── Generation state ──
   const [status, setStatus] = useState<TaskStatus>('idle')
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [savingToDrive, setSavingToDrive] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval>|null>(null)
 
+  // ── History state ──
   const [history, setHistory] = useState<VideoItem[]>([])
   const [historyLoading, setHistoryLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -677,16 +651,34 @@ export function VideoPage() {
   const [filterEmail, setFilterEmail] = useState<string | null>(null)
   const sentinelRef = useRef<HTMLDivElement>(null)
 
+  // ── Derived ──
   const currentModel = MODELS.find(m => m.id === model)!
-  const canGenerate = status !== 'pending' && status !== 'processing' && prompt.trim().length > 0
+  const totalShotsDuration = shots.reduce((s, sh) => s + sh.duration, 0)
+  const isTurboModel = TURBO_MODELS.has(model)
 
-  // Unique users from history for filter
+  const canGenerate = useMemo(() => {
+    if (status === 'pending' || status === 'processing') return false
+    if (videoMode === 'standard') return prompt.trim().length > 0
+    if (videoMode === 'multishot') return shots.some(s => s.prompt.trim().length > 0) || shotDescription.trim().length > 0
+    if (videoMode === 'motionControl') return !!motionImage && !!motionVideoUrl
+    if (videoMode === 'avatar') return !!avatarImage && !!avatarAudioBase64
+    return false
+  }, [status, videoMode, prompt, shots, shotDescription, motionImage, motionVideoUrl, avatarImage, avatarAudioBase64])
+
   const historyUsers = Array.from(
     new Map(history.filter(v => v.userEmail).map(v => [v.userEmail, v])).values()
   ).map(v => ({ email: v.userEmail, name: v.userName, image: v.userImage }))
 
   const filteredHistory = filterEmail ? history.filter(v => v.userEmail === filterEmail) : history
 
+  // ── Reset videoMode when model changes and mode not supported ──
+  useEffect(() => {
+    if (!currentModel.modes.includes(videoMode)) {
+      setVideoMode(currentModel.modes[0])
+    }
+  }, [model]) // eslint-disable-line
+
+  // ── History load ──
   const fetchHistory = useCallback(async () => {
     setHistoryLoading(true)
     try {
@@ -715,15 +707,15 @@ export function VideoPage() {
   useEffect(() => {
     const el = sentinelRef.current; if (!el) return
     const obs = new IntersectionObserver(entries => { if (entries[0].isIntersecting) loadMore() }, { threshold: 0.1 })
-    obs.observe(el)
-    return () => obs.disconnect()
+    obs.observe(el); return () => obs.disconnect()
   }, [loadMore])
 
+  // ── Polling ──
   const stopPolling = useCallback(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
   }, [])
 
-  const pollStatus = useCallback((taskId: string, type: 'text2video' | 'image2video') => {
+  const pollStatus = useCallback((taskId: string, type: string, savePayload: any) => {
     stopPolling()
     pollRef.current = setInterval(async () => {
       try {
@@ -732,19 +724,13 @@ export function VideoPage() {
         if (data.task_status === 'succeed') {
           stopPolling()
           const url = data.task_result?.videos?.[0]?.url ?? null
-          const vid = data.task_result?.videos?.[0]?.id ?? null
+          const vid = data.task_result?.videos?.[0]?.id ?? ''
           setVideoUrl(url); setStatus('done')
           if (url) {
             setSavingToDrive(true)
             fetch('/api/video/save', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                videoUrl: url, klingVideoId: vid ?? '',
-                prompt, model, duration,
-                aspectRatio: firstFrame ? '' : aspectRatio,
-                sound: sound ? 'on' : 'off',
-                inputType: firstFrame ? 'image' : 'text',
-              }),
+              body: JSON.stringify({ videoUrl: url, klingVideoId: vid, ...savePayload }),
             }).then(() => { setSavingToDrive(false); fetchHistory() }).catch(() => setSavingToDrive(false))
           }
         } else if (data.task_status === 'failed') {
@@ -752,45 +738,33 @@ export function VideoPage() {
         }
       } catch {}
     }, 4000)
-  }, [stopPolling, prompt, model, duration, aspectRatio, sound, firstFrame, fetchHistory])
+  }, [stopPolling, fetchHistory])
 
-  const handleGenerate = async () => {
-    if (!canGenerate) return
-    setStatus('pending'); setVideoUrl(null); setError(null)
-    try {
-      const type = firstFrame ? 'image2video' : 'text2video'
-      const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
-      const body = firstFrame
-        ? { model_name: model, image: firstFrame, ...(lastFrame ? { image_tail: lastFrame } : {}), prompt, negative_prompt: negPrompt, mode, duration, sound: soundParam }
-        : { model_name: model, prompt, negative_prompt: negPrompt, mode, duration, aspect_ratio: aspectRatio, sound: soundParam }
-      const res = await fetch(`/api/video/${type}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-      })
-      const data = await res.json()
-      if (data.error) throw new Error(data.error)
-      setStatus('processing')
-      pollStatus(data.task_id, type)
-    } catch (e: any) { setError(e.message); setStatus('error') }
+  // ── Handlers ──
+
+  function addShot() {
+    if (totalShotsDuration >= 15 || shots.length >= 6) return
+    const remaining = 15 - totalShotsDuration
+    setShots(prev => [...prev, { id: Math.random().toString(36).slice(2), prompt: '', duration: Math.min(3, remaining) }])
+  }
+  function removeShot(id: string) {
+    if (shots.length <= 1) return
+    setShots(prev => prev.filter(s => s.id !== id))
+  }
+  function updateShot(id: string, field: 'prompt' | 'duration', value: string | number) {
+    setShots(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s))
   }
 
-  const handleEnhancePrompt = async () => {
-    if (!prompt.trim() || enhancing) return
-    setEnhancing(true)
-    try {
-      const res = await fetch('/api/video/enhance-prompt', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, aspectRatio: firstFrame ? '' : aspectRatio, duration, assets: assets.map(a => ({ name: a.name, base64: a.base64 })) }),
-      })
-      const data = await res.json()
-      if (data.prompt) setPrompt(data.prompt)
-    } catch {}
-    setEnhancing(false)
-  }
-
-  function handlePickerSelect(b64: string) {
-    if (pickerTarget === 'first') setFirstFrame(b64)
-    else if (pickerTarget === 'last') setLastFrame(b64)
-    setPickerTarget(null)
+  function handleAvatarAudio(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]; if (!file) return
+    const reader = new FileReader()
+    reader.onload = ev => {
+      const b64 = (ev.target?.result as string).split(',')[1]
+      setAvatarAudioBase64(b64)
+      setAvatarAudioName(file.name)
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
   }
 
   function handleAssetUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -810,32 +784,189 @@ export function VideoPage() {
   function handlePromptKeyUp(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Escape') { setAtPopup(false); setAtQuery(''); return }
     const ta = e.currentTarget
-    const val = ta.value
-    const pos = ta.selectionStart ?? 0
+    const val = ta.value; const pos = ta.selectionStart ?? 0
     const before = val.slice(0, pos)
     const atIdx = before.lastIndexOf('@')
     if (atIdx !== -1 && !before.slice(atIdx).includes(' ')) {
-      const query = before.slice(atIdx + 1)
-      setAtQuery(query)
-      setAtPopup(true)
-    } else {
-      setAtPopup(false)
-      setAtQuery('')
-    }
+      setAtQuery(before.slice(atIdx + 1)); setAtPopup(true)
+    } else { setAtPopup(false); setAtQuery('') }
   }
 
   function insertAssetMention(name: string) {
-    const ta = textareaRef.current
-    if (!ta) return
-    const val = ta.value
-    const pos = ta.selectionStart ?? 0
-    const before = val.slice(0, pos)
-    const atIdx = before.lastIndexOf('@')
+    const ta = textareaRef.current; if (!ta) return
+    const val = ta.value; const pos = ta.selectionStart ?? 0
+    const before = val.slice(0, pos); const atIdx = before.lastIndexOf('@')
     const newVal = val.slice(0, atIdx) + `@${name}` + val.slice(pos)
-    setPrompt(newVal)
-    setAtPopup(false)
-    setAtQuery('')
+    setPrompt(newVal); setAtPopup(false); setAtQuery('')
     setTimeout(() => { ta.focus(); ta.setSelectionRange(atIdx + name.length + 1, atIdx + name.length + 1) }, 0)
+  }
+
+  function handlePickerSelect(b64: string) {
+    if (pickerTarget === 'first') setFirstFrame(b64)
+    else if (pickerTarget === 'last') setLastFrame(b64)
+    else if (pickerTarget === 'motion') setMotionImage(b64)
+    else if (pickerTarget === 'avatar') setAvatarImage(b64)
+    setPickerTarget(null)
+  }
+
+  // ── Enhance prompt ──
+  async function handleEnhancePrompt() {
+    if (enhancing) return
+    setEnhancing(true)
+    try {
+      // Collect all images: firstFrame + assets
+      const images: string[] = []
+      if (firstFrame) images.push(firstFrame)
+      assets.forEach(a => {
+        const raw = a.base64.startsWith('data:') ? a.base64 : `data:image/jpeg;base64,${a.base64}`
+        images.push(raw)
+      })
+      const res = await fetch('/api/video/enhance-prompt', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: prompt.trim() || 'Create a cinematic video',
+          mode: 'standard',
+          model: currentModel.label,
+          aspectRatio: firstFrame ? '' : aspectRatio,
+          duration,
+          images: images.length ? images : undefined,
+        }),
+      })
+      const data = await res.json()
+      if (data.prompt) setPrompt(data.prompt)
+    } catch {}
+    setEnhancing(false)
+  }
+
+  // ── Enhance shots ──
+  async function handleEnhanceShots() {
+    const description = shotDescription.trim() || shots.map(s => s.prompt).join(' ').trim()
+    if (!description || enhancingShots) return
+    setEnhancingShots(true)
+    try {
+      const images: string[] = []
+      if (firstFrame) images.push(firstFrame)
+      const res = await fetch('/api/video/enhance-prompt', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: description,
+          mode: 'multishot',
+          model: currentModel.label,
+          shots: shots.map(s => ({ duration: s.duration })),
+          images: images.length ? images : undefined,
+        }),
+      })
+      const data = await res.json()
+      if (Array.isArray(data.shots)) {
+        setShots(prev => prev.map((s, i) => data.shots[i] ? { ...s, prompt: data.shots[i] } : s))
+      }
+    } catch {}
+    setEnhancingShots(false)
+  }
+
+  // ── Generate ──
+  const handleGenerate = async () => {
+    if (!canGenerate) return
+    setStatus('pending'); setVideoUrl(null); setError(null)
+
+    try {
+      if (videoMode === 'motionControl') {
+        const motionModel = (model === 'kling-v3' || model === 'kling-v3-omni') ? 'kling-v3' : 'kling-v2-6'
+        const res = await fetch('/api/video/motion-control', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image_url: motionImage,
+            video_url: motionVideoUrl,
+            prompt,
+            model_name: motionModel,
+            character_orientation: motionOrientation,
+            keep_original_sound: motionKeepSound ? 'yes' : 'no',
+            mode,
+          }),
+        })
+        const data = await res.json()
+        if (data.error) throw new Error(data.error)
+        setStatus('processing')
+        pollStatus(data.task_id, 'motion-control', {
+          prompt: prompt || 'Motion control video',
+          model, duration: String(duration), aspectRatio: '', sound: 'off', inputType: 'motion',
+        })
+        return
+      }
+
+      if (videoMode === 'avatar') {
+        const res = await fetch('/api/video/avatar', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: avatarImage, sound_file: avatarAudioBase64, prompt, mode }),
+        })
+        const data = await res.json()
+        if (data.error) throw new Error(data.error)
+        setStatus('processing')
+        pollStatus(data.task_id, 'avatar', {
+          prompt: prompt || 'Avatar video',
+          model, duration: String(duration), aspectRatio: '', sound: 'off', inputType: 'avatar',
+        })
+        return
+      }
+
+      if (videoMode === 'multishot') {
+        const allShotsHavePrompts = shots.every(s => s.prompt.trim())
+        const effectivePrompt = allShotsHavePrompts
+          ? shots.map((s, i) => `shot ${i + 1}, ${s.duration}, ${s.prompt}`).join('; ')
+          : shotDescription
+        const totalDur = totalShotsDuration
+
+        if (isTurboModel) {
+          const res = await fetch('/api/video/turbo', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model_name: model, prompt: effectivePrompt, first_frame: firstFrame, duration: totalDur }),
+          })
+          const data = await res.json()
+          if (data.error) throw new Error(data.error)
+          setStatus('processing')
+          pollStatus(data.task_id, 'turbo', { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: '', sound: 'off', inputType: firstFrame ? 'image' : 'text' })
+        } else {
+          const type = firstFrame ? 'image2video' : 'text2video'
+          const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
+          const body = firstFrame
+            ? { model_name: model, image: firstFrame, prompt: effectivePrompt, mode, duration: String(totalDur), sound: soundParam }
+            : { model_name: model, prompt: effectivePrompt, mode, duration: String(totalDur), aspect_ratio: aspectRatio, sound: soundParam }
+          const res = await fetch(`/api/video/${type}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+          })
+          const data = await res.json()
+          if (data.error) throw new Error(data.error)
+          setStatus('processing')
+          pollStatus(data.task_id, type, { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: firstFrame ? '' : aspectRatio, sound: soundParam, inputType: firstFrame ? 'image' : 'text' })
+        }
+        return
+      }
+
+      // Standard mode
+      if (isTurboModel) {
+        const res = await fetch('/api/video/turbo', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model_name: model, prompt, first_frame: firstFrame, duration }),
+        })
+        const data = await res.json()
+        if (data.error) throw new Error(data.error)
+        setStatus('processing')
+        pollStatus(data.task_id, 'turbo', { prompt, model, duration: String(duration), aspectRatio: '', sound: 'off', inputType: firstFrame ? 'image' : 'text' })
+      } else {
+        const type = firstFrame ? 'image2video' : 'text2video'
+        const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
+        const body = firstFrame
+          ? { model_name: model, image: firstFrame, ...(lastFrame && currentModel.supportsLastFrame ? { image_tail: lastFrame } : {}), prompt, negative_prompt: negPrompt, mode, duration: String(duration), sound: soundParam }
+          : { model_name: model, prompt, negative_prompt: negPrompt, mode, duration: String(duration), aspect_ratio: aspectRatio, sound: soundParam }
+        const res = await fetch(`/api/video/${type}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        })
+        const data = await res.json()
+        if (data.error) throw new Error(data.error)
+        setStatus('processing')
+        pollStatus(data.task_id, type, { prompt, model, duration: String(duration), aspectRatio: firstFrame ? '' : aspectRatio, sound: soundParam, inputType: firstFrame ? 'image' : 'text' })
+      }
+    } catch (e: any) { setError(e.message); setStatus('error') }
   }
 
   const filteredAtAssets = assets.filter(a => a.name.toLowerCase().includes(atQuery.toLowerCase()))
@@ -848,141 +979,335 @@ export function VideoPage() {
         style={{ width: 340, borderRight: '1px solid var(--border)', background: 'var(--surface)' }}>
         <div className="flex flex-col gap-0 p-4">
 
-          <div className="mb-4">
+          {/* Model selector */}
+          <div className="mb-3">
             <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Model</div>
             <ModelDropdown model={model} onSelect={setModel} />
           </div>
 
-          {/* Prompt section */}
-          <div className="mb-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-                {firstFrame ? 'Motion prompt' : 'Prompt'}
+          {/* Mode selector */}
+          {currentModel.modes.length > 1 && (
+            <div className="mb-4">
+              <div className="flex gap-0 rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                {currentModel.modes.map((m, i) => (
+                  <button key={m} onClick={() => setVideoMode(m)}
+                    className="flex-1 py-2 text-[11px] font-medium transition-all"
+                    style={{
+                      background: videoMode === m ? 'rgba(79,110,247,0.15)' : 'rgba(255,255,255,0.02)',
+                      color: videoMode === m ? 'var(--accent)' : 'var(--text-muted)',
+                      borderRight: i < currentModel.modes.length - 1 ? '1px solid var(--border)' : 'none',
+                    }}>
+                    {MODE_LABELS[m]}
+                  </button>
+                ))}
               </div>
-              <button onClick={handleEnhancePrompt} disabled={enhancing || !prompt.trim()}
-                className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition-all font-medium"
-                style={{
-                  background: prompt.trim() ? 'rgba(79,110,247,0.12)' : 'rgba(255,255,255,0.04)',
-                  color: prompt.trim() ? 'var(--accent)' : 'rgba(255,255,255,0.2)',
-                  border: '1px solid var(--border)',
-                }}
-                title="Convert to professional JSON prompt">
-                {enhancing ? (
-                  <svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
-                  </svg>
-                ) : '✦'} JSON
-              </button>
             </div>
-            <div className="relative">
-              <textarea ref={textareaRef} value={prompt} onChange={e => setPrompt(e.target.value)} onKeyUp={handlePromptKeyUp}
-                placeholder={firstFrame ? 'Describe how it should move...' : 'Describe the video...'}
-                rows={6} className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none"
-                style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${prompt ? 'var(--accent)' : 'var(--border)'}`, color: 'var(--text)', caretColor: 'var(--accent)', fontFamily: 'inherit' }} />
-              {atPopup && filteredAtAssets.length > 0 && (
-                <div className="absolute bottom-full left-0 right-0 mb-1 rounded-xl overflow-hidden z-40"
-                  style={{ background: 'var(--bg)', border: '1px solid var(--border)', boxShadow: '0 -4px 20px rgba(0,0,0,0.4)' }}>
-                  {filteredAtAssets.map(asset => (
-                    <button key={asset.id} onMouseDown={e => { e.preventDefault(); insertAssetMention(asset.name) }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-left transition-all hover:bg-white/5">
-                      <img src={asset.base64} alt={asset.name} className="w-5 h-5 rounded object-cover flex-shrink-0" />
-                      <span className="text-xs font-mono" style={{ color: 'var(--accent)' }}>@{asset.name}</span>
+          )}
+
+          {/* ── Standard Mode ── */}
+          {videoMode === 'standard' && (
+            <>
+              {/* Prompt */}
+              <div className="mb-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                    {firstFrame ? 'Motion prompt' : 'Prompt'}
+                  </div>
+                  <button onClick={handleEnhancePrompt} disabled={enhancing}
+                    className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition-all font-medium"
+                    style={{ background: 'rgba(79,110,247,0.12)', color: 'var(--accent)', border: '1px solid var(--border)' }}>
+                    {enhancing ? (
+                      <svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>
+                    ) : '✦'} Enhance
+                  </button>
+                </div>
+                <div className="relative">
+                  <textarea ref={textareaRef} value={prompt} onChange={e => setPrompt(e.target.value)} onKeyUp={handlePromptKeyUp}
+                    placeholder={firstFrame ? 'Describe how it should move...' : 'Describe the video...'}
+                    rows={5} className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none"
+                    style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${prompt ? 'var(--accent)' : 'var(--border)'}`, color: 'var(--text)', caretColor: 'var(--accent)', fontFamily: 'inherit' }} />
+                  {atPopup && filteredAtAssets.length > 0 && (
+                    <div className="absolute bottom-full left-0 right-0 mb-1 rounded-xl overflow-hidden z-40"
+                      style={{ background: 'var(--bg)', border: '1px solid var(--border)', boxShadow: '0 -4px 20px rgba(0,0,0,0.4)' }}>
+                      {filteredAtAssets.map(asset => (
+                        <button key={asset.id} onMouseDown={e => { e.preventDefault(); insertAssetMention(asset.name) }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-left transition-all hover:bg-white/5">
+                          <img src={asset.base64} alt={asset.name} className="w-5 h-5 rounded object-cover flex-shrink-0" />
+                          <span className="text-xs font-mono" style={{ color: 'var(--accent)' }}>@{asset.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Assets */}
+              <div className="mb-3">
+                <div className="flex flex-wrap gap-1.5 mb-1.5">
+                  {assets.map(asset => (
+                    <div key={asset.id} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs"
+                      style={{ background: 'rgba(79,110,247,0.12)', border: '1px solid rgba(79,110,247,0.25)', color: 'var(--text)' }}>
+                      <img src={asset.base64} alt={asset.name} className="w-4 h-4 rounded object-cover" />
+                      <span className="font-mono" style={{ color: 'var(--accent)' }}>@{asset.name}</span>
+                      <button onClick={() => setAssets(prev => prev.filter(a => a.id !== asset.id))} className="ml-0.5 opacity-50 hover:opacity-100" style={{ color: 'var(--text-muted)' }}>×</button>
+                    </div>
+                  ))}
+                  <button onClick={() => assetInputRef.current?.click()}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all"
+                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                    <span style={{ fontSize: 14, lineHeight: 1 }}>＋</span> Asset
+                  </button>
+                  <input ref={assetInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleAssetUpload} />
+                </div>
+              </div>
+
+              {/* Frames */}
+              <div className="mb-3 flex gap-2">
+                <div className="flex-1">
+                  <ImageUploadBox label="First frame" preview={firstFrame}
+                    onUpload={setFirstFrame} onClear={() => setFirstFrame(null)}
+                    onPickFromLibrary={() => setPickerTarget('first')} compact />
+                </div>
+                {currentModel.supportsLastFrame && (
+                  <div className="flex-1">
+                    <ImageUploadBox label="Last frame" preview={lastFrame}
+                      onUpload={setLastFrame} onClear={() => setLastFrame(null)}
+                      onPickFromLibrary={() => setPickerTarget('last')} compact />
+                  </div>
+                )}
+              </div>
+
+              {/* Negative prompt */}
+              <div className="mb-3">
+                <button onClick={() => setNegOpen(o => !o)}
+                  className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider mb-1.5 transition-all"
+                  style={{ color: negOpen ? 'var(--text)' : 'var(--text-muted)' }}>
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className={`transition-transform ${negOpen ? 'rotate-180' : ''}`}>
+                    <path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                  Negative prompt
+                </button>
+                {negOpen && (
+                  <textarea value={negPrompt} onChange={e => setNegPrompt(e.target.value)} placeholder="What to avoid..." rows={2}
+                    className="w-full rounded-xl px-3 py-2 text-sm resize-none outline-none"
+                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+                )}
+              </div>
+            </>
+          )}
+
+          {/* ── Multishot Mode ── */}
+          {videoMode === 'multishot' && (
+            <>
+              {/* Brief description for enhance */}
+              <div className="mb-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Video concept</div>
+                  <button onClick={handleEnhanceShots} disabled={enhancingShots || (!shotDescription.trim() && !shots.some(s => s.prompt.trim()))}
+                    className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition-all font-medium"
+                    style={{ background: 'rgba(79,110,247,0.12)', color: 'var(--accent)', border: '1px solid var(--border)' }}>
+                    {enhancingShots ? (
+                      <svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>
+                    ) : '✦'} Write shots
+                  </button>
+                </div>
+                <textarea value={shotDescription} onChange={e => setShotDescription(e.target.value)}
+                  placeholder="Briefly describe the video concept..." rows={2}
+                  className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', fontFamily: 'inherit' }} />
+              </div>
+
+              {/* Shot builder */}
+              <div className="mb-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Shots</div>
+                  <span className="text-[11px] font-medium" style={{ color: totalShotsDuration >= 15 ? '#f87171' : 'var(--text-muted)' }}>
+                    {totalShotsDuration} / 15s
+                  </span>
+                </div>
+                {shots.map((shot, i) => (
+                  <div key={shot.id} className="mb-2 p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] font-semibold" style={{ color: 'var(--text-muted)' }}>Shot {i + 1}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-medium" style={{ color: 'var(--accent)' }}>{shot.duration}s</span>
+                        {shots.length > 1 && (
+                          <button onClick={() => removeShot(shot.id)} className="text-xs leading-none opacity-50 hover:opacity-100" style={{ color: '#f87171' }}>×</button>
+                        )}
+                      </div>
+                    </div>
+                    <textarea value={shot.prompt} onChange={e => updateShot(shot.id, 'prompt', e.target.value)}
+                      placeholder={`Describe shot ${i + 1}...`} rows={2}
+                      className="w-full rounded-lg px-2.5 py-2 text-xs resize-none outline-none mb-2"
+                      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', fontFamily: 'inherit' }} />
+                    <input type="range" min={1} max={Math.max(1, 15 - totalShotsDuration + shot.duration)} step={1}
+                      value={shot.duration} onChange={e => updateShot(shot.id, 'duration', Number(e.target.value))}
+                      className="w-full" style={{ accentColor: 'var(--accent)' }} />
+                  </div>
+                ))}
+                <button onClick={addShot}
+                  disabled={totalShotsDuration >= 15 || shots.length >= 6}
+                  className="w-full py-1.5 rounded-xl text-xs font-medium transition-all"
+                  style={{
+                    background: (totalShotsDuration >= 15 || shots.length >= 6) ? 'rgba(255,255,255,0.03)' : 'rgba(79,110,247,0.08)',
+                    color: (totalShotsDuration >= 15 || shots.length >= 6) ? 'rgba(255,255,255,0.2)' : 'var(--accent)',
+                    border: '1px dashed var(--border)',
+                    cursor: (totalShotsDuration >= 15 || shots.length >= 6) ? 'not-allowed' : 'pointer',
+                  }}>
+                  + Add shot {shots.length >= 6 ? '(max 6)' : totalShotsDuration >= 15 ? '(max 15s)' : ''}
+                </button>
+              </div>
+
+              {/* Optional first frame for multishot */}
+              <ImageUploadBox label="First frame (optional)" preview={firstFrame}
+                onUpload={setFirstFrame} onClear={() => setFirstFrame(null)}
+                onPickFromLibrary={() => setPickerTarget('first')} compact />
+            </>
+          )}
+
+          {/* ── Motion Control Mode ── */}
+          {videoMode === 'motionControl' && (
+            <>
+              <ImageUploadBox label="Character photo" preview={motionImage}
+                onUpload={setMotionImage} onClear={() => setMotionImage(null)}
+                onPickFromLibrary={() => setPickerTarget('motion')} />
+
+              <div className="mb-3">
+                <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Motion reference video URL</div>
+                <input value={motionVideoUrl} onChange={e => setMotionVideoUrl(e.target.value)}
+                  placeholder="https://... (.mp4 or .mov)"
+                  className="w-full rounded-xl px-3 py-2 text-sm outline-none"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+                <p className="text-[10px] mt-1" style={{ color: 'rgba(255,255,255,0.2)' }}>
+                  Min 3s · Max {motionOrientation === 'image' ? '10s' : '30s'} · up to 100MB
+                </p>
+              </div>
+
+              <div className="mb-3">
+                <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Prompt (optional)</div>
+                <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
+                  placeholder="Clothing, scene details..." rows={2}
+                  className="w-full rounded-xl px-3 py-2 text-sm resize-none outline-none"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+              </div>
+
+              <div className="mb-3">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Character orientation</div>
+                  <span title="'By photo' — character faces as in the photo (video max 10s). 'By video' — character follows orientation from the reference video (video max 30s)."
+                    className="text-[10px] w-4 h-4 rounded-full flex items-center justify-center cursor-help flex-shrink-0"
+                    style={{ background: 'rgba(255,255,255,0.1)', color: 'var(--text-muted)' }}>?</span>
+                </div>
+                <div className="flex gap-2">
+                  {([['image', 'By photo'], ['video', 'By video']] as ['image' | 'video', string][]).map(([val, label]) => (
+                    <button key={val} onClick={() => setMotionOrientation(val)}
+                      className="flex-1 py-1.5 rounded-lg text-xs font-medium transition-all"
+                      style={{ background: motionOrientation === val ? 'rgba(79,110,247,0.15)' : 'rgba(255,255,255,0.04)', color: motionOrientation === val ? 'var(--accent)' : 'var(--text-muted)', border: `1px solid ${motionOrientation === val ? 'var(--accent)' : 'var(--border)'}` }}>
+                      {label}
                     </button>
                   ))}
                 </div>
-              )}
-            </div>
-          </div>
+              </div>
 
-          {/* Assets panel */}
-          <div className="mb-3">
-            <div className="flex flex-wrap gap-1.5 mb-1.5">
-              {assets.map(asset => (
-                <div key={asset.id} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs"
-                  style={{ background: 'rgba(79,110,247,0.12)', border: '1px solid rgba(79,110,247,0.25)', color: 'var(--text)' }}>
-                  <img src={asset.base64} alt={asset.name} className="w-4 h-4 rounded object-cover" />
-                  <span className="font-mono" style={{ color: 'var(--accent)' }}>@{asset.name}</span>
-                  <button onClick={() => setAssets(prev => prev.filter(a => a.id !== asset.id))}
-                    className="ml-0.5 opacity-50 hover:opacity-100" style={{ color: 'var(--text-muted)' }}>×</button>
-                </div>
-              ))}
-              <button onClick={() => assetInputRef.current?.click()}
-                className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all"
-                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-                <span style={{ fontSize: 14, lineHeight: 1 }}>＋</span> Asset
-              </button>
-              <input ref={assetInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleAssetUpload} />
-            </div>
-            {assets.length > 0 && !firstFrame && (
-              <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.25)' }}>
-                Assets are used for AI prompt enhancement. Set a First Frame to use image2video.
-              </p>
-            )}
-          </div>
-
-          {/* First/Last frame side by side */}
-          <div className="mb-4 flex gap-2">
-            <div className="flex-1">
-              <ImageUploadBox label="First frame" preview={firstFrame}
-                onUpload={setFirstFrame} onClear={() => setFirstFrame(null)}
-                onPickFromLibrary={() => setPickerTarget('first')} compact />
-            </div>
-            <div className="flex-1">
-              <ImageUploadBox label="Last frame" preview={lastFrame}
-                onUpload={setLastFrame} onClear={() => setLastFrame(null)}
-                onPickFromLibrary={() => setPickerTarget('last')} compact />
-            </div>
-          </div>
-
-          <div className="mb-4">
-            <button onClick={() => setNegOpen(o => !o)}
-              className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider mb-1.5 transition-all"
-              style={{ color: negOpen ? 'var(--text)' : 'var(--text-muted)' }}>
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none"
-                className={`transition-transform ${negOpen ? 'rotate-180' : ''}`}>
-                <path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-              </svg>
-              Negative prompt
-            </button>
-            {negOpen && (
-              <textarea value={negPrompt} onChange={e => setNegPrompt(e.target.value)}
-                placeholder="What to avoid..." rows={2}
-                className="w-full rounded-xl px-3 py-2 text-sm resize-none outline-none"
-                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }} />
-            )}
-          </div>
-
-          <div className="mb-4">
-            <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Quality</div>
-            <div className="flex gap-2">
-              {([['std','720p Std'],['pro','1080p Pro']] as [Mode,string][]).map(([m,label]) => (
-                <button key={m} onClick={() => setMode(m)}
-                  className="flex-1 py-1.5 rounded-lg text-xs font-medium transition-all"
-                  style={{ background: mode === m ? 'rgba(79,110,247,0.15)' : 'rgba(255,255,255,0.04)', color: mode === m ? 'var(--accent)' : 'var(--text-muted)', border: `1px solid ${mode === m ? 'var(--accent)' : 'var(--border)'}` }}>
-                  {label}
+              <div className="mb-4 flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Keep original sound</span>
+                <button onClick={() => setMotionKeepSound(s => !s)}
+                  className="relative w-9 h-5 rounded-full transition-all"
+                  style={{ background: motionKeepSound ? 'var(--accent)' : 'rgba(255,255,255,0.1)' }}>
+                  <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" style={{ left: motionKeepSound ? '18px' : '2px' }} />
                 </button>
-              ))}
-            </div>
-          </div>
+              </div>
+            </>
+          )}
 
-          <div className="mb-4">
-            <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Duration</div>
-            <div className="flex gap-2">
-              {(['5','10','15'] as Duration[]).map(d => (
-                <button key={d} onClick={() => setDuration(d)}
-                  className="flex-1 py-1.5 rounded-lg text-xs font-medium transition-all"
-                  style={{ background: duration === d ? 'rgba(79,110,247,0.15)' : 'rgba(255,255,255,0.04)', color: duration === d ? 'var(--accent)' : 'var(--text-muted)', border: `1px solid ${duration === d ? 'var(--accent)' : 'var(--border)'}` }}>
-                  {d}s
-                </button>
-              ))}
-            </div>
-          </div>
+          {/* ── Avatar Mode ── */}
+          {videoMode === 'avatar' && (
+            <>
+              <ImageUploadBox label="Avatar photo" preview={avatarImage}
+                onUpload={setAvatarImage} onClear={() => setAvatarImage(null)}
+                onPickFromLibrary={() => setPickerTarget('avatar')} />
 
-          {!firstFrame && (
-            <div className="mb-4">
+              <div className="mb-3">
+                <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Audio file</div>
+                {avatarAudioBase64 ? (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: 'rgba(79,110,247,0.08)', border: '1px solid var(--border)' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--accent)', flexShrink: 0 }}>
+                      <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+                    </svg>
+                    <span className="text-xs truncate flex-1" style={{ color: 'var(--text)' }}>{avatarAudioName}</span>
+                    <button onClick={() => { setAvatarAudioBase64(null); setAvatarAudioName('') }}
+                      className="opacity-50 hover:opacity-100 flex-shrink-0" style={{ color: 'var(--text-muted)' }}>×</button>
+                  </div>
+                ) : (
+                  <button onClick={() => avatarAudioRef.current?.click()}
+                    className="w-full py-2.5 rounded-xl text-xs font-medium transition-all"
+                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px dashed var(--border)', color: 'var(--text-muted)' }}>
+                    Upload .mp3 / .wav / .m4a / .aac
+                  </button>
+                )}
+                <input ref={avatarAudioRef} type="file" accept=".mp3,.wav,.m4a,.aac" className="hidden" onChange={handleAvatarAudio} />
+                <p className="text-[10px] mt-1" style={{ color: 'rgba(255,255,255,0.2)' }}>2–300 seconds · max 5MB</p>
+              </div>
+
+              <div className="mb-3">
+                <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Prompt (optional)</div>
+                <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
+                  placeholder="Gestures, emotions, camera movements..." rows={3}
+                  className="w-full rounded-xl px-3 py-2 text-sm resize-none outline-none"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+              </div>
+            </>
+          )}
+
+          {/* ── Settings (model-dependent) ── */}
+          <div style={{ height: 1, background: 'var(--border)', marginBottom: 12, marginTop: 4 }} />
+
+          {/* Quality */}
+          {videoMode !== 'avatar' && videoMode !== 'motionControl' && (
+            <div className="mb-3">
+              <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Quality</div>
+              <div className="flex gap-2">
+                {(['std', 'pro'] as Mode[]).map(m => (
+                  <button key={m} onClick={() => setMode(m)}
+                    className="flex-1 py-1.5 rounded-lg text-xs font-medium transition-all"
+                    style={{ background: mode === m ? 'rgba(79,110,247,0.15)' : 'rgba(255,255,255,0.04)', color: mode === m ? 'var(--accent)' : 'var(--text-muted)', border: `1px solid ${mode === m ? 'var(--accent)' : 'var(--border)'}` }}>
+                    {m === 'std' ? '720p Std' : '1080p Pro'}
+                  </button>
+                ))}
+                {currentModel.supports4K && (
+                  <button onClick={() => setMode('4k')}
+                    className="flex-1 py-1.5 rounded-lg text-xs font-medium transition-all"
+                    style={{ background: mode === '4k' ? 'rgba(79,110,247,0.15)' : 'rgba(255,255,255,0.04)', color: mode === '4k' ? 'var(--accent)' : 'var(--text-muted)', border: `1px solid ${mode === '4k' ? 'var(--accent)' : 'var(--border)'}` }}>
+                    4K
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Duration slider */}
+          {videoMode !== 'multishot' && videoMode !== 'avatar' && (
+            <div className="mb-3">
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Duration</div>
+                <span className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>{duration}s</span>
+              </div>
+              <input type="range" min={3} max={15} step={1} value={duration}
+                onChange={e => setDuration(Number(e.target.value))}
+                className="w-full" style={{ accentColor: 'var(--accent)' }} />
+              <div className="flex justify-between mt-0.5">
+                <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.2)' }}>3s</span>
+                <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.2)' }}>15s</span>
+              </div>
+            </div>
+          )}
+
+          {/* Aspect ratio — only for text2video standard mode, not when first frame is set */}
+          {videoMode === 'standard' && !firstFrame && (
+            <div className="mb-3">
               <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Aspect ratio</div>
               <div className="flex flex-wrap gap-1.5">
-                {ASPECT_RATIOS.map(r => (
+                {currentModel.aspectRatios.map(r => (
                   <button key={r} onClick={() => setAspectRatio(r)}
                     className="px-2.5 py-1 rounded-lg text-xs font-medium transition-all"
                     style={{ background: aspectRatio === r ? 'rgba(79,110,247,0.15)' : 'rgba(255,255,255,0.04)', color: aspectRatio === r ? 'var(--accent)' : 'var(--text-muted)', border: `1px solid ${aspectRatio === r ? 'var(--accent)' : 'var(--border)'}` }}>
@@ -993,32 +1318,58 @@ export function VideoPage() {
             </div>
           )}
 
-          <div className="mb-5 flex items-center justify-between">
-            <div>
+          {/* Sound */}
+          {currentModel.supportsSound && videoMode === 'standard' && (
+            <div className="mb-4 flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Sound</span>
-              {!currentModel.supportsSound && (
-                <span className="ml-1.5 text-[10px]" style={{ color: 'rgba(255,255,255,0.2)' }}>v3 only</span>
-              )}
+              <button onClick={() => setSound(s => !s)}
+                className="relative w-9 h-5 rounded-full transition-all"
+                style={{ background: sound ? 'var(--accent)' : 'rgba(255,255,255,0.1)' }}>
+                <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" style={{ left: sound ? '18px' : '2px' }} />
+              </button>
             </div>
-            <button onClick={() => currentModel.supportsSound && setSound(s => !s)}
-              className="relative w-9 h-5 rounded-full transition-all"
-              style={{ background: sound && currentModel.supportsSound ? 'var(--accent)' : 'rgba(255,255,255,0.1)', opacity: currentModel.supportsSound ? 1 : 0.4 }}>
-              <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all"
-                style={{ left: sound && currentModel.supportsSound ? '18px' : '2px' }} />
-            </button>
-          </div>
+          )}
 
+          {/* Motion Control mode quality selector */}
+          {videoMode === 'motionControl' && (
+            <div className="mb-4">
+              <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Quality</div>
+              <div className="flex gap-2">
+                {(['std', 'pro'] as Mode[]).map(m => (
+                  <button key={m} onClick={() => setMode(m)}
+                    className="flex-1 py-1.5 rounded-lg text-xs font-medium transition-all"
+                    style={{ background: mode === m ? 'rgba(79,110,247,0.15)' : 'rgba(255,255,255,0.04)', color: mode === m ? 'var(--accent)' : 'var(--text-muted)', border: `1px solid ${mode === m ? 'var(--accent)' : 'var(--border)'}` }}>
+                    {m === 'std' ? '720p Std' : '1080p Pro'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Avatar quality selector */}
+          {videoMode === 'avatar' && (
+            <div className="mb-4">
+              <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Quality</div>
+              <div className="flex gap-2">
+                {(['std', 'pro'] as Mode[]).map(m => (
+                  <button key={m} onClick={() => setMode(m)}
+                    className="flex-1 py-1.5 rounded-lg text-xs font-medium transition-all"
+                    style={{ background: mode === m ? 'rgba(79,110,247,0.15)' : 'rgba(255,255,255,0.04)', color: mode === m ? 'var(--accent)' : 'var(--text-muted)', border: `1px solid ${mode === m ? 'var(--accent)' : 'var(--border)'}` }}>
+                    {m === 'std' ? '720p Std' : '1080p Pro'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Generate button */}
           <button onClick={handleGenerate} disabled={!canGenerate}
             className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
             style={{ background: canGenerate ? 'var(--accent)' : 'rgba(255,255,255,0.05)', color: canGenerate ? '#fff' : 'var(--text-muted)', cursor: canGenerate ? 'pointer' : 'not-allowed' }}>
             {status === 'pending' || status === 'processing' ? (
-              <><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
-              </svg>Generating...</>
+              <><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>Generating...</>
             ) : (
-              <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <polygon points="5 3 19 12 5 21 5 3"/>
-              </svg>Generate video</>
+              <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>Generate video</>
             )}
           </button>
         </div>
@@ -1041,14 +1392,11 @@ export function VideoPage() {
             )}
             {status === 'done' && videoUrl && (
               <div className="w-full max-w-xl flex flex-col gap-3">
-                <video src={videoUrl} controls autoPlay loop className="w-full rounded-xl"
-                  style={{ border: '1px solid var(--border)' }} />
+                <video src={videoUrl} controls autoPlay loop className="w-full rounded-xl" style={{ border: '1px solid var(--border)' }} />
                 <div className="flex items-center gap-2">
                   {savingToDrive
                     ? <span className="text-xs flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
-                        <svg className="animate-spin" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
-                        </svg>Saving to Drive...
+                        <svg className="animate-spin" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>Saving to Drive...
                       </span>
                     : <span className="text-xs" style={{ color: '#34a853' }}>✓ Saved to Drive</span>
                   }
@@ -1077,25 +1425,17 @@ export function VideoPage() {
 
         {/* History */}
         <div className="p-5">
-          {/* User filter */}
           {historyUsers.length > 1 && (
             <div className="flex items-center gap-2 mb-4">
               {historyUsers.map(u => (
                 <button key={u.email} onClick={() => setFilterEmail(filterEmail === u.email ? null : u.email)}
-                  title={u.name}
-                  className="transition-all"
-                  style={{
-                    borderRadius: '50%',
-                    outline: filterEmail === u.email ? '2px solid var(--accent)' : '2px solid transparent',
-                    outlineOffset: 2,
-                    opacity: filterEmail && filterEmail !== u.email ? 0.4 : 1,
-                  }}>
+                  title={u.name} className="transition-all"
+                  style={{ borderRadius: '50%', outline: filterEmail === u.email ? '2px solid var(--accent)' : '2px solid transparent', outlineOffset: 2, opacity: filterEmail && filterEmail !== u.email ? 0.4 : 1 }}>
                   <UserAvatar name={u.name} email={u.email} image={u.image} size={32} />
                 </button>
               ))}
               {filterEmail && (
-                <button onClick={() => setFilterEmail(null)}
-                  className="text-[10px] px-2 py-1 rounded-lg ml-1"
+                <button onClick={() => setFilterEmail(null)} className="text-[10px] px-2 py-1 rounded-lg ml-1"
                   style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>
                   Clear
                 </button>
@@ -1106,15 +1446,13 @@ export function VideoPage() {
           {historyLoading ? (
             <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
               {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="rounded-xl animate-pulse"
-                  style={{ aspectRatio: '16/10', background: 'rgba(255,255,255,0.04)' }} />
+                <div key={i} className="rounded-xl animate-pulse" style={{ aspectRatio: '16/10', background: 'rgba(255,255,255,0.04)' }} />
               ))}
             </div>
           ) : filteredHistory.length === 0 && status === 'idle' ? (
             <div className="flex items-center justify-center" style={{ minHeight: 140 }}>
               <div className="text-center">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="0.8"
-                  className="mx-auto mb-3" style={{ color: 'rgba(255,255,255,0.1)' }}>
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="0.8" className="mx-auto mb-3" style={{ color: 'rgba(255,255,255,0.1)' }}>
                   <polygon points="5 3 19 12 5 21 5 3"/>
                 </svg>
                 <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -1126,9 +1464,7 @@ export function VideoPage() {
             <>
               <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
                 {filteredHistory.map((item, idx) => (
-                  <VideoCard key={item.id} item={item}
-                    featured={idx === 0}
-                    onSelect={() => setSelectedItem(item)} />
+                  <VideoCard key={item.id} item={item} featured={idx === 0} onSelect={() => setSelectedItem(item)} />
                 ))}
               </div>
               <div ref={sentinelRef} className="h-8 flex items-center justify-center mt-2">
@@ -1143,12 +1479,8 @@ export function VideoPage() {
         </div>
       </div>
 
-      {selectedItem && (
-        <VideoCardModal item={selectedItem} onClose={() => setSelectedItem(null)} onRefresh={fetchHistory} />
-      )}
-      {pickerTarget && (
-        <ImagePickerModal onSelect={handlePickerSelect} onClose={() => setPickerTarget(null)} />
-      )}
+      {selectedItem && <VideoCardModal item={selectedItem} onClose={() => setSelectedItem(null)} onRefresh={fetchHistory} />}
+      {pickerTarget && <ImagePickerModal onSelect={handlePickerSelect} onClose={() => setPickerTarget(null)} />}
     </div>
   )
 }
