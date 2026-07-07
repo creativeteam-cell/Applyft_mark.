@@ -25,8 +25,8 @@ function QueuePanel() {
   const [open, setOpen] = useState(false)
   // local: from localStorage (instant, current device)
   // server: from Drive via /api/queue (cross-device)
-  const [local, setLocal] = useState<{ gemini: number; openai: number }>({ gemini: 0, openai: 0 })
-  const [server, setServer] = useState<{ gemini: number; openai: number }>({ gemini: 0, openai: 0 })
+  const [local, setLocal] = useState<{ gemini: number; openai: number; kling: number }>({ gemini: 0, openai: 0, kling: 0 })
+  const [server, setServer] = useState<{ gemini: number; openai: number; kling: number }>({ gemini: 0, openai: 0, kling: 0 })
   const ref = useRef<HTMLDivElement>(null)
 
   // Poll localStorage every 2s
@@ -62,9 +62,10 @@ function QueuePanel() {
   const queue = {
     gemini: Math.max(local.gemini, server.gemini),
     openai: Math.max(local.openai, server.openai),
+    kling: Math.max(local.kling, server.kling),
   }
 
-  const total = queue.gemini + queue.openai
+  const total = queue.gemini + queue.openai + queue.kling
   const busy = total > 0
 
   return (
@@ -96,9 +97,9 @@ function QueuePanel() {
             </span>
           </div>
           <div className="px-4 py-3 flex flex-col gap-3">
-            {(['gemini', 'openai'] as const).map(model => {
+            {(['gemini', 'openai', 'kling'] as const).map(model => {
               const count = queue[model]
-              const label = model === 'gemini' ? 'Gemini Image' : 'OpenAI'
+              const label = model === 'gemini' ? 'Gemini Image' : model === 'openai' ? 'OpenAI' : 'Kling Video'
               return (
                 <div key={model} className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-2">

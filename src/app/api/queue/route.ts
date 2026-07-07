@@ -8,11 +8,11 @@ export async function GET() {
   return NextResponse.json(queue)
 }
 
-// Client-side heartbeat: { model: 'gemini' | 'openai', active: boolean }
+// Client-side heartbeat: { model: 'gemini' | 'openai' | 'kling', active: boolean }
 export async function POST(req: NextRequest) {
   try {
-    const { model, active } = await req.json() as { model: 'gemini' | 'openai'; active: boolean }
-    if (model !== 'gemini' && model !== 'openai') {
+    const { model, active } = await req.json() as { model: 'gemini' | 'openai' | 'kling'; active: boolean }
+    if (model !== 'gemini' && model !== 'openai' && model !== 'kling') {
       return NextResponse.json({ error: 'Invalid model' }, { status: 400 })
     }
     await updateQueue(model, active ? 1 : -1)

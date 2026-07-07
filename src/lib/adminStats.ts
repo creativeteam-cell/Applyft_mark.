@@ -14,7 +14,7 @@ function statsFolderId() {
   return process.env.STATS_DRIVE_FOLDER_ID || process.env.GENERATOR_DRIVE_FOLDER_ID!
 }
 
-// ── Admin list ───────────────────────────────────────────────────────────────
+// -- Admin list ---------------------------------------------------------------
 
 export async function getAdminEmails(): Promise<string[]> {
   const stored = await redis.get<string[]>(ADMINS_KEY)
@@ -39,7 +39,7 @@ export async function removeAdminEmail(email: string, requestorEmail: string): P
   return updated
 }
 
-// ── Generation counters ──────────────────────────────────────────────────────
+// -- Image generation counters ------------------------------------------------
 
 function imageCountKey(email: string) {
   return `gen:images:${email}`
@@ -64,7 +64,7 @@ export async function getAllUserStats(knownEmails: string[]): Promise<UserStat[]
   }))
 }
 
-// ── Limits ───────────────────────────────────────────────────────────────────
+// -- Image limits -------------------------------------------------------------
 
 function limitKey(email: string) {
   return `gen:limit:${email}`
@@ -95,7 +95,64 @@ export async function getAllLimits(emails: string[]): Promise<Record<string, num
   return result
 }
 
-// ── Monthly snapshots ────────────────────────────────────────────────────────
+// -- Video unit counters ------------------------------------------------------
+
+function videoUnitsKey(email: string) {
+  return `gen:video:units:${email}`
+}
+
+function videoLimitKey(email: string) {
+  return `gen:video:limit:${email}`
+}
+
+export async function incrementVideoUnits(email: string, units: number): Promise<void> {
+  if (units <= 0) return
+  const key = videoUnitsKey(email)
+  const current = (await redis.get<number>(key)) ?? 0
+  await redis.set(key, Math.round((current + units) * 10) / 10)
+}
+
+export interface VideoUserStat {
+  email: string
+  videoUnits: number
+}
+
+export async function getAllVideoStats(emails: string[]): Promise<VideoUserStat[]> {
+  if (emails.length === 0) return []
+  const keys = emails.map(videoUnitsKey)
+  const counts = await redis.mget<number[]>(...keys)
+  return emails.map((email, i) => ({
+    email,
+    videoUnits: Math.round(((counts[i] as number) ?? 0) * 10) / 10,
+  }))
+}
+
+export async function getAllVideoLimits(emails: string[]): Promise<Record<string, number>> {
+  if (emails.length === 0) return {}
+  const keys = emails.map(videoLimitKey)
+  const vals = await redis.mget<number[]>(...keys)
+  const result: Record<string, number> = {}
+  emails.forEach((email, i) => { result[email] = (vals[i] as number) ?? 50 })
+  return result
+}
+
+export async function getUserVideoLimit(email: string): Promise<number> {
+  const val = await redis.get<number>(videoLimitKey(email))
+  return val ?? 50
+}
+
+export async function setVideoLimit(email: string, limit: number): Promise<void> {
+  await redis.set(videoLimitKey(email), limit)
+}
+
+export async function checkVideoLimitExceeded(email: string): Promise<boolean> {
+  const limit = await getUserVideoLimit(email)
+  if (limit === 0) return false
+  const units = (await redis.get<number>(videoUnitsKey(email))) ?? 0
+  return units >= limit
+}
+
+// -- Monthly snapshots --------------------------------------------------------
 
 export interface MonthlySnapshot {
   month: string
@@ -151,7 +208,6 @@ export async function getMonthlyStat(fileId: string): Promise<MonthlySnapshot> {
   return JSON.parse(Buffer.from(res.data).toString('utf8'))
 }
 
-// Returns true if month rolled over and counters were reset (caller should re-fetch stats)
 export async function checkAndResetMonth(
   users: Array<{ email: string; name: string; imageCount: number }>
 ): Promise<boolean> {
@@ -161,7 +217,6 @@ export async function checkAndResetMonth(
 
   if (lastReset === currentMonth) return false
 
-  // New month — save snapshot of previous month if there was data
   if (lastReset && users.some(u => u.imageCount > 0)) {
     await saveMonthlyStat(
       lastReset,
@@ -169,7 +224,6 @@ export async function checkAndResetMonth(
     ).catch(err => console.error('[adminStats] Monthly snapshot save failed:', err))
   }
 
-  // Reset all counters to 0
   if (users.length > 0) {
     await Promise.all(users.map(u => redis.set(imageCountKey(u.email), 0)))
   }

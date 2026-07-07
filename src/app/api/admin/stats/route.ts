@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { getAdminEmails, getAllUserStats, getAllLimits, checkAndResetMonth } from '@/lib/adminStats'
+import { getAdminEmails, getAllUserStats, getAllLimits, checkAndResetMonth, getAllVideoStats, getAllVideoLimits } from '@/lib/adminStats'
 import { getDriveClient } from '@/lib/googleDrive'
 
 const FOLDER_ID = process.env.GENERATOR_DRIVE_FOLDER_ID!
@@ -41,12 +41,13 @@ export async function GET(req: NextRequest) {
   }
 
   const knownEmails = Array.from(userMap.keys())
-  let [stats, limits] = await Promise.all([
+  let [stats, limits, videoStats, videoLimits] = await Promise.all([
     getAllUserStats(knownEmails),
     getAllLimits(knownEmails),
+    getAllVideoStats(knownEmails),
+    getAllVideoLimits(knownEmails),
   ])
 
-  // Check if month rolled over — if so, snapshot was saved and counters reset
   const usersForReset = stats.map(s => ({
     email: s.email,
     name: userMap.get(s.email)?.name || s.email,
@@ -54,15 +55,18 @@ export async function GET(req: NextRequest) {
   }))
   const didReset = await checkAndResetMonth(usersForReset)
   if (didReset) {
-    // Re-fetch counts (they are now 0)
     stats = await getAllUserStats(knownEmails)
   }
+
+  const videoStatsMap = Object.fromEntries(videoStats.map(v => [v.email, v.videoUnits]))
 
   const users = stats.map(s => ({
     ...s,
     name: userMap.get(s.email)?.name || s.email,
     image: userMap.get(s.email)?.image || '',
     limit: limits[s.email] ?? 0,
+    videoUnits: videoStatsMap[s.email] ?? 0,
+    videoLimit: videoLimits[s.email] ?? 50,
   })).sort((a, b) => b.imageCount - a.imageCount)
 
   return NextResponse.json({ users, adminEmails })

@@ -13,7 +13,7 @@ interface App {
 }
 interface Marketer { code: string; name: string }
 interface Language { code: string; name: string }
-interface UserStat { email: string; name: string; image: string; imageCount: number; limit: number }
+interface UserStat { email: string; name: string; image: string; imageCount: number; limit: number; videoUnits: number; videoLimit: number }
 interface MonthEntry { fileId: string; month: string }
 interface MonthlySnapshot { month: string; savedAt: string; users: Array<{ email: string; name: string; imageCount: number }> }
 
@@ -105,6 +105,70 @@ function UserStatRow({ user }: { user: UserStat }) {
           onChange={e => { setLimit(parseInt(e.target.value) || 0); setSaved(false) }}
           placeholder="∞"
           title="Limit (0 = unlimited)"
+          className="w-16 px-2 py-1 rounded-lg text-xs font-mono text-center outline-none"
+          style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', color: 'var(--text)' }}
+        />
+        <button onClick={handleSaveLimit} disabled={saving}
+          className="text-xs px-2 py-1 rounded-lg transition-all"
+          style={{
+            background: saved ? 'rgba(52,168,83,0.15)' : 'rgba(79,110,247,0.15)',
+            color: saved ? '#34a853' : 'var(--accent)'
+          }}>
+          {saved ? '✓' : saving ? '…' : 'Save'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function VideoStatRow({ user }: { user: UserStat }) {
+  const [limit, setLimit] = useState(user.videoLimit ?? 50)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  async function handleSaveLimit() {
+    setSaving(true)
+    try {
+      await fetch('/api/admin/limits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: user.email, limit, type: 'video' }),
+      })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch {}
+    setSaving(false)
+  }
+
+  return (
+    <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl"
+      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+      <div className="flex items-center gap-2.5 flex-1 min-w-0">
+        {user.image ? (
+          <img src={user.image} alt={user.name} className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
+        ) : (
+          <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-semibold text-white"
+            style={{ background: colorFromString(user.email) }}>
+            {initials(user.name)}
+          </div>
+        )}
+        <div className="min-w-0">
+          <div className="text-sm font-medium truncate">{user.name}</div>
+          <div className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>{user.email}</div>
+        </div>
+      </div>
+      <div className="text-right flex-shrink-0">
+        <div className="text-sm font-semibold font-mono">{user.videoUnits}</div>
+        <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>units</div>
+      </div>
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        <input
+          type="number"
+          min={0}
+          value={limit}
+          onChange={e => { setLimit(parseInt(e.target.value) || 0); setSaved(false) }}
+          placeholder="50"
+          title="Limit in units (0 = unlimited)"
           className="w-16 px-2 py-1 rounded-lg text-xs font-mono text-center outline-none"
           style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', color: 'var(--text)' }}
         />
@@ -306,7 +370,7 @@ function AdminPanel({ currentEmail }: { currentEmail: string }) {
         {addError && <p className="text-xs mt-1.5" style={{ color: '#f87171' }}>{addError}</p>}
       </div>
 
-      {/* Usage stats */}
+      {/* Image generation stats */}
       <div>
         <div className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>
           Image generations
@@ -317,6 +381,22 @@ function AdminPanel({ currentEmail }: { currentEmail: string }) {
           <div className="flex flex-col gap-2">
             {stats.map(u => (
               <UserStatRow key={u.email} user={u} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Video generation stats */}
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>
+          Video generations
+        </div>
+        {stats.length === 0 ? (
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No data yet</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {stats.map(u => (
+              <VideoStatRow key={u.email} user={u} />
             ))}
           </div>
         )}

@@ -4,11 +4,12 @@
 
 const EXPIRE_MS = 5 * 60 * 1000 // 5 min auto-expire (crash protection)
 
-export type QueueModel = 'gemini' | 'openai'
+export type QueueModel = 'gemini' | 'openai' | 'kling'
 
 export interface QueueState {
   gemini: number
   openai: number
+  kling: number
 }
 
 function lsKey(model: QueueModel) {
@@ -30,13 +31,13 @@ export function setQueueActive(model: QueueModel, active: boolean) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model, active }),
-    }).catch(() => {}) // silent — local display already works
+    }).catch(() => {}) // silent -- local display already works
   }
 }
 
 /** Read queue state from localStorage (current device only). */
 export function readQueueClient(): QueueState {
-  if (typeof window === 'undefined') return { gemini: 0, openai: 0 }
+  if (typeof window === 'undefined') return { gemini: 0, openai: 0, kling: 0 }
   const now = Date.now()
 
   function modelActive(model: QueueModel): number {
@@ -50,5 +51,5 @@ export function readQueueClient(): QueueState {
     }
   }
 
-  return { gemini: modelActive('gemini'), openai: modelActive('openai') }
+  return { gemini: modelActive('gemini'), openai: modelActive('openai'), kling: modelActive('kling') }
 }

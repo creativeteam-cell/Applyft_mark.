@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
+import { incrementVideoUnits } from '@/lib/adminStats'
 
 const VIDEO_FOLDER_ID = process.env.VIDEO_DRIVE_FOLDER_ID!
 export const maxDuration = 60
@@ -12,7 +13,7 @@ export async function POST(req: NextRequest) {
   const userToken = (session as any).accessToken
   if (!userToken) return NextResponse.json({ error: 'No access token' }, { status: 401 })
 
-  const { videoUrl, klingVideoId, prompt, model, duration, aspectRatio, sound, inputType } = await req.json()
+  const { videoUrl, klingVideoId, prompt, model, duration, aspectRatio, sound, inputType, units } = await req.json()
   if (!videoUrl) return NextResponse.json({ error: 'videoUrl required' }, { status: 400 })
 
   try {
@@ -64,6 +65,12 @@ export async function POST(req: NextRequest) {
     }
 
     const file = await uploadRes.json()
+
+    // Track unit usage (fire-and-forget)
+    if (units && units > 0 && session.user.email) {
+      incrementVideoUnits(session.user.email, Number(units)).catch(() => {})
+    }
+
     return NextResponse.json({
       fileId: file.id,
       webViewLink: file.webViewLink || null,

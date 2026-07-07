@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'
+import { setQueueActive } from '@/lib/queueClient'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -379,11 +380,11 @@ function VideoCard({ item, onSelect, featured = false }: { item: VideoItem; onSe
   const videoSrc = `/api/video/file/${item.id}`
   return (
     <div onClick={onSelect} className="relative rounded-xl overflow-hidden cursor-pointer group"
-      style={{ background: 'var(--surface)', border: '1px solid var(--border)', aspectRatio: featured ? '21/9' : '16/10', gridColumn: featured ? 'span 2' : undefined }}>
+      style={{ background: featured ? 'var(--surface)' : '#000', border: '1px solid var(--border)', aspectRatio: featured ? '21/9' : '1/1', gridColumn: featured ? 'span 2' : undefined }}>
       {featured ? (
         <video src={videoSrc} autoPlay muted loop playsInline className="w-full h-full object-cover" />
       ) : !thumbErr ? (
-        <img src={thumbSrc} alt={item.prompt} className="w-full h-full object-cover" onError={() => setThumbErr(true)} />
+        <img src={thumbSrc} alt={item.prompt} className="w-full h-full object-contain" onError={() => setThumbErr(true)} />
       ) : (
         <div className="w-full h-full flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.03)' }}>
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'rgba(255,255,255,0.15)' }}><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -766,6 +767,7 @@ export function VideoPage() {
         const data = await res.json()
         if (data.task_status === 'succeed') {
           stopPolling()
+          setQueueActive('kling', false)
           const url = data.task_result?.videos?.[0]?.url ?? null
           const vid = data.task_result?.videos?.[0]?.id ?? ''
           setVideoUrl(url); setStatus('done')
@@ -774,12 +776,21 @@ export function VideoPage() {
             fetch('/api/video/save', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ videoUrl: url, klingVideoId: vid, ...savePayload }),
-            }).then(() => { setSavingToDrive(false); fetchHistory() }).catch(() => setSavingToDrive(false))
+            }).then(r => r.json()).then(d => {
+              setSavingToDrive(false)
+              if (d.error) setError('Video generated but failed to save: ' + d.error)
+              else fetchHistory()
+            }).catch(e => { setSavingToDrive(false); setError('Video generated but failed to save to Drive: ' + e.message) })
           }
         } else if (data.task_status === 'failed') {
-          stopPolling(); setError(data.task_status_msg ?? 'Generation failed'); setStatus('error')
+          stopPolling()
+          setQueueActive('kling', false)
+          setError(data.task_status_msg ?? 'Generation failed'); setStatus('error')
         }
-      } catch {}
+      } catch (e: any) {
+        // network error during poll — keep retrying silently, but stop after 3 consecutive failures
+        console.warn('[poll] fetch error:', e.message)
+      }
     }, 4000)
   }, [stopPolling, fetchHistory])
 
@@ -907,48 +918,51 @@ export function VideoPage() {
     setEnhancingShots(false)
   }
 
+  // ── Fetch with retry (handles 429 / rate-limit errors) ──
+  async function fetchWithRetry(url: string, options: RequestInit, maxAttempts = 3): Promise<any> {
+    let lastError: Error = new Error('Unknown error')
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const res = await fetch(url, options)
+      const data = await res.json()
+      if (res.status === 429 || (data.error && /rate.?limit|too many|429/i.test(String(data.error)))) {
+        lastError = new Error(data.error || 'Rate limit exceeded')
+        if (attempt < maxAttempts) {
+          await new Promise(r => setTimeout(r, attempt * 3000)) // 3s, 6s backoff
+          continue
+        }
+        throw lastError
+      }
+      if (data.error) throw new Error(data.error)
+      return data
+    }
+    throw lastError
+  }
+
   // ── Generate ──
   const handleGenerate = async () => {
     if (!canGenerate) return
     setStatus('pending'); setVideoUrl(null); setError(null)
+    setQueueActive('kling', true)
 
     try {
       if (videoMode === 'motionControl') {
         const motionModel = (model === 'kling-v3' || model === 'kling-v3-omni') ? 'kling-v3' : 'kling-v2-6'
-        const res = await fetch('/api/video/motion-control', {
+        const data = await fetchWithRetry('/api/video/motion-control', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            image_url: motionImage,
-            video_url: motionVideoUrl,
-            prompt,
-            model_name: motionModel,
-            character_orientation: motionOrientation,
-            keep_original_sound: motionKeepSound ? 'yes' : 'no',
-            mode,
-          }),
+          body: JSON.stringify({ image_url: motionImage, video_url: motionVideoUrl, prompt, model_name: motionModel, character_orientation: motionOrientation, keep_original_sound: motionKeepSound ? 'yes' : 'no', mode }),
         })
-        const data = await res.json()
-        if (data.error) throw new Error(data.error)
         setStatus('processing')
-        pollStatus(data.task_id, 'motion-control', {
-          prompt: prompt || 'Motion control video',
-          model, duration: String(duration), aspectRatio: '', sound: 'off', inputType: 'motion',
-        })
+        pollStatus(data.task_id, 'motion-control', { prompt: prompt || 'Motion control video', model, duration: String(duration), aspectRatio: '', sound: 'off', inputType: 'motion', units: estimatedCost ?? 0 })
         return
       }
 
       if (videoMode === 'avatar') {
-        const res = await fetch('/api/video/avatar', {
+        const data = await fetchWithRetry('/api/video/avatar', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ image: avatarImage, sound_file: avatarAudioBase64, prompt, mode }),
         })
-        const data = await res.json()
-        if (data.error) throw new Error(data.error)
         setStatus('processing')
-        pollStatus(data.task_id, 'avatar', {
-          prompt: prompt || 'Avatar video',
-          model, duration: String(duration), aspectRatio: '', sound: 'off', inputType: 'avatar',
-        })
+        pollStatus(data.task_id, 'avatar', { prompt: prompt || 'Avatar video', model, duration: String(duration), aspectRatio: '', sound: 'off', inputType: 'avatar', units: 0 })
         return
       }
 
@@ -961,56 +975,44 @@ export function VideoPage() {
         const totalDur = totalShotsDuration
 
         if (isTurboModel) {
-          const res = await fetch('/api/video/turbo', {
+          const data = await fetchWithRetry('/api/video/turbo', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model_name: model, prompt: effectivePrompt, first_frame: firstFrame, duration: totalDur }),
           })
-          const data = await res.json()
-          if (data.error) throw new Error(data.error)
           setStatus('processing')
-          pollStatus(data.task_id, 'turbo', { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: '', sound: 'off', inputType: firstFrame ? 'image' : 'text' })
+          pollStatus(data.task_id, 'turbo', { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: '', sound: 'off', inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 })
         } else {
           const type = firstFrame ? 'image2video' : 'text2video'
           const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
           const body = firstFrame
             ? { model_name: model, image: firstFrame, prompt: effectivePrompt, mode, duration: String(totalDur), sound: soundParam }
             : { model_name: model, prompt: effectivePrompt, mode, duration: String(totalDur), aspect_ratio: aspectRatio, sound: soundParam }
-          const res = await fetch(`/api/video/${type}`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-          })
-          const data = await res.json()
-          if (data.error) throw new Error(data.error)
+          const data = await fetchWithRetry(`/api/video/${type}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
           setStatus('processing')
-          pollStatus(data.task_id, type, { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: firstFrame ? '' : aspectRatio, sound: soundParam, inputType: firstFrame ? 'image' : 'text' })
+          pollStatus(data.task_id, type, { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: firstFrame ? '' : aspectRatio, sound: soundParam, inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 })
         }
         return
       }
 
       // Standard mode
       if (isTurboModel) {
-        const res = await fetch('/api/video/turbo', {
+        const data = await fetchWithRetry('/api/video/turbo', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ model_name: model, prompt, first_frame: firstFrame, duration }),
         })
-        const data = await res.json()
-        if (data.error) throw new Error(data.error)
         setStatus('processing')
-        pollStatus(data.task_id, 'turbo', { prompt, model, duration: String(duration), aspectRatio: '', sound: 'off', inputType: firstFrame ? 'image' : 'text' })
+        pollStatus(data.task_id, 'turbo', { prompt, model, duration: String(duration), aspectRatio: '', sound: 'off', inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 })
       } else {
         const type = firstFrame ? 'image2video' : 'text2video'
         const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
         const body = firstFrame
           ? { model_name: model, image: firstFrame, ...(lastFrame && currentModel.supportsLastFrame ? { image_tail: lastFrame } : {}), prompt, negative_prompt: negPrompt, mode, duration: String(duration), sound: soundParam }
           : { model_name: model, prompt, negative_prompt: negPrompt, mode, duration: String(duration), aspect_ratio: aspectRatio, sound: soundParam }
-        const res = await fetch(`/api/video/${type}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-        })
-        const data = await res.json()
-        if (data.error) throw new Error(data.error)
+        const data = await fetchWithRetry(`/api/video/${type}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
         setStatus('processing')
-        pollStatus(data.task_id, type, { prompt, model, duration: String(duration), aspectRatio: firstFrame ? '' : aspectRatio, sound: soundParam, inputType: firstFrame ? 'image' : 'text' })
+        pollStatus(data.task_id, type, { prompt, model, duration: String(duration), aspectRatio: firstFrame ? '' : aspectRatio, sound: soundParam, inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 })
       }
-    } catch (e: any) { setError(e.message); setStatus('error') }
+    } catch (e: any) { setQueueActive('kling', false); setError(e.message); setStatus('error') }
   }
 
   const filteredAtAssets = assets.filter(a => a.name.toLowerCase().includes(atQuery.toLowerCase()))
@@ -1516,7 +1518,7 @@ export function VideoPage() {
           {historyLoading ? (
             <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
               {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="rounded-xl animate-pulse" style={{ aspectRatio: '16/10', background: 'rgba(255,255,255,0.04)' }} />
+                <div key={i} className="rounded-xl animate-pulse" style={{ aspectRatio: '1/1', background: 'rgba(255,255,255,0.04)' }} />
               ))}
             </div>
           ) : filteredHistory.length === 0 && status === 'idle' ? (

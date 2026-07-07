@@ -1,5 +1,5 @@
 // Cross-device AI queue tracking via Upstash Redis.
-// Uses atomic INCR/DECR — correct under concurrent usage across all devices.
+// Uses atomic INCR/DECR -- correct under concurrent usage across all devices.
 
 import { Redis } from '@upstash/redis'
 
@@ -13,29 +13,32 @@ const KEY_TTL = 300 // 5 min auto-reset in case of crash
 export interface QueueState {
   gemini: number
   openai: number
+  kling: number
 }
 
-function countKey(model: 'gemini' | 'openai') {
+function countKey(model: 'gemini' | 'openai' | 'kling') {
   return `queue:count:${model}`
 }
 
 export async function readQueue(): Promise<QueueState> {
   try {
-    const [gemini, openai] = await Promise.all([
+    const [gemini, openai, kling] = await Promise.all([
       redis.get<number>(countKey('gemini')),
       redis.get<number>(countKey('openai')),
+      redis.get<number>(countKey('kling')),
     ])
     return {
       gemini: Math.max(0, gemini ?? 0),
       openai: Math.max(0, openai ?? 0),
+      kling: Math.max(0, kling ?? 0),
     }
   } catch (e) {
     console.error('[queue] readQueue error:', e)
-    return { gemini: 0, openai: 0 }
+    return { gemini: 0, openai: 0, kling: 0 }
   }
 }
 
-export async function updateQueue(model: 'gemini' | 'openai', delta: 1 | -1): Promise<void> {
+export async function updateQueue(model: 'gemini' | 'openai' | 'kling', delta: 1 | -1): Promise<void> {
   try {
     const key = countKey(model)
     if (delta === 1) {
