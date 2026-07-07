@@ -376,12 +376,17 @@ function ImagePickerModal({ onSelect, onClose }: { onSelect: (b64: string) => vo
 
 function VideoCard({ item, onSelect, featured = false }: { item: VideoItem; onSelect: () => void; featured?: boolean }) {
   const [thumbErr, setThumbErr] = useState(false)
+  const [hovered, setHovered] = useState(false)
   const thumbSrc = `/api/video/thumb/${item.id}`
   const videoSrc = `/api/video/file/${item.id}`
+  const showVideo = featured || hovered
   return (
-    <div onClick={onSelect} className="relative rounded-xl overflow-hidden cursor-pointer group"
+    <div onClick={onSelect}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="relative rounded-xl overflow-hidden cursor-pointer group"
       style={{ background: '#000', border: '1px solid var(--border)', aspectRatio: featured ? '2/1' : '1/1', gridColumn: featured ? 'span 2' : undefined }}>
-      {featured ? (
+      {showVideo ? (
         <video src={videoSrc} autoPlay muted loop playsInline className="w-full h-full object-contain" />
       ) : !thumbErr ? (
         <img src={thumbSrc} alt={item.prompt} className="w-full h-full object-contain" onError={() => setThumbErr(true)} />
@@ -390,11 +395,13 @@ function VideoCard({ item, onSelect, featured = false }: { item: VideoItem; onSe
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'rgba(255,255,255,0.15)' }}><polygon points="5 3 19 12 5 21 5 3"/></svg>
         </div>
       )}
-      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: 'rgba(0,0,0,0.4)' }}>
-        <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(4px)' }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      {!showVideo && (
+        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(4px)' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          </div>
         </div>
-      </div>
+      )}
       {featured && (
         <div className="absolute top-2 left-2">
           <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold" style={{ background: 'rgba(79,110,247,0.8)', color: '#fff' }}>Latest</span>
@@ -672,6 +679,7 @@ export function VideoPage() {
   const [avatarImage, setAvatarImage] = useState<string | null>(null)
   const [avatarAudioBase64, setAvatarAudioBase64] = useState<string | null>(null)
   const [avatarAudioName, setAvatarAudioName] = useState('')
+  const [avatarAudioDuration, setAvatarAudioDuration] = useState(0)
   const avatarAudioRef = useRef<HTMLInputElement>(null)
 
   // ── Generation state ──
@@ -696,9 +704,9 @@ export function VideoPage() {
   const isTurboModel = TURBO_MODELS.has(model)
 
   const estimatedCost = useMemo(() => {
-    const durationSec = videoMode === 'multishot' ? totalShotsDuration : videoMode === 'avatar' ? 0 : duration
+    const durationSec = videoMode === 'multishot' ? totalShotsDuration : videoMode === 'avatar' ? avatarAudioDuration : duration
     return estimateCost({ model, qualityMode: mode, sound, videoMode, hasImage: !!firstFrame, durationSec })
-  }, [model, mode, sound, videoMode, firstFrame, duration, totalShotsDuration])
+  }, [model, mode, sound, videoMode, firstFrame, duration, totalShotsDuration, avatarAudioDuration])
 
   const canGenerate = useMemo(() => {
     if (status === 'pending' || status === 'processing') return false
@@ -821,9 +829,22 @@ export function VideoPage() {
     const file = e.target.files?.[0]; if (!file) return
     const reader = new FileReader()
     reader.onload = ev => {
-      const b64 = (ev.target?.result as string).split(',')[1]
+      const dataUrl = ev.target?.result as string
+      const b64 = dataUrl.split(',')[1]
       setAvatarAudioBase64(b64)
       setAvatarAudioName(file.name)
+      // Read audio duration via AudioContext
+      try {
+        const ctx = new AudioContext()
+        dataUrl.split(',')[0] // just to confirm it's there
+        const raw = atob(b64)
+        const buf = new Uint8Array(raw.length)
+        for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i)
+        ctx.decodeAudioData(buf.buffer, decoded => {
+          setAvatarAudioDuration(Math.round(decoded.duration))
+          ctx.close()
+        }, () => { ctx.close() })
+      } catch {}
     }
     reader.readAsDataURL(file)
     e.target.value = ''
@@ -970,7 +991,7 @@ export function VideoPage() {
           body: JSON.stringify({ image: avatarImage, sound_file: avatarAudioBase64, prompt, mode }),
         })
         setStatus('processing')
-        pollStatus(data.task_id, 'avatar', { prompt: prompt || 'Avatar video', model, duration: String(duration), aspectRatio: '', sound: 'off', inputType: 'avatar', units: 0 })
+        pollStatus(data.task_id, 'avatar', { prompt: prompt || 'Avatar video', model, duration: String(avatarAudioDuration || duration), aspectRatio: '', sound: 'off', inputType: 'avatar', units: estimatedCost ?? 0 })
         return
       }
 
@@ -1307,7 +1328,7 @@ export function VideoPage() {
                       <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
                     </svg>
                     <span className="text-xs truncate flex-1" style={{ color: 'var(--text)' }}>{avatarAudioName}</span>
-                    <button onClick={() => { setAvatarAudioBase64(null); setAvatarAudioName('') }}
+                    <button onClick={() => { setAvatarAudioBase64(null); setAvatarAudioName(''); setAvatarAudioDuration(0) }}
                       className="opacity-50 hover:opacity-100 flex-shrink-0" style={{ color: 'var(--text-muted)' }}>×</button>
                   </div>
                 ) : (
@@ -1455,11 +1476,9 @@ export function VideoPage() {
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                   Generate video
                 </div>
-                {videoMode === 'avatar' ? (
-                  <span className="text-xs font-normal opacity-80">{mode === 'std' ? '0.4' : '0.8'} u/s</span>
-                ) : estimatedCost !== null ? (
+                {estimatedCost !== null && (
                   <span className="text-xs font-normal opacity-80">{estimatedCost} units</span>
-                ) : null}
+                )}
               </div>
             )}
           </button>
