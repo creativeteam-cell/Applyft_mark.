@@ -8,13 +8,14 @@ type VideoMode = 'standard' | 'multishot' | 'motionControl' | 'avatar'
 type Mode = 'std' | 'pro' | '4k'
 type AspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '3:4' | '3:2' | '2:3'
 type TaskStatus = 'idle' | 'pending' | 'processing' | 'done' | 'error'
-type KlingModel = 'kling-v3' | 'kling-v3-turbo' | 'kling-v3-omni' | 'kling-video-o1' | 'kling-v2-6' | 'kling-v2-5-turbo' | 'kling-v2-master' | 'kling-v2-1-master' | 'kling-v1-6' | 'avatar'
+type KlingModel = 'kling-v3' | 'kling-v3-turbo' | 'kling-v3-omni' | 'kling-video-o1' | 'kling-v2-6' | 'kling-v2-5-turbo' | 'avatar'
 
 interface ShotItem { id: string; prompt: string; duration: number }
 interface ModelDef {
   id: KlingModel; label: string; description: string; tags: string[]
   supportsSound: boolean; supports4K: boolean; supportsLastFrame: boolean
   supportsMultishot: boolean; supportsMotionControl: boolean; isAvatar: boolean
+  supportsImageList: boolean
   modes: VideoMode[]; aspectRatios: AspectRatio[]
 }
 interface VideoItem {
@@ -35,52 +36,37 @@ const ALL_ASPECT_RATIOS: AspectRatio[] = ['16:9', '9:16', '1:1', '4:3', '3:4', '
 const MODELS: ModelDef[] = [
   {
     id: 'kling-v3', label: 'Kling 3.0', description: 'Latest model, audio sync, storyboarding', tags: ['Best', 'HOT'],
-    supportsSound: true, supports4K: false, supportsLastFrame: true, supportsMultishot: true, supportsMotionControl: false, isAvatar: false,
+    supportsSound: true, supports4K: false, supportsLastFrame: true, supportsMultishot: true, supportsMotionControl: false, isAvatar: false, supportsImageList: false,
     modes: ['standard', 'multishot'], aspectRatios: ALL_ASPECT_RATIOS,
   },
   {
     id: 'kling-v3-turbo', label: 'Kling 3.0 Turbo', description: 'Faster output, lower cost, reliable quality', tags: ['NEW'],
-    supportsSound: false, supports4K: false, supportsLastFrame: false, supportsMultishot: true, supportsMotionControl: false, isAvatar: false,
+    supportsSound: false, supports4K: false, supportsLastFrame: false, supportsMultishot: true, supportsMotionControl: false, isAvatar: false, supportsImageList: false,
     modes: ['standard', 'multishot'], aspectRatios: ['16:9', '9:16', '1:1'],
   },
   {
     id: 'kling-v3-omni', label: 'Kling 3.0 Omni', description: 'Multi-asset, motion control, 4K output', tags: ['Pro', 'HOT'],
-    supportsSound: true, supports4K: true, supportsLastFrame: true, supportsMultishot: true, supportsMotionControl: true, isAvatar: false,
+    supportsSound: true, supports4K: true, supportsLastFrame: true, supportsMultishot: true, supportsMotionControl: true, isAvatar: false, supportsImageList: true,
     modes: ['standard', 'multishot', 'motionControl'], aspectRatios: ['16:9', '9:16', '1:1'],
   },
   {
     id: 'kling-video-o1', label: 'Kling O1', description: 'Reasoning model, precise prompt adherence', tags: [],
-    supportsSound: false, supports4K: false, supportsLastFrame: false, supportsMultishot: false, supportsMotionControl: false, isAvatar: false,
+    supportsSound: false, supports4K: false, supportsLastFrame: false, supportsMultishot: false, supportsMotionControl: false, isAvatar: false, supportsImageList: false,
     modes: ['standard'], aspectRatios: ['16:9', '9:16', '1:1'],
   },
   {
     id: 'kling-v2-6', label: 'Kling 2.6', description: 'See the sound, hear the visual', tags: ['Audio'],
-    supportsSound: true, supports4K: false, supportsLastFrame: true, supportsMultishot: false, supportsMotionControl: true, isAvatar: false,
+    supportsSound: true, supports4K: false, supportsLastFrame: true, supportsMultishot: false, supportsMotionControl: true, isAvatar: false, supportsImageList: false,
     modes: ['standard', 'motionControl'], aspectRatios: ALL_ASPECT_RATIOS,
   },
   {
     id: 'kling-v2-5-turbo', label: 'Kling 2.5 Turbo', description: 'Max creativity with exceptional value', tags: ['Stable'],
-    supportsSound: false, supports4K: false, supportsLastFrame: true, supportsMultishot: false, supportsMotionControl: false, isAvatar: false,
-    modes: ['standard'], aspectRatios: ALL_ASPECT_RATIOS,
-  },
-  {
-    id: 'kling-v2-master', label: 'Kling 2 Master', description: 'High quality, cinematic realism', tags: ['HD'],
-    supportsSound: false, supports4K: false, supportsLastFrame: true, supportsMultishot: false, supportsMotionControl: false, isAvatar: false,
-    modes: ['standard'], aspectRatios: ALL_ASPECT_RATIOS,
-  },
-  {
-    id: 'kling-v2-1-master', label: 'Kling 2.1 Master', description: 'Enhanced quality and motion control', tags: [],
-    supportsSound: false, supports4K: false, supportsLastFrame: true, supportsMultishot: false, supportsMotionControl: false, isAvatar: false,
-    modes: ['standard'], aspectRatios: ALL_ASPECT_RATIOS,
-  },
-  {
-    id: 'kling-v1-6', label: 'Kling 1.6', description: 'Fast and reliable, great for drafts', tags: ['Fast'],
-    supportsSound: false, supports4K: false, supportsLastFrame: true, supportsMultishot: false, supportsMotionControl: false, isAvatar: false,
+    supportsSound: false, supports4K: false, supportsLastFrame: true, supportsMultishot: false, supportsMotionControl: false, isAvatar: false, supportsImageList: false,
     modes: ['standard'], aspectRatios: ALL_ASPECT_RATIOS,
   },
   {
     id: 'avatar', label: 'Avatar', description: 'Talking head video from photo + audio', tags: ['NEW'],
-    supportsSound: false, supports4K: false, supportsLastFrame: false, supportsMultishot: false, supportsMotionControl: false, isAvatar: true,
+    supportsSound: false, supports4K: false, supportsLastFrame: false, supportsMultishot: false, supportsMotionControl: false, isAvatar: true, supportsImageList: false,
     modes: ['avatar'], aspectRatios: [],
   },
 ]
@@ -1007,6 +993,44 @@ export function VideoPage() {
           {/* ── Standard Mode ── */}
           {videoMode === 'standard' && (
             <>
+              {/* Frames — above prompt */}
+              <div className="mb-3 flex gap-2">
+                <div className="flex-1">
+                  <ImageUploadBox label="First frame" preview={firstFrame}
+                    onUpload={setFirstFrame} onClear={() => setFirstFrame(null)}
+                    onPickFromLibrary={() => setPickerTarget('first')} compact />
+                </div>
+                {currentModel.supportsLastFrame && (
+                  <div className="flex-1">
+                    <ImageUploadBox label="Last frame" preview={lastFrame}
+                      onUpload={setLastFrame} onClear={() => setLastFrame(null)}
+                      onPickFromLibrary={() => setPickerTarget('last')} compact />
+                  </div>
+                )}
+              </div>
+
+              {/* Assets — only for Omni (image_list support) */}
+              {currentModel.supportsImageList && (
+                <div className="mb-3">
+                  <div className="flex flex-wrap gap-1.5 mb-1.5">
+                    {assets.map(asset => (
+                      <div key={asset.id} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs"
+                        style={{ background: 'rgba(79,110,247,0.12)', border: '1px solid rgba(79,110,247,0.25)', color: 'var(--text)' }}>
+                        <img src={asset.base64} alt={asset.name} className="w-4 h-4 rounded object-cover" />
+                        <span className="font-mono" style={{ color: 'var(--accent)' }}>@{asset.name}</span>
+                        <button onClick={() => setAssets(prev => prev.filter(a => a.id !== asset.id))} className="ml-0.5 opacity-50 hover:opacity-100" style={{ color: 'var(--text-muted)' }}>×</button>
+                      </div>
+                    ))}
+                    <button onClick={() => assetInputRef.current?.click()}
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all"
+                      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                      <span style={{ fontSize: 14, lineHeight: 1 }}>＋</span> Asset
+                    </button>
+                    <input ref={assetInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleAssetUpload} />
+                  </div>
+                </div>
+              )}
+
               {/* Prompt */}
               <div className="mb-3">
                 <div className="flex items-center justify-between mb-1.5">
@@ -1022,11 +1046,12 @@ export function VideoPage() {
                   </button>
                 </div>
                 <div className="relative">
-                  <textarea ref={textareaRef} value={prompt} onChange={e => setPrompt(e.target.value)} onKeyUp={handlePromptKeyUp}
+                  <textarea ref={textareaRef} value={prompt} onChange={e => setPrompt(e.target.value)}
+                    onKeyUp={currentModel.supportsImageList ? handlePromptKeyUp : undefined}
                     placeholder={firstFrame ? 'Describe how it should move...' : 'Describe the video...'}
                     rows={5} className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none"
                     style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${prompt ? 'var(--accent)' : 'var(--border)'}`, color: 'var(--text)', caretColor: 'var(--accent)', fontFamily: 'inherit' }} />
-                  {atPopup && filteredAtAssets.length > 0 && (
+                  {currentModel.supportsImageList && atPopup && filteredAtAssets.length > 0 && (
                     <div className="absolute bottom-full left-0 right-0 mb-1 rounded-xl overflow-hidden z-40"
                       style={{ background: 'var(--bg)', border: '1px solid var(--border)', boxShadow: '0 -4px 20px rgba(0,0,0,0.4)' }}>
                       {filteredAtAssets.map(asset => (
@@ -1039,42 +1064,6 @@ export function VideoPage() {
                     </div>
                   )}
                 </div>
-              </div>
-
-              {/* Assets */}
-              <div className="mb-3">
-                <div className="flex flex-wrap gap-1.5 mb-1.5">
-                  {assets.map(asset => (
-                    <div key={asset.id} className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs"
-                      style={{ background: 'rgba(79,110,247,0.12)', border: '1px solid rgba(79,110,247,0.25)', color: 'var(--text)' }}>
-                      <img src={asset.base64} alt={asset.name} className="w-4 h-4 rounded object-cover" />
-                      <span className="font-mono" style={{ color: 'var(--accent)' }}>@{asset.name}</span>
-                      <button onClick={() => setAssets(prev => prev.filter(a => a.id !== asset.id))} className="ml-0.5 opacity-50 hover:opacity-100" style={{ color: 'var(--text-muted)' }}>×</button>
-                    </div>
-                  ))}
-                  <button onClick={() => assetInputRef.current?.click()}
-                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all"
-                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-                    <span style={{ fontSize: 14, lineHeight: 1 }}>＋</span> Asset
-                  </button>
-                  <input ref={assetInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleAssetUpload} />
-                </div>
-              </div>
-
-              {/* Frames */}
-              <div className="mb-3 flex gap-2">
-                <div className="flex-1">
-                  <ImageUploadBox label="First frame" preview={firstFrame}
-                    onUpload={setFirstFrame} onClear={() => setFirstFrame(null)}
-                    onPickFromLibrary={() => setPickerTarget('first')} compact />
-                </div>
-                {currentModel.supportsLastFrame && (
-                  <div className="flex-1">
-                    <ImageUploadBox label="Last frame" preview={lastFrame}
-                      onUpload={setLastFrame} onClear={() => setLastFrame(null)}
-                      onPickFromLibrary={() => setPickerTarget('last')} compact />
-                  </div>
-                )}
               </div>
 
               {/* Negative prompt */}
@@ -1099,10 +1088,15 @@ export function VideoPage() {
           {/* ── Multishot Mode ── */}
           {videoMode === 'multishot' && (
             <>
-              {/* Brief description for enhance */}
+              {/* First frame — at the top */}
+              <ImageUploadBox label="First frame (optional)" preview={firstFrame}
+                onUpload={setFirstFrame} onClear={() => setFirstFrame(null)}
+                onPickFromLibrary={() => setPickerTarget('first')} compact />
+
+              {/* General prompt for enhance */}
               <div className="mb-3">
                 <div className="flex items-center justify-between mb-1.5">
-                  <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Video concept</div>
+                  <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Общий промт</div>
                   <button onClick={handleEnhanceShots} disabled={enhancingShots || (!shotDescription.trim() && !shots.some(s => s.prompt.trim()))}
                     className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition-all font-medium"
                     style={{ background: 'rgba(79,110,247,0.12)', color: 'var(--accent)', border: '1px solid var(--border)' }}>
@@ -1112,7 +1106,7 @@ export function VideoPage() {
                   </button>
                 </div>
                 <textarea value={shotDescription} onChange={e => setShotDescription(e.target.value)}
-                  placeholder="Briefly describe the video concept..." rows={2}
+                  placeholder="Опиши идею видео, GPT распишет по шотам..." rows={2}
                   className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none"
                   style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', fontFamily: 'inherit' }} />
               </div>
@@ -1158,10 +1152,6 @@ export function VideoPage() {
                 </button>
               </div>
 
-              {/* Optional first frame for multishot */}
-              <ImageUploadBox label="First frame (optional)" preview={firstFrame}
-                onUpload={setFirstFrame} onClear={() => setFirstFrame(null)}
-                onPickFromLibrary={() => setPickerTarget('first')} compact />
             </>
           )}
 
