@@ -380,9 +380,9 @@ function VideoCard({ item, onSelect, featured = false }: { item: VideoItem; onSe
   const videoSrc = `/api/video/file/${item.id}`
   return (
     <div onClick={onSelect} className="relative rounded-xl overflow-hidden cursor-pointer group"
-      style={{ background: featured ? 'var(--surface)' : '#000', border: '1px solid var(--border)', aspectRatio: featured ? '21/9' : '1/1', gridColumn: featured ? 'span 2' : undefined }}>
+      style={{ background: '#000', border: '1px solid var(--border)', aspectRatio: featured ? '2/1' : '1/1', gridColumn: featured ? 'span 2' : undefined }}>
       {featured ? (
-        <video src={videoSrc} autoPlay muted loop playsInline className="w-full h-full object-cover" />
+        <video src={videoSrc} autoPlay muted loop playsInline className="w-full h-full object-contain" />
       ) : !thumbErr ? (
         <img src={thumbSrc} alt={item.prompt} className="w-full h-full object-contain" onError={() => setThumbErr(true)} />
       ) : (
