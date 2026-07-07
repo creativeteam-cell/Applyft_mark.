@@ -80,6 +80,44 @@ const MODE_LABELS: Record<VideoMode, string> = {
 
 const TURBO_MODELS = new Set(['kling-v3-turbo', 'kling-v3-omni', 'kling-video-o1'])
 
+// ── Cost estimation ────────────────────────────────────────────────────────
+
+function estimateCost(params: {
+  model: KlingModel; qualityMode: Mode; sound: boolean
+  videoMode: VideoMode; hasImage: boolean; durationSec: number
+}): number | null {
+  const { model, qualityMode, sound, videoMode, hasImage, durationSec } = params
+  if (durationSec <= 0) return null
+  const is720 = qualityMode === 'std'
+  const is4k = qualityMode === '4k'
+  let rate = 0
+
+  if (model === 'kling-v3') {
+    if (videoMode === 'motionControl') rate = is720 ? 0.9 : 1.2
+    else if (sound) rate = is720 ? 0.9 : is4k ? 3.0 : 1.2
+    else rate = is720 ? 0.6 : is4k ? 3.0 : 0.8
+  } else if (model === 'kling-v3-turbo') {
+    rate = is720 ? 0.8 : 1.0
+  } else if (model === 'kling-v3-omni') {
+    if (videoMode === 'motionControl') rate = is720 ? 0.9 : is4k ? 3.0 : 1.2
+    else if (sound) rate = is720 ? 0.8 : is4k ? 3.0 : 1.0
+    else rate = is720 ? 0.6 : is4k ? 3.0 : 0.8
+  } else if (model === 'kling-video-o1') {
+    rate = hasImage ? (is720 ? 0.9 : 1.2) : (is720 ? 0.6 : 0.8)
+  } else if (model === 'kling-v2-6') {
+    if (videoMode === 'motionControl') rate = is720 ? 0.5 : 0.8
+    else rate = is720 ? 0.3 : 0.5
+  } else if (model === 'kling-v2-5-turbo') {
+    rate = is720 ? 0.3 : 0.5
+  } else if (model === 'avatar') {
+    rate = is720 ? 0.4 : 0.8
+  } else {
+    rate = is720 ? 0.6 : 0.8
+  }
+
+  return Math.round(rate * durationSec * 10) / 10
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function colorFromString(str: string) {
@@ -338,17 +376,20 @@ function ImagePickerModal({ onSelect, onClose }: { onSelect: (b64: string) => vo
 function VideoCard({ item, onSelect, featured = false }: { item: VideoItem; onSelect: () => void; featured?: boolean }) {
   const [thumbErr, setThumbErr] = useState(false)
   const thumbSrc = `/api/video/thumb/${item.id}`
+  const videoSrc = `/api/video/file/${item.id}`
   return (
     <div onClick={onSelect} className="relative rounded-xl overflow-hidden cursor-pointer group"
       style={{ background: 'var(--surface)', border: '1px solid var(--border)', aspectRatio: featured ? '21/9' : '16/10', gridColumn: featured ? 'span 2' : undefined }}>
-      {!thumbErr ? (
+      {featured ? (
+        <video src={videoSrc} autoPlay muted loop playsInline className="w-full h-full object-cover" />
+      ) : !thumbErr ? (
         <img src={thumbSrc} alt={item.prompt} className="w-full h-full object-cover" onError={() => setThumbErr(true)} />
       ) : (
         <div className="w-full h-full flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.03)' }}>
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'rgba(255,255,255,0.15)' }}><polygon points="5 3 19 12 5 21 5 3"/></svg>
         </div>
       )}
-      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: 'rgba(0,0,0,0.5)' }}>
+      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: 'rgba(0,0,0,0.4)' }}>
         <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(4px)' }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
         </div>
@@ -373,6 +414,7 @@ function VideoCard({ item, onSelect, featured = false }: { item: VideoItem; onSe
 
 function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose: () => void; onRefresh: () => void }) {
   const [extPrompt, setExtPrompt] = useState('')
+  const [extDuration, setExtDuration] = useState<'4'|'5'>('5')
   const [extending, setExtending] = useState(false)
   const [extStatus, setExtStatus] = useState<'idle'|'processing'|'done'|'error'>('idle')
   const [extError, setExtError] = useState('')
@@ -403,7 +445,7 @@ function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose
     try {
       const res = await fetch('/api/video/extend', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ klingVideoId: item.klingVideoId, prompt: extPrompt }),
+        body: JSON.stringify({ klingVideoId: item.klingVideoId, prompt: extPrompt, duration: extDuration }),
       })
       const d = await res.json()
       if (d.error) throw new Error(d.error)
@@ -480,8 +522,17 @@ function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose
           <div className="mb-4" style={{ height: 1, background: 'var(--border)' }} />
           <div className="mb-4">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-                Extend video <span className="font-normal normal-case" style={{ color: 'rgba(255,255,255,0.2)' }}>~5s</span>
+              <div className="flex items-center gap-2">
+                <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Extend video</div>
+                <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                  {(['4','5'] as const).map(d => (
+                    <button key={d} onClick={() => setExtDuration(d)}
+                      className="px-2 py-0.5 text-[10px] font-medium transition-all"
+                      style={{ background: extDuration === d ? 'rgba(79,110,247,0.2)' : 'transparent', color: extDuration === d ? 'var(--accent)' : 'var(--text-muted)', borderRight: d === '4' ? '1px solid var(--border)' : 'none' }}>
+                      {d}s
+                    </button>
+                  ))}
+                </div>
               </div>
               <button onClick={handleEnhanceExt} disabled={enhancingExt || !extPrompt.trim()}
                 className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition-all font-medium"
@@ -607,6 +658,7 @@ export function VideoPage() {
   // ── Multishot state ──
   const [shots, setShots] = useState<ShotItem[]>([{ id: '1', prompt: '', duration: 3 }])
   const [shotDescription, setShotDescription] = useState('')
+  const [shotCharacterPrompt, setShotCharacterPrompt] = useState('')
   const [enhancingShots, setEnhancingShots] = useState(false)
 
   // ── Motion Control state ──
@@ -641,6 +693,11 @@ export function VideoPage() {
   const currentModel = MODELS.find(m => m.id === model)!
   const totalShotsDuration = shots.reduce((s, sh) => s + sh.duration, 0)
   const isTurboModel = TURBO_MODELS.has(model)
+
+  const estimatedCost = useMemo(() => {
+    const durationSec = videoMode === 'multishot' ? totalShotsDuration : videoMode === 'avatar' ? 0 : duration
+    return estimateCost({ model, qualityMode: mode, sound, videoMode, hasImage: !!firstFrame, durationSec })
+  }, [model, mode, sound, videoMode, firstFrame, duration, totalShotsDuration])
 
   const canGenerate = useMemo(() => {
     if (status === 'pending' || status === 'processing') return false
@@ -896,10 +953,11 @@ export function VideoPage() {
       }
 
       if (videoMode === 'multishot') {
+        const charPrefix = shotCharacterPrompt.trim() ? `[Character: ${shotCharacterPrompt.trim()}] ` : ''
         const allShotsHavePrompts = shots.every(s => s.prompt.trim())
         const effectivePrompt = allShotsHavePrompts
-          ? shots.map((s, i) => `shot ${i + 1}, ${s.duration}, ${s.prompt}`).join('; ')
-          : shotDescription
+          ? shots.map((s, i) => `shot ${i + 1}, ${s.duration}, ${charPrefix}${s.prompt}`).join('; ')
+          : (charPrefix + shotDescription)
         const totalDur = totalShotsDuration
 
         if (isTurboModel) {
@@ -1106,9 +1164,23 @@ export function VideoPage() {
                   </button>
                 </div>
                 <textarea value={shotDescription} onChange={e => setShotDescription(e.target.value)}
-                  placeholder="Опиши идею видео, GPT распишет по шотам..." rows={2}
+                  placeholder="Describe the video idea, GPT will write per-shot prompts..." rows={2}
                   className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none"
                   style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', fontFamily: 'inherit' }} />
+              </div>
+
+              {/* Character lock */}
+              <div className="mb-3">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Character prompt</div>
+                  <span title="Prepended to every shot — keeps character appearance, voice and style consistent across all scenes."
+                    className="text-[10px] w-4 h-4 rounded-full flex items-center justify-center cursor-help flex-shrink-0"
+                    style={{ background: 'rgba(255,255,255,0.1)', color: 'var(--text-muted)' }}>?</span>
+                </div>
+                <textarea value={shotCharacterPrompt} onChange={e => setShotCharacterPrompt(e.target.value)}
+                  placeholder="e.g. 30-year-old woman, red curly hair, white linen shirt, soft natural light..." rows={2}
+                  className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${shotCharacterPrompt ? 'rgba(79,110,247,0.4)' : 'var(--border)'}`, color: 'var(--text)', fontFamily: 'inherit' }} />
               </div>
 
               {/* Shot builder */}
@@ -1359,7 +1431,15 @@ export function VideoPage() {
             {status === 'pending' || status === 'processing' ? (
               <><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>Generating...</>
             ) : (
-              <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>Generate video</>
+              <div className="flex items-center justify-between w-full px-1">
+                <div className="flex items-center gap-2">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  Generate video
+                </div>
+                {estimatedCost !== null && videoMode !== 'avatar' && (
+                  <span className="text-xs font-normal opacity-80">{estimatedCost} units</span>
+                )}
+              </div>
             )}
           </button>
         </div>
@@ -1415,7 +1495,7 @@ export function VideoPage() {
 
         {/* History */}
         <div className="p-5">
-          {historyUsers.length > 1 && (
+          {historyUsers.length > 0 && (
             <div className="flex items-center gap-2 mb-4">
               {historyUsers.map(u => (
                 <button key={u.email} onClick={() => setFilterEmail(filterEmail === u.email ? null : u.email)}

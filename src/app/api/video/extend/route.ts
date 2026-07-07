@@ -10,10 +10,11 @@ export async function POST(req: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   try {
-    const { klingVideoId, prompt, negative_prompt } = await req.json()
+    const { klingVideoId, prompt, negative_prompt, duration } = await req.json()
     if (!klingVideoId) return NextResponse.json({ error: 'klingVideoId required' }, { status: 400 })
 
-    const result = await extendVideo({ video_id: klingVideoId, prompt, negative_prompt })
+    const dur = duration === '4' ? '4' : '5'
+    const result = await extendVideo({ video_id: klingVideoId, prompt, negative_prompt, duration: dur })
     return NextResponse.json(result)
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })
