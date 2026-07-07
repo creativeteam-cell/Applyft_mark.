@@ -761,7 +761,16 @@ export function VideoPage() {
 
   const pollStatus = useCallback((taskId: string, type: string, savePayload: any) => {
     stopPolling()
+    const startedAt = Date.now()
+    const TIMEOUT_MS = 10 * 60 * 1000 // 10 minutes
     pollRef.current = setInterval(async () => {
+      if (Date.now() - startedAt > TIMEOUT_MS) {
+        stopPolling()
+        setQueueActive('kling', false)
+        setError('Generation timed out after 10 minutes. Please try again.')
+        setStatus('error')
+        return
+      }
       try {
         const res = await fetch(`/api/video/status/${taskId}?type=${type}`)
         const data = await res.json()
@@ -788,10 +797,9 @@ export function VideoPage() {
           setError(data.task_status_msg ?? 'Generation failed'); setStatus('error')
         }
       } catch (e: any) {
-        // network error during poll — keep retrying silently, but stop after 3 consecutive failures
         console.warn('[poll] fetch error:', e.message)
       }
-    }, 4000)
+    }, 5000)
   }, [stopPolling, fetchHistory])
 
   // ── Handlers ──
@@ -1314,7 +1322,16 @@ export function VideoPage() {
               </div>
 
               <div className="mb-3">
-                <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Prompt (optional)</div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Prompt (optional)</div>
+                  <button onClick={handleEnhancePrompt} disabled={enhancing}
+                    className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition-all font-medium"
+                    style={{ background: 'rgba(79,110,247,0.12)', color: 'var(--accent)', border: '1px solid var(--border)' }}>
+                    {enhancing ? (
+                      <svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>
+                    ) : '✦'} Enhance
+                  </button>
+                </div>
                 <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
                   placeholder="Gestures, emotions, camera movements..." rows={3}
                   className="w-full rounded-xl px-3 py-2 text-sm resize-none outline-none"
@@ -1438,9 +1455,11 @@ export function VideoPage() {
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                   Generate video
                 </div>
-                {estimatedCost !== null && videoMode !== 'avatar' && (
+                {videoMode === 'avatar' ? (
+                  <span className="text-xs font-normal opacity-80">{mode === 'std' ? '0.4' : '0.8'} u/s</span>
+                ) : estimatedCost !== null ? (
                   <span className="text-xs font-normal opacity-80">{estimatedCost} units</span>
-                )}
+                ) : null}
               </div>
             )}
           </button>

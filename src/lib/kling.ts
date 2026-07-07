@@ -100,15 +100,22 @@ export async function createImage2VideoTask(params: {
 }
 
 export async function getVideoTaskStatus(
-  type: 'text2video' | 'image2video' | 'video-extend',
+  type: 'text2video' | 'image2video' | 'video-extend' | 'motion-control' | 'avatar',
   task_id: string
 ): Promise<KlingTaskData> {
-  const endpoint = type === 'video-extend'
-    ? `${KLING_BASE_URL}/v1/videos/video-extend/${task_id}`
-    : `${KLING_BASE_URL}/v1/videos/${type}/${task_id}`
+  let endpoint: string
+  if (type === 'video-extend') {
+    endpoint = `${KLING_BASE_URL}/v1/videos/video-extend/${task_id}`
+  } else if (type === 'motion-control') {
+    endpoint = `${KLING_BASE_URL}/v1/videos/motion-control/${task_id}`
+  } else if (type === 'avatar') {
+    endpoint = `${KLING_BASE_URL}/v1/videos/avatar/image2video/${task_id}`
+  } else {
+    endpoint = `${KLING_BASE_URL}/v1/videos/${type}/${task_id}`
+  }
   const res = await fetch(endpoint, { headers: headers() })
   const data: KlingResponse = await res.json()
-  if (data.code !== 0) throw new Error(`Kling error: ${data.message}`)
+  if (data.code !== 0) throw new Error(`Kling error ${data.code}: ${data.message}`)
   return data.data
 }
 
