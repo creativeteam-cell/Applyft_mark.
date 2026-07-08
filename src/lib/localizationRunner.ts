@@ -1,6 +1,7 @@
 import OpenAI from 'openai'
 import sharp from 'sharp'
 import { getDriveClient, invalidateLocCache } from './googleDrive'
+import { recomposeImage } from './imagen'
 import { updateQueue } from './queue'
 
 // --- Size helpers ---
@@ -1147,17 +1148,23 @@ export async function runLocalizationJob(
             let finalBuffer = buffer
 
             if (translatedRefBuffer && sizeLabel !== translatedRefSizeLabel && refHasTranslation) {
-              // ── Strategy A: recompose from translated reference ──
+              // ── Strategy A: recompose translated ref to target size using imagen.ts ──
+              // Pass ONLY the translated image — recomposeImage extends background to target size
+              // while preserving all text overlays (already translated).
               patch(folder.id, { uploadInfo: `${lang}: ${img.name} — recomposing from ${translatedRefSizeLabel}...` })
               emit()
-              finalBuffer = await localizeViaRecompose(
-                translatedRefBuffer, buffer, sizeLabel ?? '', lang,
-                (attempt, status) => {
-                  const icon = status === 'ok' ? '✓' : status === 'retry' ? '↻' : '✗'
-                  patch(folder.id, { uploadInfo: `${lang}: ${img.name} — recompose ${attempt}/3 ${icon}` })
-                  emit()
-                }
-              )
+              try {
+                const translatedRefBase64 = `data:image/jpeg;base64,${translatedRefBuffer!.toString('base64')}`
+                const fixNote = `Keep ALL text exactly as it appears in the source — it is already translated to ${lang} and must NOT be changed to English or any other language.`
+                const recomposeResult = await recomposeImage(translatedRefBase64, sizeLabel ?? '1x1', fixNote)
+                const b64Data = recomposeResult.replace(/^data:image\/\w+;base64,/, '')
+                finalBuffer = Buffer.from(b64Data, 'base64')
+                patch(folder.id, { uploadInfo: `${lang}: ${img.name} — recompose ✓` })
+                emit()
+              } catch (recomposeErr: any) {
+                console.warn(`[loc] recompose failed for ${img.name}/${lang}:`, recomposeErr.message)
+                // finalBuffer remains = buffer (original)
+              }
             } else {
               // ── Strategy B: translate this image from scratch (first/reference image) ──
               const SKIP_TYPES = new Set(['logo', 'watermark'])
