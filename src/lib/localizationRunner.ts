@@ -293,7 +293,7 @@ async function gptLocalizeImage(
         image: imageFile,
         prompt,
         size: gptSize,
-      } as any)
+      } as any, { timeout: 90_000 })
       const b64 = (response.data?.[0] as any)?.b64_json
       if (!b64) throw new Error('No image data in gpt-image-1 response')
       console.log(`[gpt-img] ${sizeLabel}/${language} attempt ${attempt} ✓`)
