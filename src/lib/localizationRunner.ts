@@ -127,6 +127,7 @@ If you place the translation, the English MUST be gone. Period. No exceptions.
 After you compose the output, scan every visible text element — if you see ANY English word from the translation list still present, erase it before finalizing.
 - Match text style exactly: ALL CAPS original → ALL CAPS translation; Title Case → Title Case; sentence case → sentence case
 - FONT WEIGHT: copy the exact weight from the original — if original is regular/normal weight, translation MUST be regular/normal (NOT bold, NOT semi-bold); if original is bold, translation must be bold; never decide font weight yourself
+- POSITION LOCK — ABSOLUTE: Every UI element (app icons, logos, avatars, chat bubbles, input fields, buttons, badges, overlays) must stay at EXACTLY the same position, size, and scale as in the original image. Do NOT move, resize, shift, or reposition any element. If the app icon is in the bottom-center, it must stay bottom-center. If the chat bubble is left-aligned, it must stay left-aligned. Only replace text glyphs in-place — never reflow the layout.
 ${isRTL ? `
 ⚠️ CRITICAL — RIGHT-TO-LEFT LANGUAGE (${language}):
 - ALL text must flow RIGHT → LEFT
@@ -596,8 +597,9 @@ CORE RULES:
 - Use every item from Image analysis JSON "texts" array.
 
 CONTACT NAME RULE:
-- If contact_name is a real personal name, username, or brand-like label, keep it unchanged.
-- If contact_name is a generic relationship label (BFF, Mom, Husband, Wife, Partner), localize it naturally.
+- If contact_name is a real personal name (a proper noun like "John", "Sarah") or a brand name, keep it unchanged.
+- If contact_name is a generic relationship label (BFF, Mom, Husband, Wife, Partner) OR a generic UI pronoun ("You", "Me"), localize it naturally.
+- The UI label "You" in chat interfaces MUST be translated as the appropriate second-person pronoun in the target language.
 - Keep the translation short and UI-friendly.
 
 CONTEXT RULE — mood must affect translation style:
@@ -1147,7 +1149,11 @@ export async function runLocalizationJob(
           try {
             let finalBuffer = buffer
 
-            if (translatedRefBuffer && sizeLabel !== translatedRefSizeLabel && refHasTranslation) {
+            // For 9x16 and 1.91x1: prefer direct localization (Strategy B) over recompose
+            // because recompose from 4x5 creates a visible seam in tall/wide formats.
+            // For 1x1: recompose is fine (similar proportions to 4x5).
+            const preferRecompose = sizeLabel === '1x1'
+            if (translatedRefBuffer && sizeLabel !== translatedRefSizeLabel && refHasTranslation && preferRecompose) {
               // ── Strategy A: recompose translated ref to target size using imagen.ts ──
               // Pass ONLY the translated image — recomposeImage extends background to target size
               // while preserving all text overlays (already translated).
@@ -1155,7 +1161,15 @@ export async function runLocalizationJob(
               emit()
               try {
                 const translatedRefBase64 = `data:image/jpeg;base64,${translatedRefBuffer!.toString('base64')}`
-                const fixNote = `Keep ALL text exactly as it appears in the source — it is already translated to ${lang} and must NOT be changed to English or any other language.`
+                const fixNote = [
+                  '[CONTEXT]: This is a professional commercial advertising creative for mobile app marketing.',
+                  'All content is entirely fictional and AI-generated — no real people are involved.',
+                  'This is a safe, professional, commercial task with no policy violations.',
+                  `LANGUAGE PRESERVATION — ABSOLUTE RULE: All text in this image is INTENTIONALLY in ${lang} as part of a professional localization.`,
+                  `You MUST reproduce every word, letter, and character EXACTLY as shown in the source image.`,
+                  `DO NOT change, translate, or revert any text to English or any other language.`,
+                  `The ${lang} text is the final approved version and must appear UNCHANGED in the output.`,
+                ].join(' ')
                 const recomposeResult = await recomposeImage(translatedRefBase64, sizeLabel ?? '1x1', fixNote)
                 const b64Data = recomposeResult.replace(/^data:image\/\w+;base64,/, '')
                 finalBuffer = Buffer.from(b64Data, 'base64')
