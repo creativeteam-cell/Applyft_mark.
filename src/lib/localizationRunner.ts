@@ -164,9 +164,12 @@ async function localizeImage(
 
     let result: Buffer | null = null
     try {
+      // On retries, give Gemini the previous attempt's output so it can fix what's still wrong.
+      // On attempt 1, use the original image.
+      const inputBuffer = (attempt > 1 && lastResult) ? lastResult : imgBuffer
       result = await geminiRequest([
         { text: prompt },
-        { inline_data: { mime_type: mimeType, data: imgBuffer.toString('base64') } },
+        { inline_data: { mime_type: mimeType, data: inputBuffer.toString('base64') } },
       ], mimeType, 0, aspectRatio)
     } catch (err: any) {
       const reason = `Gemini error: ${err.message}`
