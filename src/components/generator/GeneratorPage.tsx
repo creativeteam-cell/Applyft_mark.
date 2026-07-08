@@ -491,6 +491,8 @@ function ImageCardModal({ item, onClose, onGenerated }: {
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [imgSrc, setImgSrc] = useState<string | null>(null)
+  const [imgZoomed, setImgZoomed] = useState(false)
+  const [aiEnhance, setAiEnhance] = useState(false)
 
   const currentModel = MODELS.find(m => m.id === selectedModelId) ?? MODELS[0]
   const availableSizes = currentModel.sizes.map(s => s.label)
@@ -540,6 +542,7 @@ function ImageCardModal({ item, onClose, onGenerated }: {
             recomposeFileId: item.id,
             targetSize: selectedSize,
             fixNote: newPrompt.trim(),
+            enhanceFixNote: aiEnhance,
           }),
         })
         const data = await res.json()
@@ -583,7 +586,7 @@ function ImageCardModal({ item, onClose, onGenerated }: {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6"
       style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
       onClick={handleBackdrop}>
-      <div className="relative flex rounded-2xl overflow-hidden max-h-[90vh] w-full max-w-3xl"
+      <div className="relative flex rounded-2xl overflow-hidden max-h-[90vh] w-full max-w-4xl"
         style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
         onClick={e => e.stopPropagation()}>
 
@@ -596,10 +599,11 @@ function ImageCardModal({ item, onClose, onGenerated }: {
         </button>
 
         {/* Image preview */}
-        <div className="flex-shrink-0 flex items-center justify-center"
-          style={{ width: 340, background: 'rgba(0,0,0,0.3)' }}>
+        <div className="flex-shrink-0 flex items-center justify-center relative group"
+          style={{ width: 480, background: 'rgba(0,0,0,0.3)', cursor: 'zoom-in' }}
+          onClick={() => setImgZoomed(true)}>
           {imgSrc ? (
-            <img src={imgSrc} alt={item.prompt} className="max-w-full max-h-[90vh] object-contain"
+            <img src={imgSrc} alt={item.prompt} className="max-w-full max-h-[90vh] object-contain transition-transform duration-200 group-hover:scale-[1.03]"
               onError={() => { if (item.thumbnailLink) setImgSrc(item.thumbnailLink) }} />
           ) : (
             <div className="flex items-center justify-center w-full h-64">
@@ -608,6 +612,13 @@ function ImageCardModal({ item, onClose, onGenerated }: {
                 <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/>
                 <path d="M12 2a10 10 0 0 1 10 10"/>
               </svg>
+            </div>
+          )}
+          {/* Zoom hint */}
+          {imgSrc && (
+            <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity px-2 py-1 rounded text-xs"
+              style={{ background: 'rgba(0,0,0,0.6)', color: 'rgba(255,255,255,0.7)' }}>
+              Click to expand
             </div>
           )}
         </div>
@@ -689,9 +700,21 @@ function ImageCardModal({ item, onClose, onGenerated }: {
 
           {/* New prompt */}
           <div className="mb-4 flex-1">
-            <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
-              New prompt
-              <span className="ml-1 font-normal normal-case" style={{ color: 'rgba(255,255,255,0.25)' }}>(leave empty to resize only)</span>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                New prompt
+                <span className="ml-1 font-normal normal-case" style={{ color: 'rgba(255,255,255,0.25)' }}>(leave empty to resize only)</span>
+              </span>
+              <button onClick={() => setAiEnhance(o => !o)}
+                className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-lg transition-all"
+                style={{ background: aiEnhance ? 'rgba(79,110,247,0.15)' : 'rgba(255,255,255,0.05)',
+                  color: aiEnhance ? 'var(--accent)' : 'var(--text-muted)',
+                  border: `1px solid ${aiEnhance ? 'var(--accent)' : 'transparent'}` }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                </svg>
+                AI
+              </button>
             </div>
             <textarea value={newPrompt} onChange={e => setNewPrompt(e.target.value)}
               placeholder="Describe a variation, or leave empty to recompose at new size..."
@@ -746,6 +769,23 @@ function ImageCardModal({ item, onClose, onGenerated }: {
           </div>
         </div>
       </div>
+
+      {/* Fullscreen zoom overlay */}
+      {imgZoomed && imgSrc && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.92)', cursor: 'zoom-out' }}
+          onClick={() => setImgZoomed(false)}>
+          <img src={imgSrc} alt={item.prompt}
+            style={{ maxWidth: '92vw', maxHeight: '92vh', objectFit: 'contain', borderRadius: 8 }} />
+          <button onClick={() => setImgZoomed(false)}
+            className="absolute top-5 right-5 w-9 h-9 rounded-full flex items-center justify-center"
+            style={{ background: 'rgba(255,255,255,0.12)' }}>
+            <svg width="13" height="13" viewBox="0 0 12 12" fill="none">
+              <path d="M1 1l10 10M11 1L1 11" stroke="white" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          </button>
+        </div>
+      )}
     </div>
   )
 }

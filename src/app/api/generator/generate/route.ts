@@ -156,7 +156,7 @@ export async function POST(req: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { prompt, engine, modelId, size, referenceBase64: referenceBase64Body, referenceFileId, aiPrompt, recomposeFileId, recomposeBase64, targetSize, fixNote } = body
+  const { prompt, engine, modelId, size, referenceBase64: referenceBase64Body, referenceFileId, aiPrompt, recomposeFileId, recomposeBase64, targetSize, fixNote, enhanceFixNote } = body
 
   // Check generation limit (applies to all generation modes)
   if (session.user?.email) {
@@ -185,14 +185,37 @@ export async function POST(req: NextRequest) {
       const imageBase64 = recomposeFileId
         ? await fetchDriveFileAsBase64(recomposeFileId)
         : recomposeBase64 as string
-      const result = await recomposeImage(imageBase64, sizeCode, fixNote as string | undefined)
+
+      // Optionally AI-enhance the fixNote before recomposing
+      let resolvedFixNote = fixNote as string | undefined
+      if (enhanceFixNote && resolvedFixNote?.trim()) {
+        try {
+          const enhanced = await getOpenAI().chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+              {
+                role: 'system',
+                content: `You are an expert at writing instructions for AI image editing. The user wants to modify an existing image. Take their rough correction note and rewrite it as a clear, specific instruction for the image editing AI. Keep the same intent, add visual detail (lighting, composition, spatial relationships). Return ONLY the improved instruction in English, nothing else.`,
+              },
+              { role: 'user', content: resolvedFixNote },
+            ],
+            max_tokens: 300,
+            temperature: 0.7,
+          })
+          resolvedFixNote = enhanced.choices[0]?.message?.content?.trim() || resolvedFixNote
+        } catch (e) {
+          console.warn('[generator/recompose] enhance fixNote failed, using original:', e)
+        }
+      }
+
+      const result = await recomposeImage(imageBase64, sizeCode, resolvedFixNote)
 
       const userToken = (session as any).accessToken
       let fileId: string | null = null
       let webViewLink: string | null = null
       if (userToken) {
         const saved = await saveToDrive(result, {
-          prompt: `[Recompose to ${targetSize}]`,
+          prompt: resolvedFixNote || `[Recompose to ${targetSize}]`,
           engine: 'Banana',
           size: targetSize,
           userName: session.user.name || '',

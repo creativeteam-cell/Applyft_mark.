@@ -234,8 +234,9 @@ async function withRetry(prompt: string, referenceBase64?: string, logoBase64?: 
       const msg: string = e.message || ''
       const isTimeout = msg === 'TIMEOUT'
       const isRateLimit = msg === 'RATE_LIMIT'
+      const isTransient = msg.includes('404') || msg.includes('NOT_FOUND') || msg.includes('503') || msg.includes('500')
       const isHardStop = msg === 'CONTENT_FILTER' || msg === 'PROMPT_TOO_LONG' || msg === 'BLOCKED_WORD' || msg === 'RECITATION'
-      const isRetryable = (isTimeout || isRateLimit || msg.startsWith('NO_IMAGE:')) && !isHardStop
+      const isRetryable = (isTimeout || isRateLimit || isTransient || msg.startsWith('NO_IMAGE:')) && !isHardStop
 
       if (!isRetryable || attempt === maxAttempts) {
         if (isTimeout) throw new Error('TIMEOUT')
@@ -336,14 +337,22 @@ export async function recomposeImage(imageBase64: string, targetSize: string, fi
     '4x5':    'portrait (4:5)',
   }
 
+  const extensionHints: Record<string, string> = {
+    '9x16':   ' Extend primarily downward (and slightly upward) to fill the taller canvas. The added area should show more of the same environment — ground, street, floor, or surroundings that naturally continue below the frame.',
+    '1.91x1': ' Extend primarily to the left and right to fill the wider canvas. The added area should show more of the same scene at the sides.',
+    '1x1':    ' Extend equally on all sides to fill the square canvas.',
+    '4x5':    '',
+  }
+
   const prompt = `SCENE EXTENSION TASK: Redraw this image for a ${directions[targetSize] || targetSize} aspect ratio.
 
 HOW TO DO IT:
 - Keep the main subject (person, face, body) EXACTLY as in the original — same appearance, same lighting, same pose, same expression
-- Extend the background/environment naturally to fill the new canvas — show more of the same scene as if the camera zoomed out or panned
+- Extend the background/environment naturally to fill the new canvas — show more of the same scene as if the camera zoomed out or panned.${extensionHints[targetSize] || ''}
 - The extension must be seamless — no visible borders, no seams, no collage effect
 - Match the original's colour grade, lighting direction, atmosphere, and style perfectly
-- Do NOT add text, UI elements, watermarks, or logos${hint}${fix}`
+- PRESERVE ALL existing text overlays, logos, icons, UI elements, and graphical layers from the original image — reproduce them exactly (same content, same position, same style). Do NOT remove or alter any overlay that was present in the original
+- Do NOT add NEW text, logos, or UI elements that were not in the original${hint}${fix}`
 
   return withRetry(prompt, cleanB64, undefined, 3, targetSize, undefined, model)
 }
