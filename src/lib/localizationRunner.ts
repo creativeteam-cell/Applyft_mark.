@@ -116,6 +116,7 @@ RULES:
 - TEXT BACKGROUND BOXES: if the original text has a colored background box, highlight, pill, or label behind it — resize that box to tightly fit the translated text. The box width/height must match the new text length, not the old one. Never leave a box that is too wide or too narrow for the translated text
 - Do NOT remove, reduce, or change any blur, glow, shadow, or visual effect applied to ANY part of the image — blurred regions must remain exactly as blurred
 - Replace EVERY occurrence of each listed text
+- INLINE BRAND NAMES: if a phrase contains a brand/app name within it (e.g. "Try using Family Locator to calm yourself"), translate the surrounding words but keep the brand name exactly as-is in its original styling and position
 - Zero English letters may remain in replaced areas
 
 ⛔ ABSOLUTE RULE — NO BILINGUAL OUTPUT:
@@ -204,7 +205,7 @@ async function localizeImage(
   } else {
     console.warn(`[loc] All 5 Gemini attempts threw errors, falling back to original. Reasons:\n${failReasons.join('\n')}`)
   }
-  return firstResult ?? lastResult ?? imgBuffer
+  return lastResult ?? firstResult ?? imgBuffer
 }
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -1109,13 +1110,13 @@ export async function runLocalizationJob(
         if (uploadedThisLang > 0 || allExisted) {
           completedLangs.push(lang)
           const info = allExisted
-            ? `${lang} ✓ (all sizes already exist)`
-            : `${lang} ✓ (${uploadedThisLang}/${imageDataList.length} uploaded)`
+            ? `${lang} (all sizes already exist)`
+            : `${lang} (${uploadedThisLang}/${imageDataList.length} uploaded)`
           patch(folder.id, { completedLangs: [...completedLangs], uploadInfo: info })
         } else {
           patch(folder.id, {
             status: 'error',
-            error: `${lang}: 0 files uploaded — dict=${dictSize}, check server logs`,
+            error: `${lang}: 0 files uploaded -- dict=${dictSize}, check server logs`,
           })
         }
         emit()
