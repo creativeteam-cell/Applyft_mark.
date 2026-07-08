@@ -293,7 +293,7 @@ Rules:
       imageBase64 = await generateWithGptImage(finalPrompt, size, referenceBase64, openaiModel)
     } else {
       const geminiModel = GEMINI_MODEL_MAP[modelId as string] || DEFAULT_GEMINI_MODEL
-      imageBase64 = await generateImage(finalPrompt, size, referenceBase64, undefined, geminiModel)
+      imageBase64 = await generateImage(finalPrompt, referenceBase64, undefined, size, undefined, false, geminiModel)
     }
 
     const userToken = (session as any).accessToken

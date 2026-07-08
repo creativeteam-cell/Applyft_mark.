@@ -584,6 +584,24 @@ function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose
   )
 }
 
+// Compress image to max 1280px JPEG to keep API payloads under Vercel 4.5MB limit
+function shrinkForVideo(dataUrl: string, maxPx = 1280): Promise<string> {
+  return new Promise(resolve => {
+    const img = new Image()
+    img.onload = () => {
+      const scale = Math.min(1, maxPx / Math.max(img.width, img.height))
+      const w = Math.round(img.width * scale)
+      const h = Math.round(img.height * scale)
+      const canvas = document.createElement('canvas')
+      canvas.width = w; canvas.height = h
+      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h)
+      resolve(canvas.toDataURL('image/jpeg', 0.88))
+    }
+    img.onerror = () => resolve(dataUrl)
+    img.src = dataUrl
+  })
+}
+
 // ── ImageUploadBox ─────────────────────────────────────────────────────────
 
 function ImageUploadBox({ label, preview, onUpload, onClear, onPickFromLibrary, compact }: {
@@ -595,7 +613,11 @@ function ImageUploadBox({ label, preview, onUpload, onClear, onPickFromLibrary, 
   function handle(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return
     const reader = new FileReader()
-    reader.onload = ev => { const url = ev.target?.result as string; onUpload(url.split(',')[1]) }
+    reader.onload = async ev => {
+      const url = ev.target?.result as string
+      const compressed = await shrinkForVideo(url)
+      onUpload(compressed.split(',')[1])
+    }
     reader.readAsDataURL(file)
   }
   return (
