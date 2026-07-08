@@ -344,7 +344,11 @@ export async function recomposeImage(imageBase64: string, targetSize: string, fi
     '4x5':    '',
   }
 
-  const prompt = `SCENE EXTENSION TASK: Redraw this image for a ${directions[targetSize] || targetSize} aspect ratio.
+  const langPreserveNote = fixNote?.includes('already translated') || fixNote?.includes('must NOT be changed')
+    ? `\n\nLANGUAGE PRESERVATION — ABSOLUTE RULE: All text in this image is INTENTIONALLY in a non-English language as part of a professional localization. You MUST reproduce every word, letter, and character EXACTLY as shown. DO NOT change any text to English. The non-English text is correct and must not be altered.`
+    : ''
+
+  const prompt = `${FICTIONAL_DISCLAIMER}\n\nSCENE EXTENSION TASK: Redraw this image for a ${directions[targetSize] || targetSize} aspect ratio.
 
 HOW TO DO IT:
 - Keep the main subject (person, face, body) EXACTLY as in the original — same appearance, same lighting, same pose, same expression
@@ -352,7 +356,7 @@ HOW TO DO IT:
 - The extension must be seamless — no visible borders, no seams, no collage effect
 - Match the original's colour grade, lighting direction, atmosphere, and style perfectly
 - PRESERVE ALL existing text overlays, logos, icons, UI elements, and graphical layers from the original image — reproduce them exactly (same content, same position, same style). Do NOT remove or alter any overlay that was present in the original
-- Do NOT add NEW text, logos, or UI elements that were not in the original${hint}${fix}`
+- Do NOT add NEW text, logos, or UI elements that were not in the original${hint}${fix}${langPreserveNote}`
 
   return withRetry(prompt, cleanB64, undefined, 3, targetSize, undefined, model)
 }

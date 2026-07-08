@@ -1162,7 +1162,10 @@ export async function runLocalizationJob(
                 patch(folder.id, { uploadInfo: `${lang}: ${img.name} — recompose ✓` })
                 emit()
               } catch (recomposeErr: any) {
-                console.warn(`[loc] recompose failed for ${img.name}/${lang}:`, recomposeErr.message)
+                const isFilter = recomposeErr.message === 'CONTENT_FILTER'
+                console.warn(`[loc] recompose FAILED for ${img.name}/${lang} — ${isFilter ? 'CONTENT_FILTER (safety block)' : recomposeErr.message}`)
+                patch(folder.id, { uploadInfo: `${lang}: ${img.name} — recompose failed (${isFilter ? 'safety filter' : recomposeErr.message}), uploading original` })
+                emit()
                 // finalBuffer remains = buffer (original)
               }
             } else {
