@@ -145,8 +145,18 @@ ${translationsText}
 ${fixPrompt ? `\nPREVIOUS ATTEMPT HAD ISSUES — FIX THESE SPECIFICALLY:\n${fixPrompt}` : ''}`
 }
 
-const RETRY_DELAY_MS = 4000 // pause between Gemini retries
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
+// GPT image size map for gpt-image-1 images.edit; 4x5 has no matching preset → no GPT for 4x5
+const GPT_IMAGE_SIZE_MAP: Record<string, '1024x1024' | '1024x1536' | '1536x1024'> = {
+  '1x1':    '1024x1024',
+  '9x16':   '1024x1536',
+  '1.91x1': '1536x1024',
+}
+
+const RETRY_DELAY_MS = 4000 // pause between attempts
+
+// Unified localization: Gemini N attempts → GPT M attempts (chain: each attempt fixes previous)
 async function localizeImage(
   imgBuffer: Buffer,
   mimeType: string,
@@ -154,156 +164,119 @@ async function localizeImage(
   phrases: { en: string; translated: string; role?: string }[],
   onAttempt?: (attempt: number, status: 'ok' | 'fail' | 'retry') => void,
   aspectRatio?: string,
-  maxAttempts = 5,
+  geminiAttempts = 5,
+  gptAttempts = 0,
+  sizeLabel?: string,
 ): Promise<Buffer> {
-  let firstResult: Buffer | null = null  // first successful Gemini output (best baseline)
-  let lastResult: Buffer | null = null
+  let lastResult: Buffer | null = null   // most recent output (chain input for next attempt)
+  let bestResult: Buffer | null = null   // last produced result (best-effort fallback)
   let lastFixPrompt = ''
   const failReasons: string[] = []
   const originalDataUrl = `data:${mimeType};base64,${imgBuffer.toString('base64')}`
+  const totalAttempts = geminiAttempts + gptAttempts
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  // ── Phase 1: Gemini ──
+  for (let attempt = 1; attempt <= geminiAttempts; attempt++) {
     const prompt = buildGeminiPrompt(language, phrases, lastFixPrompt || undefined)
-
     let result: Buffer | null = null
     try {
-      // On retries, give Gemini the previous attempt's output so it can fix what's still wrong.
-      // On attempt 1, use the original image.
       const inputBuffer = (attempt > 1 && lastResult) ? lastResult : imgBuffer
       result = await geminiRequest([
         { text: prompt },
         { inline_data: { mime_type: mimeType, data: inputBuffer.toString('base64') } },
       ], mimeType, 0, aspectRatio)
     } catch (err: any) {
-      const reason = `Gemini error: ${err.message}`
-      console.warn(`[loc] attempt ${attempt} — ${reason}`)
-      failReasons.push(`#${attempt} ${reason}`)
-      if (attempt < 5) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
+      failReasons.push(`#${attempt}(gemini) ${err.message}`)
+      console.warn(`[loc] Gemini attempt ${attempt} error: ${err.message}`)
+      if (attempt < totalAttempts) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
       continue
     }
 
-    if (!firstResult) firstResult = result
     lastResult = result
+    bestResult = result
 
-    // Review with original + localized — if review throws, treat as fail and retry
     let qa: { status: 'ok' | 'fail'; fix_prompt: string }
     try {
       const localizedDataUrl = `data:${mimeType};base64,${result.toString('base64')}`
       qa = await reviewLocalizedImage(originalDataUrl, localizedDataUrl, language, phrases)
     } catch (err: any) {
-      console.warn(`[loc] GPT review attempt ${attempt} failed:`, err.message)
-      qa = { status: 'fail', fix_prompt: 'Some text may still be in the wrong language. Check all text elements carefully and replace any untranslated text.' }
+      console.warn(`[loc] QA review error (Gemini attempt ${attempt}):`, err.message)
+      qa = { status: 'fail', fix_prompt: 'Check all text elements and replace any untranslated text.' }
     }
 
-    console.log(`[loc] Attempt ${attempt} QA: ${qa.status}${qa.fix_prompt ? ' — ' + qa.fix_prompt : ''}`)
-    onAttempt?.(attempt, qa.status === 'ok' ? 'ok' : attempt < maxAttempts ? 'retry' : 'fail')
+    const remaining = totalAttempts - attempt
+    console.log(`[loc] Gemini attempt ${attempt} QA: ${qa.status}${qa.fix_prompt ? ' — ' + qa.fix_prompt : ''}`)
+    onAttempt?.(attempt, qa.status === 'ok' ? 'ok' : remaining > 0 ? 'retry' : 'fail')
 
     if (qa.status === 'ok') return result
 
-    failReasons.push(`#${attempt} QA fail: ${qa.fix_prompt}`)
+    failReasons.push(`#${attempt}(gemini) QA: ${qa.fix_prompt}`)
     lastFixPrompt = qa.fix_prompt
-    if (attempt < maxAttempts) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
+    if (attempt < totalAttempts) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
   }
 
-  // No attempt passed QA — use first successful Gemini result as best-effort,
-  // fall back to original only if Gemini never produced anything
-  if (firstResult || lastResult) {
-    console.warn(`[loc] All 5 QA checks failed, using best-effort result. Reasons:\n${failReasons.join('\n')}`)
+  // ── Phase 2: GPT image edit (chain: starts from last Gemini result + QA fix prompt) ──
+  if (gptAttempts > 0) {
+    const gptSize = sizeLabel ? GPT_IMAGE_SIZE_MAP[sizeLabel] : undefined
+    if (!gptSize) {
+      console.log(`[gpt-img] ${sizeLabel} not in GPT_IMAGE_SIZE_MAP, skipping GPT phase`)
+    } else {
+      const ext = mimeType === 'image/png' ? 'png' : 'jpg'
+      for (let attempt = 1; attempt <= gptAttempts; attempt++) {
+        const globalAttempt = geminiAttempts + attempt
+        const inputBuffer = lastResult ?? imgBuffer  // chain from last result
+        const prompt = buildGeminiPrompt(language, phrases, lastFixPrompt || undefined)
+
+        let result: Buffer | null = null
+        try {
+          const imageFile = await toFile(inputBuffer, `image.${ext}`, { type: mimeType })
+          const response = await openai.images.edit({
+            model: 'gpt-image-1',
+            image: imageFile,
+            prompt,
+            size: gptSize,
+          } as any, { timeout: 90_000 })
+          const b64 = (response.data?.[0] as any)?.b64_json
+          if (!b64) throw new Error('No image data in gpt-image-1 response')
+          result = Buffer.from(b64, 'base64')
+        } catch (err: any) {
+          failReasons.push(`#${globalAttempt}(gpt) ${err.message}`)
+          console.warn(`[loc] GPT attempt ${globalAttempt} error: ${err.message}`)
+          if (attempt < gptAttempts) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
+          continue
+        }
+
+        lastResult = result
+        bestResult = result
+
+        let qa: { status: 'ok' | 'fail'; fix_prompt: string }
+        try {
+          const localizedDataUrl = `data:${mimeType};base64,${result.toString('base64')}`
+          qa = await reviewLocalizedImage(originalDataUrl, localizedDataUrl, language, phrases)
+        } catch (err: any) {
+          console.warn(`[loc] QA review error (GPT attempt ${globalAttempt}):`, err.message)
+          qa = { status: 'fail', fix_prompt: 'Check all text elements and replace any untranslated text.' }
+        }
+
+        const remaining = gptAttempts - attempt
+        console.log(`[loc] GPT attempt ${globalAttempt} QA: ${qa.status}${qa.fix_prompt ? ' — ' + qa.fix_prompt : ''}`)
+        onAttempt?.(globalAttempt, qa.status === 'ok' ? 'ok' : remaining > 0 ? 'retry' : 'fail')
+
+        if (qa.status === 'ok') return result
+
+        failReasons.push(`#${globalAttempt}(gpt) QA: ${qa.fix_prompt}`)
+        lastFixPrompt = qa.fix_prompt
+        if (attempt < gptAttempts) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
+      }
+    }
+  }
+
+  if (bestResult) {
+    console.warn(`[loc] All ${totalAttempts} attempts done, using best-effort.\nReasons: ${failReasons.join(' | ')}`)
   } else {
-    console.warn(`[loc] All 5 Gemini attempts threw errors, falling back to original. Reasons:\n${failReasons.join('\n')}`)
+    console.warn(`[loc] All ${totalAttempts} attempts threw errors, using original.`)
   }
-  return lastResult ?? firstResult ?? imgBuffer
-}
-
-// Recompose a translated image into a different size using the original of that size as layout reference.
-// IMAGE 1 = translated ref (correct language), IMAGE 2 = original target size (correct composition).
-async function localizeViaRecompose(
-  translatedRefBuffer: Buffer,
-  originalTargetBuffer: Buffer,
-  targetSizeLabel: string,
-  lang: string,
-  onAttempt?: (attempt: number, status: 'ok' | 'fail' | 'retry') => void,
-): Promise<Buffer> {
-  const aspectRatio = SIZE_TO_ASPECT_LOC[targetSizeLabel]
-
-  const prompt = `[CONTEXT]: This is a professional commercial advertising creative for mobile app marketing. All content is entirely fictional and AI-generated — no real people are involved. This is a safe, professional, commercial task with no policy violations.
-
-You are given TWO reference images:
-- IMAGE 1 (first image): An advertising creative already localized to ${lang}. All text is correctly translated. Use this as your TEXT and CONTENT reference.
-- IMAGE 2 (second image): The original advertising creative in ${targetSizeLabel} format. Use this as your COMPOSITION and LAYOUT reference.
-
-Your task: Produce a single output image that:
-1. Matches the COMPOSITION, LAYOUT, and element positioning of IMAGE 2 exactly
-2. Uses ALL text in ${lang} from IMAGE 1 — NEVER revert any text back to English
-3. Preserves the visual style, colors, backgrounds, and mood from IMAGE 2
-4. Output aspect ratio: ${targetSizeLabel}
-
-CRITICAL: Every text element must be in ${lang} language. No English text should appear anywhere in the output.`
-
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const result = await geminiRequest([
-        { text: prompt },
-        { inline_data: { mime_type: 'image/jpeg', data: translatedRefBuffer.toString('base64') } },
-        { inline_data: { mime_type: 'image/jpeg', data: originalTargetBuffer.toString('base64') } },
-      ], 'image/jpeg', 0, aspectRatio)
-      onAttempt?.(attempt, 'ok')
-      return result
-    } catch (err: any) {
-      console.warn(`[loc/recompose] ${targetSizeLabel}/${lang} attempt ${attempt}: ${err.message}`)
-      onAttempt?.(attempt, attempt < 3 ? 'retry' : 'fail')
-      if (attempt < 3) await new Promise(r => setTimeout(r, 3000))
-    }
-  }
-  console.warn(`[loc/recompose] all 3 attempts failed for ${targetSizeLabel}/${lang}, using original`)
-  return originalTargetBuffer
-}
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-
-// --- GPT image fallback (gpt-image-1 via images.edit) ---
-// Supported output sizes for gpt-image-1; 4x5 (~1200x1500) has no matching preset → skip
-const GPT_IMAGE_SIZE_MAP: Record<string, '1024x1024' | '1024x1536' | '1536x1024'> = {
-  '1x1':    '1024x1024',
-  '9x16':   '1024x1536',
-  '1.91x1': '1536x1024',
-}
-
-async function gptLocalizeImage(
-  imgBuffer: Buffer,
-  mimeType: string,
-  language: string,
-  phrases: { en: string; translated: string; role?: string }[],
-  sizeLabel: string,
-): Promise<Buffer | null> {
-  const gptSize = GPT_IMAGE_SIZE_MAP[sizeLabel]
-  if (!gptSize) {
-    console.log(`[gpt-img] ${sizeLabel} not supported by gpt-image-1, skipping`)
-    return null
-  }
-
-  const ext = mimeType === 'image/png' ? 'png' : 'jpg'
-  const prompt = buildGeminiPrompt(language, phrases)
-
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const imageFile = await toFile(imgBuffer, `image.${ext}`, { type: mimeType })
-      const response = await openai.images.edit({
-        model: 'gpt-image-1',
-        image: imageFile,
-        prompt,
-        size: gptSize,
-      } as any, { timeout: 90_000 })
-      const b64 = (response.data?.[0] as any)?.b64_json
-      if (!b64) throw new Error('No image data in gpt-image-1 response')
-      console.log(`[gpt-img] ${sizeLabel}/${language} attempt ${attempt} ✓`)
-      return Buffer.from(b64, 'base64')
-    } catch (err: any) {
-      console.warn(`[gpt-img] ${sizeLabel}/${language} attempt ${attempt}: ${err.message}`)
-      if (attempt < 2) await new Promise(r => setTimeout(r, 4000))
-    }
-  }
-  return null
+  return bestResult ?? imgBuffer
 }
 
 // --- Types ---
@@ -1151,32 +1124,6 @@ export async function runLocalizationJob(
         for (const [k, v] of Object.entries(dict)) dictNorm.set(norm(k), v)
         function dictLookup(en: string) { return dict[en] || dictNorm.get(norm(en)) }
 
-        // --- Find an existing translated reference (prefer 4x5 → 1x1 → 9x16 → 1.91x1) ---
-        const PREFERRED_REF_ORDER = ['4x5', '1x1', '9x16', '1.91x1']
-        let translatedRefBuffer: Buffer | null = null
-        let translatedRefSizeLabel: string | null = null
-        let refHasTranslation = false  // true if the ref has actual translated text (not a copy)
-
-        for (const prefSize of PREFERRED_REF_ORDER) {
-          if (existingSizes.has(prefSize)) {
-            const existingEntry = Array.from(existingFiles.entries())
-              .find(([name]) => getSizeLabelFromName(name) === prefSize)
-            if (existingEntry) {
-              try {
-                patch(folder.id, { uploadInfo: `${lang}: loading existing ${prefSize} as translation reference...` })
-                emit()
-                translatedRefBuffer = await downloadFileAsBuffer(existingEntry[1])
-                translatedRefSizeLabel = prefSize
-                refHasTranslation = true
-                console.log(`[loc] ${folder.name}/${lang}: reusing existing ${prefSize} as translated ref`)
-              } catch (e: any) {
-                console.warn(`[loc] failed to download existing ${prefSize} ref:`, e.message)
-              }
-              break
-            }
-          }
-        }
-
         let uploadedThisLang = 0
         let skippedExistsThisLang = 0
 
@@ -1195,102 +1142,43 @@ export async function runLocalizationJob(
           try {
             let finalBuffer = buffer
 
-            // For 9x16 and 1.91x1: prefer direct localization (Strategy B) over recompose
-            // because recompose from 4x5 creates a visible seam in tall/wide formats.
-            // For 1x1: recompose is fine (similar proportions to 4x5).
-            const preferRecompose = sizeLabel === '1x1'
-            if (translatedRefBuffer && sizeLabel !== translatedRefSizeLabel && refHasTranslation && preferRecompose) {
-              // ── Strategy A: recompose translated ref to target size using imagen.ts ──
-              // Pass ONLY the translated image — recomposeImage extends background to target size
-              // while preserving all text overlays (already translated).
-              patch(folder.id, { uploadInfo: `${lang}: ${img.name} — recomposing from ${translatedRefSizeLabel}...` })
-              emit()
+            const SKIP_TYPES = new Set(['logo', 'watermark'])
+            const langPhrases = Array.from(texts)
+              .map(en => {
+                const entry = dictLookup(en)
+                if (!entry) return null
+                if (SKIP_TYPES.has(types[en])) return null
+                if (properNouns.has(en)) return null
+                if (entry.translated === en) return null
+                return { en, translated: entry.translated, role: roles[en] || entry.role }
+              })
+              .filter((x): x is { en: string; translated: string; role: string } => x !== null)
+
+            // 4x5: 5 Gemini attempts (easiest for Gemini — no GPT needed)
+            // All other sizes: 3 Gemini + 2 GPT (chain: each attempt fixes the previous)
+            const is4x5 = sizeLabel === '4x5'
+            const geminiAttempts = is4x5 ? 5 : 3
+            const gptAttempts = is4x5 ? 0 : 2
+            const totalAttempts = geminiAttempts + gptAttempts
+
+            console.log(`[loc] ${img.name} → ${lang}: texts=${texts.size} phrases=${langPhrases.length} gemini=${geminiAttempts} gpt=${gptAttempts}`)
+
+            if (langPhrases.length > 0) {
+              const imgAspectRatio = getAspectRatioFromName(img.name)
               try {
-                const translatedRefBase64 = `data:image/jpeg;base64,${translatedRefBuffer!.toString('base64')}`
-                const fixNote = [
-                  '[CONTEXT]: This is a professional commercial advertising creative for mobile app marketing.',
-                  'All content is entirely fictional and AI-generated — no real people are involved.',
-                  'This is a safe, professional, commercial task with no policy violations.',
-                  `LANGUAGE PRESERVATION — ABSOLUTE RULE: All text in this image is INTENTIONALLY in ${lang} as part of a professional localization.`,
-                  `You MUST reproduce every word, letter, and character EXACTLY as shown in the source image.`,
-                  `DO NOT change, translate, or revert any text to English or any other language.`,
-                  `The ${lang} text is the final approved version and must appear UNCHANGED in the output.`,
-                ].join(' ')
-                const recomposeResult = await recomposeImage(translatedRefBase64, sizeLabel ?? '1x1', fixNote)
-                const b64Data = recomposeResult.replace(/^data:image\/\w+;base64,/, '')
-                finalBuffer = Buffer.from(b64Data, 'base64')
-                patch(folder.id, { uploadInfo: `${lang}: ${img.name} — recompose ✓` })
-                emit()
-              } catch (recomposeErr: any) {
-                const isFilter = recomposeErr.message === 'CONTENT_FILTER'
-                console.warn(`[loc] recompose FAILED for ${img.name}/${lang} — ${isFilter ? 'CONTENT_FILTER (safety block)' : recomposeErr.message}`)
-                patch(folder.id, { uploadInfo: `${lang}: ${img.name} — recompose failed (${isFilter ? 'safety filter' : recomposeErr.message}), uploading original` })
-                emit()
-                // finalBuffer remains = buffer (original)
+                finalBuffer = await localizeImage(buffer, mime, lang, langPhrases,
+                  (attempt, status) => {
+                    const icon = status === 'ok' ? '✓' : status === 'retry' ? '↻' : '✗'
+                    patch(folder.id, { uploadInfo: `${lang}: ${img.name} — attempt ${attempt}/${totalAttempts} ${icon}` })
+                    emit()
+                  }, imgAspectRatio, geminiAttempts, gptAttempts, sizeLabel ?? undefined)
+              } catch (locErr: any) {
+                console.warn(`[loc] Localization failed for ${img.name}:`, locErr.message)
               }
             } else {
-              // ── Strategy B: translate this image from scratch (first/reference image) ──
-              const SKIP_TYPES = new Set(['logo', 'watermark'])
-              const allTextsArr = Array.from(texts)
-              const langPhrases = allTextsArr
-                .map(en => {
-                  const entry = dictLookup(en)
-                  if (!entry) return null
-                  if (SKIP_TYPES.has(types[en])) return null
-                  if (properNouns.has(en)) return null
-                  if (entry.translated === en) return null
-                  return { en, translated: entry.translated, role: roles[en] || entry.role }
-                })
-                .filter((x): x is { en: string; translated: string; role: string } => x !== null)
-
-              const isRefCandidate = !translatedRefBuffer
-              const maxAttempts = isRefCandidate ? 10 : 5
-
-              console.log(`[loc] ${img.name} → ${lang}: texts=${texts.size} phrases=${langPhrases.length} maxAttempts=${maxAttempts}`)
-
-              if (langPhrases.length > 0) {
-                const imgAspectRatio = getAspectRatioFromName(img.name)
-                try {
-                  finalBuffer = await localizeImage(buffer, mime, lang, langPhrases,
-                    (attempt, status) => {
-                      const icon = status === 'ok' ? '✓' : status === 'retry' ? '↻' : '✗'
-                      patch(folder.id, { uploadInfo: `${lang}: ${img.name} — attempt ${attempt}/${maxAttempts} ${icon}` })
-                      emit()
-                    }, imgAspectRatio, maxAttempts)
-
-                  // GPT fallback: if Gemini returned the original unchanged (all attempts failed)
-                  // and this size is supported by gpt-image-1 (not 4x5)
-                  if (finalBuffer === buffer && sizeLabel !== '4x5' && GPT_IMAGE_SIZE_MAP[sizeLabel ?? '']) {
-                    patch(folder.id, { uploadInfo: `${lang}: ${img.name} — Gemini failed, trying GPT fallback...` })
-                    emit()
-                    const gptResult = await gptLocalizeImage(buffer, mime, lang, langPhrases, sizeLabel ?? '')
-                    if (gptResult) {
-                      finalBuffer = gptResult
-                      console.log(`[gpt-img] ${img.name}/${lang}: GPT fallback succeeded`)
-                    }
-                  }
-
-                  // First successful translation → becomes the reference for all other sizes
-                  if (isRefCandidate && finalBuffer !== buffer) {
-                    translatedRefBuffer = finalBuffer
-                    translatedRefSizeLabel = sizeLabel
-                    refHasTranslation = true
-                    console.log(`[loc] ${folder.name}/${lang}: set ${sizeLabel} as translation reference`)
-                  }
-                } catch (locErr: any) {
-                  console.warn(`[loc] Localization failed for ${img.name}:`, locErr.message)
-                }
-              } else {
-                const copyReason = texts.size === 0 ? 'analysis returned 0 texts' : 'all texts are brand names'
-                patch(folder.id, { uploadInfo: `${lang}: ${img.name} — copying (${copyReason})` })
-                emit()
-                // No translatable text — set as ref anyway so other sizes don't try full localization
-                if (isRefCandidate) {
-                  translatedRefBuffer = buffer
-                  translatedRefSizeLabel = sizeLabel
-                  refHasTranslation = false
-                }
-              }
+              const copyReason = texts.size === 0 ? 'analysis returned 0 texts' : 'all texts are brand names'
+              patch(folder.id, { uploadInfo: `${lang}: ${img.name} — copying (${copyReason})` })
+              emit()
             }
 
             const targetSize = getSizeFromName(img.name)

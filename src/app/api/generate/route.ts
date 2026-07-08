@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { generatePrompt } from '@/lib/openai'
-import { generateImage, recomposeImage } from '@/lib/imagen'
+import { generateImage, recomposeImage, DEFAULT_GEMINI_MODEL } from '@/lib/imagen'
 import { getConfig } from '@/lib/appsStore'
 import { updateQueue } from '@/lib/queue'
 
@@ -122,7 +122,10 @@ export async function POST(req: NextRequest) {
         imageReference,
         logoBase64 || undefined,
         targetSize || '4x5',
-        assets || undefined
+        assets || undefined,
+        false,
+        DEFAULT_GEMINI_MODEL,
+        !!fixNote
       )
     } finally {
       await updateQueue('gemini', -1)

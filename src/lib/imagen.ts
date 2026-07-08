@@ -291,10 +291,15 @@ const SIZE_HINTS: Record<string, string> = {
 
 const RAW_MODE_PREFIX = "Generate exactly the image described below. Follow the description literally and precisely. Do NOT add any text, labels, watermarks, logos, advertising copy, UI elements, banners, or decorative elements that are not explicitly mentioned. Do not treat this as an advertisement — just create the image as described."
 
-export async function generateImage(prompt: string, referenceBase64?: string, logoBase64?: string, size = '4x5', assets?: Asset[], rawMode = false, model = DEFAULT_GEMINI_MODEL): Promise<string> {
+export async function generateImage(prompt: string, referenceBase64?: string, logoBase64?: string, size = '4x5', assets?: Asset[], rawMode = false, model = DEFAULT_GEMINI_MODEL, isFix = false): Promise<string> {
   // rawMode: plain image generation (Generator tab) — no ad-specific rules, no text overlays
   if (rawMode) {
     return withRetry(RAW_MODE_PREFIX + '\n\n' + prompt, referenceBase64, undefined, 3, size, undefined, model)
+  }
+
+  // Fix mode: user is correcting the previous result — send only the surgical prompt, no filters or safe-zone rules
+  if (isFix) {
+    return withRetry(prompt, referenceBase64, undefined, 3, size, undefined, model)
   }
 
   const hint = SIZE_HINTS[size] || SIZE_HINTS['4x5']
@@ -326,8 +331,15 @@ export async function recomposeImage(imageBase64: string, targetSize: string, fi
   if (!aspect) throw new Error(`Unknown target size: ${targetSize}`)
 
   const cleanB64 = imageBase64.replace(/^data:image\/\w+;base64,/, '')
+
+  // Fix mode: no rules, no safe-zone, no layout restrictions — only the user's raw instruction
+  if (fixNote?.trim()) {
+    const fixPrompt = `Apply this change to the image precisely: ${fixNote.trim()}\n\nPreserve everything else exactly as shown in the original image.`
+    return withRetry(fixPrompt, cleanB64, undefined, 3, targetSize, undefined, model)
+  }
+
   const hint = SIZE_HINTS[targetSize] || ''
-  const fix = fixNote ? `\n\nFIX from previous attempt: ${fixNote}` : ''
+  const fix = ''
 
   const [aw, ah] = aspect
   const directions: Record<string, string> = {
