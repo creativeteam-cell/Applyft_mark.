@@ -195,7 +195,19 @@ export async function POST(req: NextRequest) {
             messages: [
               {
                 role: 'system',
-                content: `You are an expert at writing instructions for AI image editing. The user wants to modify an existing image. Take their rough correction note and rewrite it as a clear, specific instruction for the image editing AI. Keep the same intent, add visual detail (lighting, composition, spatial relationships). Return ONLY the improved instruction in English, nothing else.`,
+                content: `You are an expert at writing precise instructions for AI image editing (Gemini, DALL-E, Stable Diffusion inpainting).
+
+The user has an existing image and wants to modify it. Your job: take their rough note and rewrite it as a detailed, unambiguous editing instruction.
+
+Rules:
+- ALWAYS explicitly state what to PRESERVE: specific people (describe them — clothing, hair, expression, position), backgrounds, lighting, colors, objects
+- ALWAYS explicitly state what to CHANGE: use exact spatial language (left/right/center/foreground/background, back-to-back, side-by-side, facing left/right)
+- Break the instruction into clear steps if multiple things change
+- If the user describes a composition change (moving people, flipping, repositioning), describe the final result in detail — where each element ends up
+- Use imperative commands: "Keep", "Move", "Mirror", "Place", "Rotate", "Replace"
+- Do NOT invent new elements not mentioned by the user
+- ALWAYS write in English regardless of input language
+- Return ONLY the improved instruction, nothing else`,
               },
               { role: 'user', content: resolvedFixNote },
             ],
@@ -250,13 +262,18 @@ export async function POST(req: NextRequest) {
             {
               role: 'system',
               content: `You are an expert at writing prompts for AI image generation (Midjourney, DALL-E, Gemini).
-Your task: take the user's rough idea and rewrite it into a detailed, vivid image generation prompt.
+
+Your task: take the user's rough idea and rewrite it into a detailed, vivid, unambiguous image generation prompt.
+
 Rules:
-- Keep the core idea and intent exactly as the user intended
-- Add specific details: lighting, style, mood, camera angle, colors, composition
-- Use concise descriptive language (no full sentences needed)
-- Do NOT add any text overlays, captions, or UI elements unless explicitly requested
-- ALWAYS write the output prompt in English, regardless of the input language
+- Keep the core idea and intent exactly as the user intended — do not change what they asked for
+- Add specific details: lighting direction, mood, time of day, camera angle, color palette, composition, spatial relationships between elements
+- For scenes with people: describe each person specifically — clothing, hair, expression, pose, position in frame (left/right/foreground/background), what they are doing
+- For compositions with multiple elements: be explicit about their spatial relationship (side-by-side, back-to-back, facing each other, split-screen, etc.)
+- Use imperative, descriptive language — paint a picture with words
+- Do NOT add text overlays, UI elements, watermarks unless explicitly requested
+- Do NOT invent elements not mentioned by the user
+- ALWAYS write in English regardless of input language
 - Return ONLY the improved prompt, nothing else`,
             },
             { role: 'user', content: prompt },
@@ -271,55 +288,37 @@ Rules:
     }
 
     let imageBase64: string
-    const queueModel = engine === 'dalle' ? 'openai' : 'gemini'
-    await updateQueue(queueModel, 1)
-
-    try {
-      if (engine === 'dalle') {
-        const openaiModel = OPENAI_MODEL_MAP[modelId as string] || 'gpt-image-1'
-        imageBase64 = await generateWithGptImage(finalPrompt, size, referenceBase64, openaiModel)
-      } else {
-        const sizeMap: Record<string, string> = {
-          '4x5': '4x5', '1x1': '1x1', '9x16': '9x16', '1.91x1': '1.91x1',
-        }
-        const sizeKey = (size as string).replace(/[^\dx.]/g, 'x')
-        const sizeCode = sizeMap[sizeKey] || '4x5'
-        const geminiModel = GEMINI_MODEL_MAP[modelId as string] || 'gemini-3.1-flash-image-preview'
-        try {
-          imageBase64 = await generateImage(finalPrompt, referenceBase64, undefined, sizeCode, undefined, true, geminiModel)
-        } catch (genErr: any) {
-          console.error('[generator] generateImage failed:', genErr.message)
-          const msg = genErr.message || 'Unknown error'
-          const { message, status } = friendlyError(msg)
-          return NextResponse.json({ error: message }, { status })
-        }
-      }
-    } finally {
-      await updateQueue(queueModel, -1)
+    if (engine === 'dalle' || engine === 'gpt') {
+      const openaiModel = OPENAI_MODEL_MAP[modelId as string] || 'gpt-image-1'
+      imageBase64 = await generateWithGptImage(finalPrompt, size, referenceBase64, openaiModel)
+    } else {
+      const geminiModel = GEMINI_MODEL_MAP[modelId as string] || DEFAULT_GEMINI_MODEL
+      imageBase64 = await generateImage(finalPrompt, size, referenceBase64, undefined, geminiModel)
     }
 
     const userToken = (session as any).accessToken
+    let fileId: string | null = null
     let webViewLink: string | null = null
-    try {
+    if (userToken) {
+      const queueModel = engine === 'dalle' ? 'openai' : 'gemini'
+      await updateQueue(queueModel, 1)
       const saved = await saveToDrive(imageBase64, {
         prompt: finalPrompt,
-        engine: engine === 'dalle' ? 'GPT' : 'Gemini',
-        size: (size as string) || '4x5',
-        userName: session.user?.name || '',
-        userEmail: session.user?.email || '',
-        userImage: session.user?.image || '',
+        engine: engine === 'dalle' ? 'GPT' : 'Banana',
+        size,
+        userName: session.user.name || '',
+        userEmail: session.user.email || '',
+        userImage: session.user.image || '',
       }, userToken)
+      fileId = saved.fileId
       webViewLink = saved.webViewLink
-    } catch (driveErr: any) {
-      console.warn('[generator] Drive save failed:', driveErr.message)
     }
 
-    // Increment persistent generation counter
     if (session.user?.email) {
       incrementImageCount(session.user.email).catch(() => {})
     }
 
-    return NextResponse.json({ success: true, webViewLink })
+    return NextResponse.json({ imageBase64, fileId, webViewLink })
   } catch (e: any) {
     console.error('[generator/generate]', e)
     const { message, status } = friendlyError(e.message || '')

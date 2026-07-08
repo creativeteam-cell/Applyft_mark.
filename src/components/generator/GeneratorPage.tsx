@@ -517,14 +517,34 @@ function ImageCardModal({ item, onClose, onGenerated }: {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  const isGpt = selectedModelId.startsWith('gptimage')
+
   async function handleGenerate() {
     if (generating) return
     setGenerating(true)
-    setQueueActive('gemini', true)
+    setQueueActive(isGpt ? 'openai' : 'gemini', true)
     setError(null)
     try {
-      if (!newPrompt.trim()) {
-        // Pure recompose — no instructions
+      if (isGpt) {
+        // GPT Image path — always uses referenceFileId + prompt (no recompose support)
+        const prompt = newPrompt.trim() || `Resize to ${selectedSize}, keep everything exactly the same`
+        const res = await fetch('/api/generator/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            referenceFileId: item.id,
+            prompt,
+            engine: 'dalle',
+            modelId: selectedModelId,
+            size: selectedSize,
+            aiPrompt: aiEnhance && !!newPrompt.trim(),
+          }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || 'Generation failed')
+        onGenerated(); onClose()
+      } else if (!newPrompt.trim()) {
+        // Gemini pure recompose — no instructions
         const res = await fetch('/api/generator/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -534,7 +554,7 @@ function ImageCardModal({ item, onClose, onGenerated }: {
         if (!res.ok) throw new Error(data.error || 'Recompose failed')
         onGenerated(); onClose()
       } else {
-        // Recompose WITH fix notes — treat user text as layout/style instructions, not a new prompt
+        // Gemini recompose WITH fix notes
         const res = await fetch('/api/generator/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -552,7 +572,7 @@ function ImageCardModal({ item, onClose, onGenerated }: {
     } catch (e: any) {
       setError(e.message)
     }
-    setQueueActive('gemini', false)
+    setQueueActive(isGpt ? 'openai' : 'gemini', false)
     setGenerating(false)
   }
 
@@ -1100,10 +1120,7 @@ export function GeneratorPage() {
               </div>
 
               {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
-            </div>
 
-            {/* Generate button */}
-            <div className="p-4 border-t flex-shrink-0" style={{ borderColor: 'var(--border)' }}>
               <button onClick={handleGenerate} disabled={!canGenerate}
                 className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all"
                 style={{ background: canGenerate ? 'var(--accent)' : 'rgba(255,255,255,0.06)',
@@ -1118,33 +1135,34 @@ export function GeneratorPage() {
                   </svg>{btnLabel}</>
                 )}
               </button>
+
             </div>
           </div>
 
-          {/* Right panel — history */}
+          {/* History */}
           <div className="flex-1 overflow-y-auto p-6">
             <PeopleFilter items={history} selectedEmails={selectedEmails} onToggle={toggleEmail} onClear={() => setSelectedEmails(new Set())} />
             {historyLoading ? (
               <div className="flex items-center justify-center py-16">
-                <svg className="animate-spin" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                  style={{ color: 'rgba(255,255,255,0.2)' }}>
+                <svg className="animate-spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--text-muted)' }}>
                   <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
                 </svg>
               </div>
             ) : (
               <>
                 <HistoryGrid items={filteredHistory} onSelect={setSelectedItem} />
-                <div ref={sentinelRef} className="h-8 flex items-center justify-center mt-2">
-                  {loadingMore && (
-                    <svg className="animate-spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                      style={{ color: 'rgba(255,255,255,0.2)' }}>
+                <div ref={sentinelRef} className="h-4" />
+                {loadingMore && (
+                  <div className="flex items-center justify-center py-4">
+                    <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--text-muted)' }}>
                       <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
                     </svg>
-                  )}
-                </div>
+                  </div>
+                )}
               </>
             )}
           </div>
+
         </div>
       )}
     </div>
