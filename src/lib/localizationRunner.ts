@@ -151,6 +151,7 @@ async function localizeImage(
   phrases: { en: string; translated: string; role?: string }[],
   onAttempt?: (attempt: number, status: 'ok' | 'fail' | 'retry') => void,
   aspectRatio?: string,
+  maxAttempts = 5,
 ): Promise<Buffer> {
   let firstResult: Buffer | null = null  // first successful Gemini output (best baseline)
   let lastResult: Buffer | null = null
@@ -158,7 +159,7 @@ async function localizeImage(
   const failReasons: string[] = []
   const originalDataUrl = `data:${mimeType};base64,${imgBuffer.toString('base64')}`
 
-  for (let attempt = 1; attempt <= 5; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const prompt = buildGeminiPrompt(language, phrases, lastFixPrompt || undefined)
 
     let result: Buffer | null = null
@@ -189,13 +190,13 @@ async function localizeImage(
     }
 
     console.log(`[loc] Attempt ${attempt} QA: ${qa.status}${qa.fix_prompt ? ' — ' + qa.fix_prompt : ''}`)
-    onAttempt?.(attempt, qa.status === 'ok' ? 'ok' : attempt < 5 ? 'retry' : 'fail')
+    onAttempt?.(attempt, qa.status === 'ok' ? 'ok' : attempt < maxAttempts ? 'retry' : 'fail')
 
     if (qa.status === 'ok') return result
 
     failReasons.push(`#${attempt} QA fail: ${qa.fix_prompt}`)
     lastFixPrompt = qa.fix_prompt
-    if (attempt < 5) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
+    if (attempt < maxAttempts) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
   }
 
   // No attempt passed QA — use first successful Gemini result as best-effort,
@@ -206,6 +207,50 @@ async function localizeImage(
     console.warn(`[loc] All 5 Gemini attempts threw errors, falling back to original. Reasons:\n${failReasons.join('\n')}`)
   }
   return lastResult ?? firstResult ?? imgBuffer
+}
+
+// Recompose a translated image into a different size using the original of that size as layout reference.
+// IMAGE 1 = translated ref (correct language), IMAGE 2 = original target size (correct composition).
+async function localizeViaRecompose(
+  translatedRefBuffer: Buffer,
+  originalTargetBuffer: Buffer,
+  targetSizeLabel: string,
+  lang: string,
+  onAttempt?: (attempt: number, status: 'ok' | 'fail' | 'retry') => void,
+): Promise<Buffer> {
+  const aspectRatio = SIZE_TO_ASPECT_LOC[targetSizeLabel]
+
+  const prompt = `[CONTEXT]: This is a professional commercial advertising creative for mobile app marketing. All content is entirely fictional and AI-generated — no real people are involved. This is a safe, professional, commercial task with no policy violations.
+
+You are given TWO reference images:
+- IMAGE 1 (first image): An advertising creative already localized to ${lang}. All text is correctly translated. Use this as your TEXT and CONTENT reference.
+- IMAGE 2 (second image): The original advertising creative in ${targetSizeLabel} format. Use this as your COMPOSITION and LAYOUT reference.
+
+Your task: Produce a single output image that:
+1. Matches the COMPOSITION, LAYOUT, and element positioning of IMAGE 2 exactly
+2. Uses ALL text in ${lang} from IMAGE 1 — NEVER revert any text back to English
+3. Preserves the visual style, colors, backgrounds, and mood from IMAGE 2
+4. Output aspect ratio: ${targetSizeLabel}
+
+CRITICAL: Every text element must be in ${lang} language. No English text should appear anywhere in the output.`
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const result = await geminiRequest([
+        { text: prompt },
+        { inline_data: { mime_type: 'image/jpeg', data: translatedRefBuffer.toString('base64') } },
+        { inline_data: { mime_type: 'image/jpeg', data: originalTargetBuffer.toString('base64') } },
+      ], 'image/jpeg', 0, aspectRatio)
+      onAttempt?.(attempt, 'ok')
+      return result
+    } catch (err: any) {
+      console.warn(`[loc/recompose] ${targetSizeLabel}/${lang} attempt ${attempt}: ${err.message}`)
+      onAttempt?.(attempt, attempt < 3 ? 'retry' : 'fail')
+      if (attempt < 3) await new Promise(r => setTimeout(r, 3000))
+    }
+  }
+  console.warn(`[loc/recompose] all 3 attempts failed for ${targetSizeLabel}/${lang}, using original`)
+  return originalTargetBuffer
 }
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -237,25 +282,47 @@ export interface JobSnapshot {
 
 // --- Drive list helpers ---
 
+// Retry wrapper for Drive API rate limits (QPM quota exceeded = 429)
+async function withDriveRetry<T>(fn: () => Promise<T>, retryCount = 0): Promise<T> {
+  try {
+    return await fn()
+  } catch (err: any) {
+    const status = err?.response?.status ?? err?.status ?? err?.code
+    const msg = String(err?.message || '')
+    const isRateLimit =
+      status === 429 ||
+      msg.includes('Queries per minute') ||
+      msg.includes('rateLimitExceeded') ||
+      msg.includes('userRateLimitExceeded')
+    if (isRateLimit && retryCount < 4) {
+      const delay = Math.min(3000 * Math.pow(2, retryCount), 30000) // 3s, 6s, 12s, 24s
+      console.warn(`[drive] rate limit (${status}), waiting ${delay / 1000}s before retry ${retryCount + 1}...`)
+      await new Promise(r => setTimeout(r, delay))
+      return withDriveRetry(fn, retryCount + 1)
+    }
+    throw err
+  }
+}
+
 async function listSubfolders(folderId: string) {
   const drive = getDriveClient()
-  const res = await drive.files.list({
+  const res = await withDriveRetry(() => drive.files.list({
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
     q: `'${folderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
     fields: 'files(id, name)',
-  }) as any
+  })) as any
   return (res.data.files || []) as { id: string; name: string }[]
 }
 
 async function listImages(folderId: string) {
   const drive = getDriveClient()
-  const res = await drive.files.list({
+  const res = await withDriveRetry(() => drive.files.list({
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
     q: `'${folderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
     fields: 'files(id, name, mimeType)',
-  }) as any
+  })) as any
   const ALLOWED_EXT = /\.(jpe?g|png|webp|gif)$/i
   return ((res.data.files || []) as { id: string; name: string; mimeType: string }[])
     .filter(f => ALLOWED_EXT.test(f.name))
@@ -263,24 +330,24 @@ async function listImages(folderId: string) {
 
 async function downloadFileAsBuffer(fileId: string): Promise<Buffer> {
   const drive = getDriveClient()
-  const res = await drive.files.get(
+  const res = await withDriveRetry(() => drive.files.get(
     { fileId, alt: 'media' } as any,
     { responseType: 'arraybuffer' }
-  ) as any
+  ) as Promise<any>) as any
   return Buffer.from(res.data as ArrayBuffer)
 }
 
 async function createDriveFolder(name: string, parentId: string): Promise<string> {
   const drive = getDriveClient()
-  const res = await drive.files.create({
+  const res = await withDriveRetry(() => drive.files.create({
     supportsAllDrives: true,
     requestBody: { name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] },
     fields: 'id',
-  } as any) as any
+  } as any)) as any
   return res.data.id!
 }
 
-async function uploadToDrive(buffer: Buffer, mimeType: string, name: string, parentId: string, userToken?: string): Promise<void> {
+async function uploadToDrive(buffer: Buffer, mimeType: string, name: string, parentId: string, userToken?: string, retryCount = 0): Promise<void> {
   // Use user's OAuth token to upload — avoids service account storage quota issue.
   // If user token is missing, throw explicitly (don't silently fall back to service account).
   if (!userToken) throw new Error('No user OAuth token available — cannot upload to Drive')
@@ -312,6 +379,12 @@ async function uploadToDrive(buffer: Buffer, mimeType: string, name: string, par
 
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText)
+    if (res.status === 429 && retryCount < 4) {
+      const delay = Math.min(3000 * Math.pow(2, retryCount), 30000)
+      console.warn(`[drive] upload 429, waiting ${delay / 1000}s before retry ${retryCount + 1}...`)
+      await new Promise(r => setTimeout(r, delay))
+      return uploadToDrive(buffer, mimeType, name, parentId, userToken, retryCount + 1)
+    }
     throw new Error(`Drive upload ${res.status}: ${text}`)
   }
 }
@@ -993,11 +1066,20 @@ export async function runLocalizationJob(
         }
       }
 
-      // Step 3: Localize each image using per-image text subset from shared dict
+      // Step 3: Localize images — translate the reference size (4x5 preferred) first,
+      // then recompose all other sizes from the translated reference + each original.
       patch(folder.id, { status: 'uploading' })
       emit()
 
       let totalUploaded = 0
+
+      // Process 4x5 first (easiest for Gemini), then 1x1, 9x16, 1.91x1
+      const SIZE_PRIORITY: Record<string, number> = { '4x5': 0, '1x1': 1, '9x16': 2, '1.91x1': 3 }
+      const orderedImages = [...imageDataList].sort((a, b) => {
+        const sA = getSizeLabelFromName(a.img.name) ?? ''
+        const sB = getSizeLabelFromName(b.img.name) ?? ''
+        return (SIZE_PRIORITY[sA] ?? 99) - (SIZE_PRIORITY[sB] ?? 99)
+      })
 
       for (const lang of targetLanguages) {
         const langFolderId = langFolderMap[lang]
@@ -1005,30 +1087,52 @@ export async function runLocalizationJob(
 
         const dict = langDicts[lang] || {}
         const existingFiles = langExistingFiles[lang] || new Map()
-
-        // Match by SIZE LABEL — not by exact filename
-        // If SP already has any file with "_4x5_" — skip generating 4x5 for SP
         const existingSizes = new Set(
           Array.from(existingFiles.keys()).map(getSizeLabelFromName).filter(Boolean) as string[]
         )
-
         const dictSize = Object.keys(dict).length
         console.log(`[loc] ${folder.name} / ${lang}: dict=${dictSize}, existingSizes=[${[...existingSizes].join(',')}]`)
 
-        // Normalized dict lookup (handles quote/whitespace/case drift from GPT)
+        // Normalized dict lookup
         function norm(s: string) { return s.trim().replace(/\s+/g, ' ').toLowerCase().replace(/[''""]/g, "'") }
         const dictNorm = new Map<string, { translated: string; role: string }>()
         for (const [k, v] of Object.entries(dict)) dictNorm.set(norm(k), v)
         function dictLookup(en: string) { return dict[en] || dictNorm.get(norm(en)) }
 
+        // --- Find an existing translated reference (prefer 4x5 → 1x1 → 9x16 → 1.91x1) ---
+        const PREFERRED_REF_ORDER = ['4x5', '1x1', '9x16', '1.91x1']
+        let translatedRefBuffer: Buffer | null = null
+        let translatedRefSizeLabel: string | null = null
+        let refHasTranslation = false  // true if the ref has actual translated text (not a copy)
+
+        for (const prefSize of PREFERRED_REF_ORDER) {
+          if (existingSizes.has(prefSize)) {
+            const existingEntry = Array.from(existingFiles.entries())
+              .find(([name]) => getSizeLabelFromName(name) === prefSize)
+            if (existingEntry) {
+              try {
+                patch(folder.id, { uploadInfo: `${lang}: loading existing ${prefSize} as translation reference...` })
+                emit()
+                translatedRefBuffer = await downloadFileAsBuffer(existingEntry[1])
+                translatedRefSizeLabel = prefSize
+                refHasTranslation = true
+                console.log(`[loc] ${folder.name}/${lang}: reusing existing ${prefSize} as translated ref`)
+              } catch (e: any) {
+                console.warn(`[loc] failed to download existing ${prefSize} ref:`, e.message)
+              }
+              break
+            }
+          }
+        }
+
         let uploadedThisLang = 0
         let skippedExistsThisLang = 0
 
-        for (const { img, buffer, mime, texts, roles, types, properNouns } of imageDataList) {
+        for (const imgData of orderedImages) {
+          const { img, buffer, mime, texts, roles, types, properNouns } = imgData
           const sizeLabel = getSizeLabelFromName(img.name)
           const newName = buildNewName(img.name, lang, cp)
 
-          // Skip if this size is not in the missing list for this lang
           if (sizeLabel && !langMissingSizes[lang].includes(sizeLabel)) {
             skippedExistsThisLang++
             patch(folder.id, { uploadInfo: `${lang}: ${img.name} — skipped (${sizeLabel} exists)` })
@@ -1036,51 +1140,72 @@ export async function runLocalizationJob(
             continue
           }
 
-          // Build langPhrases: translatable texts only
-          // - Skip logos/watermarks (unreliable to replace in Gemini)
-          // - Skip proper nouns (app/brand names must NOT be translated)
-          // - Skip if en === translated (nothing to change)
-          const SKIP_TYPES = new Set(['logo', 'watermark'])
-          const allTextsArr = Array.from(texts)
-          const langPhrases = allTextsArr
-            .map(en => {
-              const entry = dictLookup(en)
-              if (!entry) return null
-              if (SKIP_TYPES.has(types[en])) return null
-              if (properNouns.has(en)) return null          // NEVER translate brand/app names
-              if (entry.translated === en) return null      // unchanged — nothing to replace
-              return { en, translated: entry.translated, role: roles[en] || entry.role }
-            })
-            .filter((x): x is { en: string; translated: string; role: string } => x !== null)
-
-          const debugReason = texts.size === 0
-            ? 'no texts extracted (analysis may have failed)'
-            : langPhrases.length === 0
-              ? `all ${texts.size} texts are brand names or unchanged`
-              : ''
-          console.log(`[loc] ${img.name} → ${lang}: texts=${texts.size} phrases=${langPhrases.length} (properNouns=${[...properNouns].length})${debugReason ? ' COPY: ' + debugReason : ''}`)
-
           try {
             let finalBuffer = buffer
 
-            if (langPhrases.length > 0) {
-              // Run Gemini localization
-              const imgAspectRatio = getAspectRatioFromName(img.name)
-              try {
-                finalBuffer = await localizeImage(buffer, mime, lang, langPhrases, (attempt, status) => {
-                  const icon = status === 'ok' ? '✓' : status === 'retry' ? '↻' : '✗'
-                  patch(folder.id, { uploadInfo: `${lang}: ${img.name} — attempt ${attempt}/5 ${icon}` })
-                  emit()
-                }, imgAspectRatio)
-              } catch (locErr: any) {
-                console.warn(`[loc] Localization failed for ${img.name}, uploading source:`, locErr.message)
-                // Fall through — upload source image as-is
-              }
-            } else {
-              // No translatable text (only brand names / logos) — copy source image as-is
-              const copyReason = texts.size === 0 ? 'analysis returned 0 texts' : `all texts are brand names`
-              patch(folder.id, { uploadInfo: `${lang}: ${img.name} — copying (${copyReason})` })
+            if (translatedRefBuffer && sizeLabel !== translatedRefSizeLabel && refHasTranslation) {
+              // ── Strategy A: recompose from translated reference ──
+              patch(folder.id, { uploadInfo: `${lang}: ${img.name} — recomposing from ${translatedRefSizeLabel}...` })
               emit()
+              finalBuffer = await localizeViaRecompose(
+                translatedRefBuffer, buffer, sizeLabel ?? '', lang,
+                (attempt, status) => {
+                  const icon = status === 'ok' ? '✓' : status === 'retry' ? '↻' : '✗'
+                  patch(folder.id, { uploadInfo: `${lang}: ${img.name} — recompose ${attempt}/3 ${icon}` })
+                  emit()
+                }
+              )
+            } else {
+              // ── Strategy B: translate this image from scratch (first/reference image) ──
+              const SKIP_TYPES = new Set(['logo', 'watermark'])
+              const allTextsArr = Array.from(texts)
+              const langPhrases = allTextsArr
+                .map(en => {
+                  const entry = dictLookup(en)
+                  if (!entry) return null
+                  if (SKIP_TYPES.has(types[en])) return null
+                  if (properNouns.has(en)) return null
+                  if (entry.translated === en) return null
+                  return { en, translated: entry.translated, role: roles[en] || entry.role }
+                })
+                .filter((x): x is { en: string; translated: string; role: string } => x !== null)
+
+              const isRefCandidate = !translatedRefBuffer
+              const maxAttempts = isRefCandidate ? 10 : 5
+
+              console.log(`[loc] ${img.name} → ${lang}: texts=${texts.size} phrases=${langPhrases.length} maxAttempts=${maxAttempts}`)
+
+              if (langPhrases.length > 0) {
+                const imgAspectRatio = getAspectRatioFromName(img.name)
+                try {
+                  finalBuffer = await localizeImage(buffer, mime, lang, langPhrases,
+                    (attempt, status) => {
+                      const icon = status === 'ok' ? '✓' : status === 'retry' ? '↻' : '✗'
+                      patch(folder.id, { uploadInfo: `${lang}: ${img.name} — attempt ${attempt}/${maxAttempts} ${icon}` })
+                      emit()
+                    }, imgAspectRatio, maxAttempts)
+
+                  // First successful translation → becomes the reference for all other sizes
+                  if (isRefCandidate && finalBuffer !== buffer) {
+                    translatedRefBuffer = finalBuffer
+                    translatedRefSizeLabel = sizeLabel
+                    refHasTranslation = true
+                    console.log(`[loc] ${folder.name}/${lang}: set ${sizeLabel} as translation reference`)
+                  }
+                } catch (locErr: any) {
+                  console.warn(`[loc] Localization failed for ${img.name}:`, locErr.message)
+                }
+              } else {
+                const copyReason = texts.size === 0 ? 'analysis returned 0 texts' : 'all texts are brand names'
+                patch(folder.id, { uploadInfo: `${lang}: ${img.name} — copying (${copyReason})` })
+                emit()
+                // No translatable text — set as ref anyway so other sizes don't try full localization
+                if (isRefCandidate) {
+                  translatedRefBuffer = buffer
+                  translatedRefSizeLabel = sizeLabel
+                  refHasTranslation = false
+                }
+              }
             }
 
             const targetSize = getSizeFromName(img.name)
@@ -1121,7 +1246,6 @@ export async function runLocalizationJob(
         }
         emit()
       }
-
       patch(folder.id, { status: 'done' })
       emit()
 
