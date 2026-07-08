@@ -1,4 +1,4 @@
-import OpenAI from 'openai'
+import OpenAI, { toFile } from 'openai'
 import sharp from 'sharp'
 import { getDriveClient, invalidateLocCache } from './googleDrive'
 import { recomposeImage } from './imagen'
@@ -127,6 +127,7 @@ If you place the translation, the English MUST be gone. Period. No exceptions.
 After you compose the output, scan every visible text element — if you see ANY English word from the translation list still present, erase it before finalizing.
 - Match text style exactly: ALL CAPS original → ALL CAPS translation; Title Case → Title Case; sentence case → sentence case
 - FONT WEIGHT: copy the exact weight from the original — if original is regular/normal weight, translation MUST be regular/normal (NOT bold, NOT semi-bold); if original is bold, translation must be bold; never decide font weight yourself
+- POSITION LOCK — ABSOLUTE: Every UI element (app icons, logos, avatars, chat bubbles, input fields, buttons, badges, overlays) must stay at EXACTLY the same position, size, and scale as in the original image. Do NOT move, resize, shift, or reposition any element. If the app icon is in the bottom-center, it must stay bottom-center. If the chat bubble is left-aligned, it must stay left-aligned. Only replace text glyphs in-place — never reflow the layout.
 - POSITION LOCK — ABSOLUTE: Every UI element (app icons, logos, avatars, chat bubbles, input fields, buttons, badges, overlays) must stay at EXACTLY the same position, size, and scale as in the original image. Do NOT move, resize, shift, or reposition any element. If the app icon is in the bottom-center, it must stay bottom-center. If the chat bubble is left-aligned, it must stay left-aligned. Only replace text glyphs in-place — never reflow the layout.
 ${isRTL ? `
 ⚠️ CRITICAL — RIGHT-TO-LEFT LANGUAGE (${language}):
@@ -259,6 +260,51 @@ CRITICAL: Every text element must be in ${lang} language. No English text should
 }
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+
+// --- GPT image fallback (gpt-image-1 via images.edit) ---
+// Supported output sizes for gpt-image-1; 4x5 (~1200x1500) has no matching preset → skip
+const GPT_IMAGE_SIZE_MAP: Record<string, '1024x1024' | '1024x1536' | '1536x1024'> = {
+  '1x1':    '1024x1024',
+  '9x16':   '1024x1536',
+  '1.91x1': '1536x1024',
+}
+
+async function gptLocalizeImage(
+  imgBuffer: Buffer,
+  mimeType: string,
+  language: string,
+  phrases: { en: string; translated: string; role?: string }[],
+  sizeLabel: string,
+): Promise<Buffer | null> {
+  const gptSize = GPT_IMAGE_SIZE_MAP[sizeLabel]
+  if (!gptSize) {
+    console.log(`[gpt-img] ${sizeLabel} not supported by gpt-image-1, skipping`)
+    return null
+  }
+
+  const ext = mimeType === 'image/png' ? 'png' : 'jpg'
+  const prompt = buildGeminiPrompt(language, phrases)
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const imageFile = await toFile(imgBuffer, `image.${ext}`, { type: mimeType })
+      const response = await openai.images.edit({
+        model: 'gpt-image-1',
+        image: imageFile,
+        prompt,
+        size: gptSize,
+      } as any)
+      const b64 = (response.data?.[0] as any)?.b64_json
+      if (!b64) throw new Error('No image data in gpt-image-1 response')
+      console.log(`[gpt-img] ${sizeLabel}/${language} attempt ${attempt} ✓`)
+      return Buffer.from(b64, 'base64')
+    } catch (err: any) {
+      console.warn(`[gpt-img] ${sizeLabel}/${language} attempt ${attempt}: ${err.message}`)
+      if (attempt < 2) await new Promise(r => setTimeout(r, 4000))
+    }
+  }
+  return null
+}
 
 // --- Types ---
 
@@ -1211,6 +1257,18 @@ export async function runLocalizationJob(
                       patch(folder.id, { uploadInfo: `${lang}: ${img.name} — attempt ${attempt}/${maxAttempts} ${icon}` })
                       emit()
                     }, imgAspectRatio, maxAttempts)
+
+                  // GPT fallback: if Gemini returned the original unchanged (all attempts failed)
+                  // and this size is supported by gpt-image-1 (not 4x5)
+                  if (finalBuffer === buffer && sizeLabel !== '4x5' && GPT_IMAGE_SIZE_MAP[sizeLabel ?? '']) {
+                    patch(folder.id, { uploadInfo: `${lang}: ${img.name} — Gemini failed, trying GPT fallback...` })
+                    emit()
+                    const gptResult = await gptLocalizeImage(buffer, mime, lang, langPhrases, sizeLabel ?? '')
+                    if (gptResult) {
+                      finalBuffer = gptResult
+                      console.log(`[gpt-img] ${img.name}/${lang}: GPT fallback succeeded`)
+                    }
+                  }
 
                   // First successful translation → becomes the reference for all other sizes
                   if (isRefCandidate && finalBuffer !== buffer) {
