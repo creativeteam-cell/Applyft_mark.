@@ -996,11 +996,16 @@ export function VideoPage() {
     setQueueActive('kling', true)
 
     try {
+      // Compress firstFrame/lastFrame/avatarImage before sending — Vercel 4.5MB limit
+      const ff = firstFrame ? (await shrinkForVideo('data:image/jpeg;base64,' + firstFrame, 1024)).split(',')[1] : null
+      const lf = lastFrame ? (await shrinkForVideo('data:image/jpeg;base64,' + lastFrame, 1024)).split(',')[1] : null
+      const ai = avatarImage ? (await shrinkForVideo('data:image/jpeg;base64,' + avatarImage, 1024)).split(',')[1] : null
+      const mi = motionImage ? (await shrinkForVideo('data:image/jpeg;base64,' + motionImage, 1024)).split(',')[1] : null
       if (videoMode === 'motionControl') {
         const motionModel = (model === 'kling-v3' || model === 'kling-v3-omni') ? 'kling-v3' : 'kling-v2-6'
         const data = await fetchWithRetry('/api/video/motion-control', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_url: motionImage, video_url: motionVideoUrl, prompt, model_name: motionModel, character_orientation: motionOrientation, keep_original_sound: motionKeepSound ? 'yes' : 'no', mode }),
+          body: JSON.stringify({ image_url: mi, video_url: motionVideoUrl, prompt, model_name: motionModel, character_orientation: motionOrientation, keep_original_sound: motionKeepSound ? 'yes' : 'no', mode }),
         })
         setStatus('processing')
         pollStatus(data.task_id, 'motion-control', { prompt: prompt || 'Motion control video', model, duration: String(duration), aspectRatio: '', sound: 'off', inputType: 'motion', units: estimatedCost ?? 0 })
@@ -1010,7 +1015,7 @@ export function VideoPage() {
       if (videoMode === 'avatar') {
         const data = await fetchWithRetry('/api/video/avatar', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: avatarImage, sound_file: avatarAudioBase64, prompt, mode }),
+          body: JSON.stringify({ image: ai, sound_file: avatarAudioBase64, prompt, mode }),
         })
         setStatus('processing')
         pollStatus(data.task_id, 'avatar', { prompt: prompt || 'Avatar video', model, duration: String(avatarAudioDuration || duration), aspectRatio: '', sound: 'off', inputType: 'avatar', units: estimatedCost ?? 0 })
@@ -1028,7 +1033,7 @@ export function VideoPage() {
         if (isTurboModel) {
           const data = await fetchWithRetry('/api/video/turbo', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model_name: model, prompt: effectivePrompt, first_frame: firstFrame, duration: totalDur }),
+            body: JSON.stringify({ model_name: model, prompt: effectivePrompt, first_frame: ff, duration: totalDur }),
           })
           setStatus('processing')
           pollStatus(data.task_id, 'turbo', { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: '', sound: 'off', inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 })
@@ -1036,7 +1041,7 @@ export function VideoPage() {
           const type = firstFrame ? 'image2video' : 'text2video'
           const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
           const body = firstFrame
-            ? { model_name: model, image: firstFrame, prompt: effectivePrompt, mode, duration: String(totalDur), sound: soundParam }
+            ? { model_name: model, image: ff, prompt: effectivePrompt, mode, duration: String(totalDur), sound: soundParam }
             : { model_name: model, prompt: effectivePrompt, mode, duration: String(totalDur), aspect_ratio: aspectRatio, sound: soundParam }
           const data = await fetchWithRetry(`/api/video/${type}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
           setStatus('processing')
@@ -1049,7 +1054,7 @@ export function VideoPage() {
       if (isTurboModel) {
         const data = await fetchWithRetry('/api/video/turbo', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model_name: model, prompt, first_frame: firstFrame, duration }),
+          body: JSON.stringify({ model_name: model, prompt, first_frame: ff, duration }),
         })
         setStatus('processing')
         pollStatus(data.task_id, 'turbo', { prompt, model, duration: String(duration), aspectRatio: '', sound: 'off', inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 })
@@ -1057,7 +1062,7 @@ export function VideoPage() {
         const type = firstFrame ? 'image2video' : 'text2video'
         const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
         const body = firstFrame
-          ? { model_name: model, image: firstFrame, ...(lastFrame && currentModel.supportsLastFrame ? { image_tail: lastFrame } : {}), prompt, negative_prompt: negPrompt, mode, duration: String(duration), sound: soundParam }
+          ? { model_name: model, image: ff, ...(lastFrame && currentModel.supportsLastFrame ? { image_tail: lf } : {}), prompt, negative_prompt: negPrompt, mode, duration: String(duration), sound: soundParam }
           : { model_name: model, prompt, negative_prompt: negPrompt, mode, duration: String(duration), aspect_ratio: aspectRatio, sound: soundParam }
         const data = await fetchWithRetry(`/api/video/${type}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
         setStatus('processing')
