@@ -1138,8 +1138,15 @@ export function VideoPage() {
                   <textarea ref={textareaRef} value={prompt} onChange={e => setPrompt(e.target.value)}
                     onKeyUp={currentModel.supportsImageList ? handlePromptKeyUp : undefined}
                     placeholder={firstFrame ? 'Describe how it should move...' : 'Describe the video...'}
+                    maxLength={2500}
                     rows={5} className="w-full rounded-xl px-3 py-2.5 text-sm resize-none outline-none"
                     style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${prompt ? 'var(--accent)' : 'var(--border)'}`, color: 'var(--text)', caretColor: 'var(--accent)', fontFamily: 'inherit' }} />
+                  {prompt.length > 2200 && (
+                    <span className="absolute bottom-2 right-2 text-xs px-1.5 py-0.5 rounded"
+                      style={{ background: 'rgba(0,0,0,0.6)', color: prompt.length >= 2500 ? '#f87171' : 'rgba(255,255,255,0.5)' }}>
+                      {prompt.length}/2500
+                    </span>
+                  )}
                   {currentModel.supportsImageList && atPopup && filteredAtAssets.length > 0 && (
                     <div className="absolute bottom-full left-0 right-0 mb-1 rounded-xl overflow-hidden z-40"
                       style={{ background: 'var(--bg)', border: '1px solid var(--border)', boxShadow: '0 -4px 20px rgba(0,0,0,0.4)' }}>
@@ -1279,7 +1286,7 @@ export function VideoPage() {
               <div className="mb-3">
                 <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Prompt (optional)</div>
                 <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
-                  placeholder="Clothing, scene details..." rows={2}
+                  placeholder="Clothing, scene details..." rows={2} maxLength={2500}
                   className="w-full rounded-xl px-3 py-2 text-sm resize-none outline-none"
                   style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }} />
               </div>
@@ -1354,7 +1361,7 @@ export function VideoPage() {
                   </button>
                 </div>
                 <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
-                  placeholder="Gestures, emotions, camera movements..." rows={3}
+                  placeholder="Gestures, emotions, camera movements..." rows={3} maxLength={2500}
                   className="w-full rounded-xl px-3 py-2 text-sm resize-none outline-none"
                   style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }} />
               </div>

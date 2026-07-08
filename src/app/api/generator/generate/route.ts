@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { generateImage, recomposeImage } from '@/lib/imagen'
+import { generateImage, recomposeImage, DEFAULT_GEMINI_MODEL } from '@/lib/imagen'
 import { getDriveClient } from '@/lib/googleDrive'
 import { updateQueue } from '@/lib/queue'
 import { incrementImageCount, checkLimitExceeded } from '@/lib/adminStats'
