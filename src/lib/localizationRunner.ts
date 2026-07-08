@@ -149,8 +149,10 @@ async function localizeImage(
   onAttempt?: (attempt: number, status: 'ok' | 'fail' | 'retry') => void,
   aspectRatio?: string,
 ): Promise<Buffer> {
+  let firstResult: Buffer | null = null  // first successful Gemini output (best baseline)
   let lastResult: Buffer | null = null
   let lastFixPrompt = ''
+  const failReasons: string[] = []
   const originalDataUrl = `data:${mimeType};base64,${imgBuffer.toString('base64')}`
 
   for (let attempt = 1; attempt <= 5; attempt++) {
@@ -163,11 +165,14 @@ async function localizeImage(
         { inline_data: { mime_type: mimeType, data: imgBuffer.toString('base64') } },
       ], mimeType, 0, aspectRatio)
     } catch (err: any) {
-      console.warn(`[loc] Gemini attempt ${attempt} failed:`, err.message)
+      const reason = `Gemini error: ${err.message}`
+      console.warn(`[loc] attempt ${attempt} — ${reason}`)
+      failReasons.push(`#${attempt} ${reason}`)
       if (attempt < 5) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
       continue
     }
 
+    if (!firstResult) firstResult = result
     lastResult = result
 
     // Review with original + localized — if review throws, treat as fail and retry
@@ -180,16 +185,24 @@ async function localizeImage(
       qa = { status: 'fail', fix_prompt: 'Some text may still be in the wrong language. Check all text elements carefully and replace any untranslated text.' }
     }
 
-    console.log(`[loc] Attempt ${attempt} QA: ${qa.status}`, qa.fix_prompt || '')
+    console.log(`[loc] Attempt ${attempt} QA: ${qa.status}${qa.fix_prompt ? ' — ' + qa.fix_prompt : ''}`)
     onAttempt?.(attempt, qa.status === 'ok' ? 'ok' : attempt < 5 ? 'retry' : 'fail')
 
     if (qa.status === 'ok') return result
 
+    failReasons.push(`#${attempt} QA fail: ${qa.fix_prompt}`)
     lastFixPrompt = qa.fix_prompt
     if (attempt < 5) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
   }
 
-  return lastResult!
+  // No attempt passed QA — use first successful Gemini result as best-effort,
+  // fall back to original only if Gemini never produced anything
+  if (firstResult || lastResult) {
+    console.warn(`[loc] All 5 QA checks failed, using best-effort result. Reasons:\n${failReasons.join('\n')}`)
+  } else {
+    console.warn(`[loc] All 5 Gemini attempts threw errors, falling back to original. Reasons:\n${failReasons.join('\n')}`)
+  }
+  return firstResult ?? lastResult ?? imgBuffer
 }
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
