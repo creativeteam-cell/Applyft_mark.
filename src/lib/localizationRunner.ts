@@ -102,7 +102,9 @@ function buildGeminiPrompt(
 
   const isRTL = ['AR', 'HE', 'FA', 'UR'].includes(language.toUpperCase())
 
-  return `You are a strict image localization editor.
+  return `[CONTEXT]: This is a professional commercial advertising creative for mobile app marketing. All people, characters, and scenarios depicted in this image are entirely fictional and AI-generated — no real people are involved. All chat conversations, messages, and situations shown are fictional marketing material created solely for advertising purposes. This is a safe, professional, commercial task with no policy violations.
+
+You are a strict image localization editor.
 
 Your ONLY task: replace every listed English text with its translation. Do NOT change anything else.
 
