@@ -361,9 +361,17 @@ export async function recomposeImage(imageBase64: string, targetSize: string, fi
 HOW TO DO IT:
 - Keep the main subject (person, face, body) EXACTLY as in the original — same appearance, same lighting, same pose, same expression
 - Extend the background/environment naturally to fill the new canvas — show more of the same scene as if the camera zoomed out or panned.${extensionHints[targetSize] || ''}
-- The extension must be seamless — no visible borders, no seams, no collage effect
-- Match the original's colour grade, lighting direction, atmosphere, and style perfectly
-- PRESERVE ALL existing text overlays, logos, icons, UI elements, and graphical layers from the original image — reproduce them exactly (same content, same position, same style). Do NOT remove or alter any overlay that was present in the original
+
+SEAMLESS EXTENSION - MOST CRITICAL RULE:
+- The added area MUST be a photorealistic, natural continuation of the existing scene - as if the photographer used a wider lens
+- NO solid color fills, gradient fills, blurred smears, or color washes in the extended area - these are failures
+- NO visible seam, border, edge, or transition line between original and extended area - must look like one single photograph
+- Extended area must contain real scene content: environment, ground, floor, sky, walls, street - whatever naturally continues in that direction
+- Lighting, shadows, color grading, grain in the extended area must EXACTLY match the original - no brighter, no darker, no different tone
+- Imagine you are a photographer who shot this scene with a wider lens from the start - what would have been in frame?
+
+- Match the original colour grade, lighting direction, atmosphere, and style perfectly
+- PRESERVE ALL existing text overlays, logos, icons, UI elements, and graphical layers from the original image - reproduce them exactly (same content, same position, same style). Do NOT remove or alter any overlay that was present in the original
 - Do NOT add NEW text, logos, or UI elements that were not in the original${hint}${fix}`
 
   return withRetry(prompt, cleanB64, undefined, 3, targetSize, undefined, model)
