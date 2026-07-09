@@ -671,21 +671,30 @@ function ImageUploadBox({ label, preview, onUpload, onClear, onPickFromLibrary, 
   )
 }
 
+// ── LocalStorage helpers ──────────────────────────────────────────────────
+function loadLS<T>(key: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback
+  try { const v = localStorage.getItem(key); return v !== null ? JSON.parse(v) : fallback } catch { return fallback }
+}
+function saveLS(key: string, value: unknown) {
+  try { localStorage.setItem(key, JSON.stringify(value)) } catch {}
+}
+
 // ── Main VideoPage ─────────────────────────────────────────────────────────
 
 export function VideoPage() {
   // ── Model & Mode ──
-  const [model, setModel] = useState<KlingModel>('kling-v3')
-  const [videoMode, setVideoMode] = useState<VideoMode>('standard')
+  const [model, setModel] = useState<KlingModel>(() => loadLS<KlingModel>('gen_vid_model', 'kling-v3'))
+  const [videoMode, setVideoMode] = useState<VideoMode>(() => loadLS<VideoMode>('gen_vid_mode', 'standard'))
 
   // ── Standard mode state ──
-  const [prompt, setPrompt] = useState('')
-  const [negPrompt, setNegPrompt] = useState('')
+  const [prompt, setPrompt] = useState<string>(() => loadLS<string>('gen_vid_prompt', ''))
+  const [negPrompt, setNegPrompt] = useState<string>(() => loadLS<string>('gen_vid_negprompt', ''))
   const [negOpen, setNegOpen] = useState(false)
-  const [mode, setMode] = useState<Mode>('std')
-  const [duration, setDuration] = useState(5)
-  const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9')
-  const [sound, setSound] = useState(false)
+  const [mode, setMode] = useState<Mode>(() => loadLS<Mode>('gen_vid_quality', 'std'))
+  const [duration, setDuration] = useState<number>(() => loadLS<number>('gen_vid_duration', 5))
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>(() => loadLS<AspectRatio>('gen_vid_aspect', '16:9'))
+  const [sound, setSound] = useState<boolean>(() => loadLS<boolean>('gen_vid_sound', false))
   const [firstFrame, setFirstFrame] = useState<string | null>(null)
   const [lastFrame, setLastFrame] = useState<string | null>(null)
   const [assets, setAssets] = useState<{ id: string; name: string; base64: string }[]>([])
@@ -693,14 +702,28 @@ export function VideoPage() {
   const [pickerTarget, setPickerTarget] = useState<'first' | 'last' | 'motion' | 'avatar' | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const assetInputRef = useRef<HTMLInputElement>(null)
+
+  // Persist Video settings to localStorage (model/mode/standard controls)
+  useEffect(() => { saveLS('gen_vid_model', model) }, [model])
+  useEffect(() => { saveLS('gen_vid_mode', videoMode) }, [videoMode])
+  useEffect(() => { saveLS('gen_vid_prompt', prompt) }, [prompt])
+  useEffect(() => { saveLS('gen_vid_negprompt', negPrompt) }, [negPrompt])
+  useEffect(() => { saveLS('gen_vid_quality', mode) }, [mode])
+  useEffect(() => { saveLS('gen_vid_duration', duration) }, [duration])
+  useEffect(() => { saveLS('gen_vid_aspect', aspectRatio) }, [aspectRatio])
+  useEffect(() => { saveLS('gen_vid_sound', sound) }, [sound])
   const [atPopup, setAtPopup] = useState(false)
   const [atQuery, setAtQuery] = useState('')
 
   // ── Multishot state ──
-  const [shots, setShots] = useState<ShotItem[]>([{ id: '1', prompt: '', duration: 3 }])
-  const [shotDescription, setShotDescription] = useState('')
-  const [shotCharacterPrompt, setShotCharacterPrompt] = useState('')
+  const [shots, setShots] = useState<ShotItem[]>(() => loadLS<ShotItem[]>('gen_vid_shots', [{ id: '1', prompt: '', duration: 3 }]))
+  const [shotDescription, setShotDescription] = useState<string>(() => loadLS<string>('gen_vid_shotdesc', ''))
+  const [shotCharacterPrompt, setShotCharacterPrompt] = useState<string>(() => loadLS<string>('gen_vid_shotchar', ''))
   const [enhancingShots, setEnhancingShots] = useState(false)
+  // Persist multishot settings
+  useEffect(() => { saveLS('gen_vid_shots', shots) }, [shots])
+  useEffect(() => { saveLS('gen_vid_shotdesc', shotDescription) }, [shotDescription])
+  useEffect(() => { saveLS('gen_vid_shotchar', shotCharacterPrompt) }, [shotCharacterPrompt])
 
   // ── Motion Control state ──
   const [motionImage, setMotionImage] = useState<string | null>(null)
@@ -973,6 +996,7 @@ export function VideoPage() {
         }),
       })
       const data = await res.json()
+      if (data.error) throw new Error(data.error)
       if (Array.isArray(data.shots) && data.shots.length > 0) {
         setShots(prev => {
           const result = prev.map((s, i) => data.shots[i] ? { ...s, prompt: data.shots[i] } : s)
@@ -986,7 +1010,9 @@ export function VideoPage() {
           return result
         })
       }
-    } catch {}
+    } catch (e: any) {
+      setError(e.message || 'Failed to write shots')
+    }
     setEnhancingShots(false)
   }
 

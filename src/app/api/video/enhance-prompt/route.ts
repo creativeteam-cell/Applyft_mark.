@@ -52,8 +52,11 @@ export async function POST(req: NextRequest) {
         temperature: 0.75,
       })
 
-      const raw = res.choices[0]?.message?.content?.trim() || '[]'
+      let raw = res.choices[0]?.message?.content?.trim() || '[]'
+      // Strip markdown code fences if GPT wraps the JSON
+      if (raw.startsWith('`')) raw = raw.replace(/^[`]{1,3}(?:json)?\s*\n?/, '').replace(/\n?[`]{1,3}\s*$/, '')
       const parsed = JSON.parse(raw)
+      if (!Array.isArray(parsed)) throw new Error('GPT returned non-array response')
       return NextResponse.json({ shots: parsed })
     }
 

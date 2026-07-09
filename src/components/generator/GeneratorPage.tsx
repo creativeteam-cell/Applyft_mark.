@@ -5,6 +5,16 @@ import { useSession } from 'next-auth/react'
 import { setQueueActive } from '@/lib/queueClient'
 import { VideoPage } from '@/components/video/VideoPage'
 
+// ── LocalStorage helpers ──────────────────────────────────────────────────
+function loadLS<T>(key: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback
+  try { const v = localStorage.getItem(key); return v !== null ? JSON.parse(v) : fallback } catch { return fallback }
+}
+function saveLS(key: string, value: unknown) {
+  try { localStorage.setItem(key, JSON.stringify(value)) } catch {}
+}
+
+
 // Shrink image to max px on longest side (JPEG) to stay under Vercel's 4.5MB payload limit
 function shrinkImage(dataUrl: string, maxPx = 1536): Promise<string> {
   return new Promise((resolve) => {
@@ -814,7 +824,7 @@ function ImageCardModal({ item, onClose, onGenerated }: {
 
 export function GeneratorPage() {
   const { data: session } = useSession()
-  const [tab, setTab] = useState<'image' | 'video'>('image')
+  const [tab, setTab] = useState<'image' | 'video'>(() => loadLS<'image' | 'video'>('gen_tab', 'image'))
 
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [historyLoading, setHistoryLoading] = useState(true)
@@ -873,16 +883,24 @@ export function GeneratorPage() {
   useEffect(() => { fetchHistory() }, [fetchHistory])
 
   const [sizeOpen, setSizeOpen] = useState(false)
-  const [selectedModelId, setSelectedModelId] = useState('banana2')
-  const [selectedSizeIdx, setSelectedSizeIdx] = useState(0)
-  const [prompt, setPrompt] = useState('')
-  const [aiPrompt, setAiPrompt] = useState(false)
-  const [selectedStyle, setSelectedStyle] = useState<string | null>(null)
+  const [selectedModelId, setSelectedModelId] = useState<string>(() => loadLS<string>('gen_img_model', 'banana2'))
+  const [selectedSizeIdx, setSelectedSizeIdx] = useState<number>(() => loadLS<number>('gen_img_size', 0))
+  const [prompt, setPrompt] = useState<string>(() => loadLS<string>('gen_img_prompt', ''))
+  const [aiPrompt, setAiPrompt] = useState<boolean>(() => loadLS<boolean>('gen_img_aiprompt', false))
+  const [selectedStyle, setSelectedStyle] = useState<string | null>(() => loadLS<string | null>('gen_img_style', null))
   const [reference, setReference] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
   const [describing, setDescribing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const referenceRef = useRef<HTMLInputElement>(null)
+
+  // Persist Image tab settings to localStorage
+  useEffect(() => { saveLS('gen_tab', tab) }, [tab])
+  useEffect(() => { saveLS('gen_img_model', selectedModelId) }, [selectedModelId])
+  useEffect(() => { saveLS('gen_img_size', selectedSizeIdx) }, [selectedSizeIdx])
+  useEffect(() => { saveLS('gen_img_prompt', prompt) }, [prompt])
+  useEffect(() => { saveLS('gen_img_aiprompt', aiPrompt) }, [aiPrompt])
+  useEffect(() => { saveLS('gen_img_style', selectedStyle) }, [selectedStyle])
 
   const currentModel = MODELS.find(m => m.id === selectedModelId) ?? MODELS[0]
   const currentSize = currentModel.sizes[selectedSizeIdx] ?? currentModel.sizes[0]
