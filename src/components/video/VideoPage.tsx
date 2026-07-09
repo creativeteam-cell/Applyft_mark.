@@ -984,7 +984,11 @@ export function VideoPage() {
     setEnhancingShots(true)
     try {
       const images: string[] = []
-      if (firstFrame) images.push(firstFrame)
+      if (firstFrame) {
+        // Compress before sending — raw firstFrame can exceed Next.js body limit
+        const compressed = await shrinkForVideo('data:image/jpeg;base64,' + firstFrame, 512)
+        images.push(compressed) // send as full data URL
+      }
       const res = await fetch('/api/video/enhance-prompt', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

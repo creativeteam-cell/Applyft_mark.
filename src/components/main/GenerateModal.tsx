@@ -65,6 +65,8 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
   // hover zoom
   const [hoveredSize, setHoveredSize] = useState<string | null>(null)
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null)
+  // AI recompose error messages per size (shown as tooltip under card)
+  const [sizeErrors, setSizeErrors] = useState<Record<string, string>>({})
 
   const [fixNote, setFixNote] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -234,7 +236,9 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
       const results: Record<string, string> = { '4x5': previewImage }
       const compressedPreview = await compressImage(previewImage, 1200)
 
+      const newSizeErrors: Record<string, string> = {}
       async function recomposeSize(size: string): Promise<void> {
+        let aiImage: string | null = null
         try {
           const res = await fetch('/api/generate', {
             method: 'POST',
@@ -243,26 +247,34 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
           })
           const data = await res.json()
           if (!data.error && data.imageBase64) {
-            try {
-              const compressedForResize = await compressImage(data.imageBase64, 2000)
-              const resizeRes = await fetch('/api/resize', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imageBase64: compressedForResize, size }),
-              })
-              const resizeData = await resizeRes.json()
-              results[size] = resizeData.imageBase64 || data.imageBase64
-            } catch {
-              results[size] = data.imageBase64
-            }
+            aiImage = data.imageBase64
+          } else if (data.error) {
+            newSizeErrors[size] = data.error
+            console.error(`Recompose failed for ${size}:`, data.error)
           }
-        } catch (e) {
+        } catch (e: any) {
+          newSizeErrors[size] = e.message || 'Network error'
           console.error(`Recompose failed for ${size}:`, e)
+        }
+        // Always store something — AI result if available, else simple resize of the 4x5
+        const source = aiImage || previewImage!  // previewImage is non-null at this stage
+        try {
+          const compressedForResize = await compressImage(source, 2000)
+          const resizeRes = await fetch('/api/resize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageBase64: compressedForResize, size }),
+          })
+          const resizeData = await resizeRes.json()
+          results[size] = resizeData.imageBase64 || source
+        } catch {
+          results[size] = source
         }
       }
 
       await Promise.all(['1x1', '9x16', '1.91x1'].map(recomposeSize))
 
+      if (Object.keys(newSizeErrors).length) setSizeErrors(newSizeErrors)
       setAllImages(results)
 
       // Initialize per-size histories
@@ -389,6 +401,7 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
       const compressed = await compressImage(base, 1200)
 
       async function recomposeSize(size: string): Promise<void> {
+        let aiImage: string | null = null
         try {
           const res = await fetch('/api/generate', {
             method: 'POST',
@@ -396,28 +409,29 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
             body: JSON.stringify({ recomposeBase64: compressed, targetSize: size }),
           })
           const data = await res.json()
-          if (!data.error && data.imageBase64) {
-            let finalImage = data.imageBase64
-            try {
-              const compressedForResize = await compressImage(data.imageBase64, 2000)
-              const resizeRes = await fetch('/api/resize', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imageBase64: compressedForResize, size }),
-              })
-              const resizeData = await resizeRes.json()
-              if (resizeData.imageBase64) finalImage = resizeData.imageBase64
-            } catch {}
-            // Append new version to that size's history
-            setSizeHistories(prev => {
-              const newHist = [...(prev[size] || []), finalImage]
-              setSizeIndexes(idx => ({ ...idx, [size]: newHist.length - 1 }))
-              return { ...prev, [size]: newHist }
-            })
-          }
+          if (!data.error && data.imageBase64) aiImage = data.imageBase64
         } catch (e) {
           console.error(`Rebuild failed for ${size}:`, e)
         }
+        // Always store something — AI result if available, else simple resize of the 4x5
+        const source = aiImage || base
+        let finalImage = source
+        try {
+          const compressedForResize = await compressImage(source, 2000)
+          const resizeRes = await fetch('/api/resize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageBase64: compressedForResize, size }),
+          })
+          const resizeData = await resizeRes.json()
+          if (resizeData.imageBase64) finalImage = resizeData.imageBase64
+        } catch {}
+        // Append new version to that size's history
+        setSizeHistories(prev => {
+          const newHist = [...(prev[size] || []), finalImage]
+          setSizeIndexes(idx => ({ ...idx, [size]: newHist.length - 1 }))
+          return { ...prev, [size]: newHist }
+        })
       }
 
       await Promise.all(['1x1', '9x16', '1.91x1'].map(recomposeSize))
@@ -778,6 +792,15 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
                         </div>
                       )}
                     </div>
+
+                    {/* AI recompose error — shown when fallback resize was used */}
+                    {sizeErrors[size] && (
+                      <div className="mt-1 px-1" title={sizeErrors[size]}>
+                        <p className="text-[10px] leading-tight text-center" style={{ color: '#f87171' }}>
+                          ⚠ AI: {sizeErrors[size].length > 60 ? sizeErrors[size].slice(0, 60) + '…' : sizeErrors[size]}
+                        </p>
+                      </div>
+                    )}
 
                     {/* History navigation */}
                     {hasHistory && (

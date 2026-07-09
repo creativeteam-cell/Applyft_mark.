@@ -1021,9 +1021,10 @@ export function GeneratorPage() {
         ))}
       </div>
 
-      {tab === 'video' ? (
-        <VideoPage />
-      ) : (
+      {/* VideoPage always mounted — preserves firstFrame and other ephemeral state */}
+      {tab !== 'video' && <div className="hidden"><VideoPage /></div>}
+      {tab === 'video' && <VideoPage />}
+      {tab === 'video' ? null : (
         <div className="flex flex-1 min-h-0">
 
           <div className="flex-shrink-0 flex flex-col overflow-y-auto"
