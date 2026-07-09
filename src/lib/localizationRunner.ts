@@ -154,6 +154,32 @@ const GPT_IMAGE_SIZE_MAP: Record<string, '1024x1024' | '1024x1536' | '1536x1024'
   '1.91x1': '1536x1024',
 }
 
+// Short, direct prompt for gpt-image-1 image editing (Gemini prompt is too long for GPT)
+function buildGptImagePrompt(
+  language: string,
+  phrases: { en: string; translated: string; role?: string }[],
+  fixPrompt?: string,
+): string {
+  const replacements = phrases
+    .map(p => `"${p.en}" → "${p.translated}"`)
+    .join('\n')
+
+  return `This is a professional commercial advertising image for mobile app marketing. All content is fictional and safe.
+
+Localize this image to ${language} by replacing these text strings:
+
+${replacements}
+
+Rules:
+- Replace ONLY the listed text — change nothing else
+- Keep exact same font style, size, color, weight, and position for each replaced text
+- Erase the original text completely before placing the translation
+- Preserve all logos, brand marks, app icons, and visual elements exactly as-is
+- Do NOT add or remove any visual elements${fixPrompt ? `
+
+Previous attempt had issues — fix these: ${fixPrompt}` : ''}`
+}
+
 const RETRY_DELAY_MS = 4000 // pause between attempts
 
 // Unified localization: Gemini N attempts → GPT M attempts (chain: each attempt fixes previous)
@@ -162,7 +188,7 @@ async function localizeImage(
   mimeType: string,
   language: string,
   phrases: { en: string; translated: string; role?: string }[],
-  onAttempt?: (attempt: number, status: 'ok' | 'fail' | 'retry') => void,
+  onAttempt?: (attempt: number, status: 'ok' | 'fail' | 'retry', msg?: string) => void,
   aspectRatio?: string,
   geminiAttempts = 5,
   gptAttempts = 0,
@@ -188,6 +214,7 @@ async function localizeImage(
     } catch (err: any) {
       failReasons.push(`#${attempt}(gemini) ${err.message}`)
       console.warn(`[loc] Gemini attempt ${attempt} error: ${err.message}`)
+      onAttempt?.(attempt, 'fail', err.message)
       if (attempt < totalAttempts) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
       continue
     }
@@ -206,7 +233,7 @@ async function localizeImage(
 
     const remaining = totalAttempts - attempt
     console.log(`[loc] Gemini attempt ${attempt} QA: ${qa.status}${qa.fix_prompt ? ' — ' + qa.fix_prompt : ''}`)
-    onAttempt?.(attempt, qa.status === 'ok' ? 'ok' : remaining > 0 ? 'retry' : 'fail')
+    onAttempt?.(attempt, qa.status === 'ok' ? 'ok' : remaining > 0 ? 'retry' : 'fail', qa.status !== 'ok' ? qa.fix_prompt : undefined)
 
     if (qa.status === 'ok') return result
 
@@ -229,19 +256,29 @@ async function localizeImage(
 
         let result: Buffer | null = null
         try {
+          const gptPrompt = buildGptImagePrompt(language, phrases, lastFixPrompt || undefined)
           const imageFile = await toFile(inputBuffer, `image.${ext}`, { type: mimeType })
-          const response = await openai.images.edit({
+          const response = await (openai.images.edit as any)({
             model: 'gpt-image-1',
             image: imageFile,
-            prompt,
+            prompt: gptPrompt,
+            n: 1,
             size: gptSize,
-          } as any, { timeout: 90_000 })
-          const b64 = (response.data?.[0] as any)?.b64_json
-          if (!b64) throw new Error('No image data in gpt-image-1 response')
-          result = Buffer.from(b64, 'base64')
+          }, { timeout: 90_000 })
+          const b64 = response.data?.[0]?.b64_json
+          if (b64) {
+            result = Buffer.from(b64, 'base64')
+          } else {
+            const url = response.data?.[0]?.url
+            if (!url) throw new Error('No image data in gpt-image-1 response')
+            const imgRes = await fetch(url)
+            if (!imgRes.ok) throw new Error(`Failed to fetch GPT image: ${imgRes.status}`)
+            result = Buffer.from(await imgRes.arrayBuffer())
+          }
         } catch (err: any) {
           failReasons.push(`#${globalAttempt}(gpt) ${err.message}`)
           console.warn(`[loc] GPT attempt ${globalAttempt} error: ${err.message}`)
+          onAttempt?.(globalAttempt, 'fail', `GPT: ${err.message}`)
           if (attempt < gptAttempts) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
           continue
         }
@@ -260,7 +297,7 @@ async function localizeImage(
 
         const remaining = gptAttempts - attempt
         console.log(`[loc] GPT attempt ${globalAttempt} QA: ${qa.status}${qa.fix_prompt ? ' — ' + qa.fix_prompt : ''}`)
-        onAttempt?.(globalAttempt, qa.status === 'ok' ? 'ok' : remaining > 0 ? 'retry' : 'fail')
+        onAttempt?.(globalAttempt, qa.status === 'ok' ? 'ok' : remaining > 0 ? 'retry' : 'fail', qa.status !== 'ok' ? `GPT QA: ${qa.fix_prompt}` : undefined)
 
         if (qa.status === 'ok') return result
 
@@ -1126,6 +1163,7 @@ export async function runLocalizationJob(
 
         let uploadedThisLang = 0
         let skippedExistsThisLang = 0
+        let failedNoTranslation = 0
 
         for (const imgData of orderedImages) {
           const { img, buffer, mime, texts, roles, types, properNouns } = imgData
@@ -1165,11 +1203,14 @@ export async function runLocalizationJob(
 
             if (langPhrases.length > 0) {
               const imgAspectRatio = getAspectRatioFromName(img.name)
+              patch(folder.id, { uploadInfo: `${lang}: ${img.name} — starting (0/${totalAttempts})...` })
+              emit()
               try {
                 finalBuffer = await localizeImage(buffer, mime, lang, langPhrases,
-                  (attempt, status) => {
+                  (attempt, status, msg) => {
                     const icon = status === 'ok' ? '✓' : status === 'retry' ? '↻' : '✗'
-                    patch(folder.id, { uploadInfo: `${lang}: ${img.name} — attempt ${attempt}/${totalAttempts} ${icon}` })
+                    const detail = (status === 'fail' && msg) ? `: ${msg.slice(0, 80)}` : ''
+                    patch(folder.id, { uploadInfo: `${lang}: ${img.name} — attempt ${attempt}/${totalAttempts} ${icon}${detail}` })
                     emit()
                   }, imgAspectRatio, geminiAttempts, gptAttempts, sizeLabel ?? undefined)
               } catch (locErr: any) {
@@ -1183,6 +1224,7 @@ export async function runLocalizationJob(
 
             // HARD RULE: never upload original English image to translated folder
             if (finalBuffer === buffer && langPhrases.length > 0) {
+              failedNoTranslation++
               console.warn(`[loc] ${img.name}/${lang}: all attempts failed, skipping upload (no English fallback allowed)`)
               patch(folder.id, { uploadInfo: `${lang}: ${img.name} — skipped (translation failed, English not uploaded)` })
               emit()
@@ -1213,16 +1255,21 @@ export async function runLocalizationJob(
         }
 
         const allExisted = skippedExistsThisLang === imageDataList.length
-        if (uploadedThisLang > 0 || allExisted) {
+        const anyProgress = uploadedThisLang > 0 || allExisted || failedNoTranslation > 0
+        if (anyProgress) {
           completedLangs.push(lang)
           const info = allExisted
             ? `${lang} (all sizes already exist)`
-            : `${lang} (${uploadedThisLang}/${imageDataList.length} uploaded)`
+            : uploadedThisLang > 0 && failedNoTranslation > 0
+              ? `${lang} (${uploadedThisLang} uploaded, ${failedNoTranslation} failed to translate)`
+              : uploadedThisLang > 0
+                ? `${lang} (${uploadedThisLang}/${imageDataList.length} uploaded)`
+                : `${lang} (all ${failedNoTranslation} sizes failed to translate — retry needed)`
           patch(folder.id, { completedLangs: [...completedLangs], uploadInfo: info })
         } else {
           patch(folder.id, {
             status: 'error',
-            error: `${lang}: 0 files uploaded -- dict=${dictSize}, check server logs`,
+            error: `${lang}: 0 files uploaded — dict=${dictSize}, no phrases matched. Check analyzer logs.`,
           })
         }
         emit()
