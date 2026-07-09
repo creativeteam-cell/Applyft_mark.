@@ -234,9 +234,16 @@ async function localizeImage(
         { inline_data: { mime_type: mimeType, data: inputBuffer.toString('base64') } },
       ], mimeType, 0, aspectRatio)
     } catch (err: any) {
+      const isContentBlock = err.message?.includes('IMAGE_SAFETY') || err.message?.includes('NO_IMAGE')
       failReasons.push(`#${attempt}(gemini) ${err.message}`)
       console.warn(`[loc] Gemini attempt ${attempt} error: ${err.message}`)
       onAttempt?.(attempt, 'fail', err.message)
+      onDebug?.({ attempt, phase: 'gemini', status: 'safety', buffer: null, qaFix: err.message })
+      if (isContentBlock && attempt === geminiAttempts) {
+        // All Gemini attempts blocked by content policy — skip remaining, go straight to GPT
+        console.warn(`[loc] Gemini content block on all attempts — proceeding to GPT phase`)
+        break
+      }
       if (attempt < totalAttempts) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
       continue
     }
@@ -980,6 +987,8 @@ Respond ONLY with a raw JSON array, no markdown, no backticks:
 
 // --- Main runner ---
 
+const DEBUG_EMAIL = 'valerii.lemberov@applyft.co'
+
 export async function runLocalizationJob(
   folders: { id: string; name: string }[],
   targetLanguages: string[],
@@ -987,6 +996,7 @@ export async function runLocalizationJob(
   appCode: string,
   onUpdate: (snapshot: JobSnapshot) => void,
   getAccessToken?: () => Promise<string | undefined>,
+  userEmail?: string,
 ): Promise<void> {
 
   const state: FolderProgress[] = folders.map(f => ({
@@ -1328,11 +1338,13 @@ export async function runLocalizationJob(
               } catch (locErr: any) {
                 console.warn(`[loc] Localization failed for ${img.name}:`, locErr.message)
               }
-              // Upload debug artifacts in background (don't block main flow)
-              const userTokenForDebug = await getAccessToken?.()
-              if (userTokenForDebug && langFolderId) {
-                uploadDebugFiles(debugEntries, img.name, lang, langFolderId, userTokenForDebug)
-                  .catch(e => console.warn('[debug] uploadDebugFiles error:', e.message))
+              // Upload debug artifacts in background — only for Valera
+              if (userEmail === DEBUG_EMAIL) {
+                const userTokenForDebug = await getAccessToken?.()
+                if (userTokenForDebug && langFolderId) {
+                  uploadDebugFiles(debugEntries, img.name, lang, langFolderId, userTokenForDebug)
+                    .catch(e => console.warn('[debug] uploadDebugFiles error:', e.message))
+                }
               }
             } else {
               const copyReason = texts.size === 0 ? 'analysis returned 0 texts' : 'all texts are brand names'

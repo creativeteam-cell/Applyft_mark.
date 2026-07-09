@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
       }
 
       try {
-        await runLocalizationJob(folders, languages, cp, appCode, send, getAccessToken)
+        await runLocalizationJob(folders, languages, cp, appCode, send, getAccessToken, session.user.email ?? undefined)
       } catch (err: any) {
         send({ status: 'error', folders: [], error: err.message })
       } finally {

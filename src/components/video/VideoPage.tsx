@@ -380,6 +380,12 @@ function VideoCard({ item, onSelect, featured = false }: { item: VideoItem; onSe
   const thumbSrc = `/api/video/thumb/${item.id}`
   const videoSrc = `/api/video/file/${item.id}`
   const showVideo = featured || hovered
+
+  // Short prompt always shown on card (strip JSON brackets for multishot)
+  let shortPrompt = item.prompt || ''
+  try { const p = JSON.parse(shortPrompt); if (p.shots) shortPrompt = p.shots.map((s: any) => s.prompt).join(' · ') } catch {}
+  shortPrompt = shortPrompt.replace(/^\[.*?\]\s*/, '').slice(0, 90)
+
   return (
     <div onClick={onSelect}
       onMouseEnter={() => setHovered(true)}
@@ -391,9 +397,7 @@ function VideoCard({ item, onSelect, featured = false }: { item: VideoItem; onSe
       ) : !thumbErr ? (
         <img src={thumbSrc} alt={item.prompt} className="w-full h-full object-contain" onError={() => setThumbErr(true)} />
       ) : (
-        <div className="w-full h-full flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.03)' }}>
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" style={{ color: 'rgba(255,255,255,0.15)' }}><polygon points="5 3 19 12 5 21 5 3"/></svg>
-        </div>
+        <video src={videoSrc} preload="metadata" muted playsInline className="w-full h-full object-contain" />
       )}
       {!showVideo && (
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
@@ -407,12 +411,19 @@ function VideoCard({ item, onSelect, featured = false }: { item: VideoItem; onSe
           <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold" style={{ background: 'rgba(79,110,247,0.8)', color: '#fff' }}>Latest</span>
         </div>
       )}
-      <div className="absolute bottom-0 left-0 right-0 p-2 flex items-end justify-between" style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.7))' }}>
-        <div className="flex gap-1 flex-wrap">
-          <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-medium" style={{ background: 'rgba(79,110,247,0.8)', color: '#fff' }}>{item.duration}s</span>
-          <span className="text-[9px] px-1.5 py-0.5 rounded font-medium" style={{ background: 'rgba(0,0,0,0.6)', color: 'rgba(255,255,255,0.7)' }}>{item.model.replace('kling-','')}</span>
+      <div className="absolute bottom-0 left-0 right-0 px-2 pt-4 pb-2" style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.85))' }}>
+        {shortPrompt && !showVideo && (
+          <p className="text-[10px] leading-tight mb-1.5" style={{ color: 'rgba(255,255,255,0.75)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+            {shortPrompt}
+          </p>
+        )}
+        <div className="flex items-center justify-between">
+          <div className="flex gap-1 flex-wrap">
+            <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-medium" style={{ background: 'rgba(79,110,247,0.8)', color: '#fff' }}>{item.duration}s</span>
+            <span className="text-[9px] px-1.5 py-0.5 rounded font-medium" style={{ background: 'rgba(0,0,0,0.6)', color: 'rgba(255,255,255,0.7)' }}>{item.model.replace('kling-','')}</span>
+          </div>
+          {item.userName && <UserAvatar name={item.userName} email={item.userEmail} image={item.userImage} size={18} />}
         </div>
-        {item.userName && <UserAvatar name={item.userName} email={item.userEmail} image={item.userImage} size={20} />}
       </div>
     </div>
   )
@@ -733,7 +744,7 @@ export function VideoPage() {
   const canGenerate = useMemo(() => {
     if (status === 'pending' || status === 'processing') return false
     if (videoMode === 'standard') return prompt.trim().length > 0
-    if (videoMode === 'multishot') return shots.some(s => s.prompt.trim().length > 0) || shotDescription.trim().length > 0
+    if (videoMode === 'multishot') return (shots.some(s => s.prompt.trim().length > 0) || shotDescription.trim().length > 0) && totalShotsDuration <= 15
     if (videoMode === 'motionControl') return !!motionImage && !!motionVideoUrl
     if (videoMode === 'avatar') return !!avatarImage && !!avatarAudioBase64
     return false
@@ -835,7 +846,7 @@ export function VideoPage() {
   // ── Handlers ──
 
   function addShot() {
-    if (totalShotsDuration >= 15 || shots.length >= 6) return
+    if (shots.length >= 6) return
     const remaining = 15 - totalShotsDuration
     setShots(prev => [...prev, { id: Math.random().toString(36).slice(2), prompt: '', duration: Math.min(3, remaining) }])
   }
@@ -962,8 +973,18 @@ export function VideoPage() {
         }),
       })
       const data = await res.json()
-      if (Array.isArray(data.shots)) {
-        setShots(prev => prev.map((s, i) => data.shots[i] ? { ...s, prompt: data.shots[i] } : s))
+      if (Array.isArray(data.shots) && data.shots.length > 0) {
+        setShots(prev => {
+          const result = prev.map((s, i) => data.shots[i] ? { ...s, prompt: data.shots[i] } : s)
+          // Auto-add shots if GPT returned more than we currently have
+          for (let i = result.length; i < Math.min(data.shots.length, 6); i++) {
+            const used = result.reduce((sum: number, sh: any) => sum + sh.duration, 0)
+            const remaining = 15 - used
+            if (remaining <= 0) break
+            result.push({ id: Math.random().toString(36).slice(2), prompt: data.shots[i], duration: Math.min(3, remaining) })
+          }
+          return result
+        })
       }
     } catch {}
     setEnhancingShots(false)
@@ -1219,7 +1240,7 @@ export function VideoPage() {
               {/* General prompt for enhance */}
               <div className="mb-3">
                 <div className="flex items-center justify-between mb-1.5">
-                  <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Общий промт</div>
+                  <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Script prompt</div>
                   <button onClick={handleEnhanceShots} disabled={enhancingShots || (!shotDescription.trim() && !shots.some(s => s.prompt.trim()))}
                     className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition-all font-medium"
                     style={{ background: 'rgba(79,110,247,0.12)', color: 'var(--accent)', border: '1px solid var(--border)' }}>
@@ -1271,21 +1292,21 @@ export function VideoPage() {
                       placeholder={`Describe shot ${i + 1}...`} rows={2}
                       className="w-full rounded-lg px-2.5 py-2 text-xs resize-none outline-none mb-2"
                       style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', fontFamily: 'inherit' }} />
-                    <input type="range" min={1} max={Math.max(1, 15 - totalShotsDuration + shot.duration)} step={1}
+                    <input type="range" min={1} max={15} step={1}
                       value={shot.duration} onChange={e => updateShot(shot.id, 'duration', Number(e.target.value))}
-                      className="w-full" style={{ accentColor: 'var(--accent)' }} />
+                      className="w-full" style={{ accentColor: totalShotsDuration > 15 ? '#f87171' : 'var(--accent)' }} />
                   </div>
                 ))}
                 <button onClick={addShot}
-                  disabled={totalShotsDuration >= 15 || shots.length >= 6}
+                  disabled={shots.length >= 6}
                   className="w-full py-1.5 rounded-xl text-xs font-medium transition-all"
                   style={{
-                    background: (totalShotsDuration >= 15 || shots.length >= 6) ? 'rgba(255,255,255,0.03)' : 'rgba(79,110,247,0.08)',
-                    color: (totalShotsDuration >= 15 || shots.length >= 6) ? 'rgba(255,255,255,0.2)' : 'var(--accent)',
+                    background: shots.length >= 6 ? 'rgba(255,255,255,0.03)' : 'rgba(79,110,247,0.08)',
+                    color: shots.length >= 6 ? 'rgba(255,255,255,0.2)' : 'var(--accent)',
                     border: '1px dashed var(--border)',
-                    cursor: (totalShotsDuration >= 15 || shots.length >= 6) ? 'not-allowed' : 'pointer',
+                    cursor: shots.length >= 6 ? 'not-allowed' : 'pointer',
                   }}>
-                  + Add shot {shots.length >= 6 ? '(max 6)' : totalShotsDuration >= 15 ? '(max 15s)' : ''}
+                  + Add shot {shots.length >= 6 ? '(max 6)' : ''}
                 </button>
               </div>
 
