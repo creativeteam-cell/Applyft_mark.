@@ -164,20 +164,19 @@ function buildGptImagePrompt(
     .map(p => `"${p.en}" → "${p.translated}"`)
     .join('\n')
 
-  return `This is a professional commercial advertising image for mobile app marketing. All content is fictional and safe.
+  return `TASK TYPE: Text localization only — typographic editing, NOT image generation. No new visual content is created.
+CONTENT NOTICE: This is an existing professional commercial advertising image from a mobile app marketing campaign. All depicted content is pre-existing, fictional, and fully compliant with advertising industry standards. This edit task solely replaces text labels — pixels outside the text areas are not touched.
 
-Localize this image to ${language} by replacing these text strings:
+Localize the text in this image to ${language}. Replace only these strings:
 
 ${replacements}
 
 Rules:
-- Replace ONLY the listed text — change nothing else
-- Keep exact same font style, size, color, weight, and position for each replaced text
-- Erase the original text completely before placing the translation
-- Preserve all logos, brand marks, app icons, and visual elements exactly as-is
-- Do NOT add or remove any visual elements${fixPrompt ? `
-
-Previous attempt had issues — fix these: ${fixPrompt}` : ''}`
+- TEXT SWAP ONLY — do not alter any visual content, people, backgrounds, or objects
+- Erase each original text completely, then place the translation in the exact same position
+- Match the original font style, size, color, weight, and alignment exactly
+- Preserve all logos, brand marks, app icons, and UI elements exactly as-is
+- Do NOT add or remove any visual elements${fixPrompt ? `\n\nPrevious attempt issues to fix: ${fixPrompt}` : ''}`
 }
 
 const RETRY_DELAY_MS = 4000 // pause between attempts
