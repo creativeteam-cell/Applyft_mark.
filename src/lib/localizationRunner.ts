@@ -62,6 +62,13 @@ async function geminiRequest(parts: any[], mimeType: string, retryCount = 0, asp
       body: JSON.stringify({
         contents: [{ parts }],
         generationConfig,
+        // Reduce safety filter sensitivity for standard commercial advertising images
+        safetySettings: [
+          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
+          { category: 'HARM_CATEGORY_HATE_SPEECH',       threshold: 'BLOCK_ONLY_HIGH' },
+          { category: 'HARM_CATEGORY_HARASSMENT',        threshold: 'BLOCK_ONLY_HIGH' },
+          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
+        ],
       }),
     }
   )
@@ -182,6 +189,14 @@ Rules:
 const RETRY_DELAY_MS = 4000 // pause between attempts
 
 // Unified localization: Gemini N attempts → GPT M attempts (chain: each attempt fixes previous)
+export type DebugEntry = {
+  attempt: number
+  phase: 'gemini' | 'gpt'
+  status: 'ok' | 'fail' | 'safety'
+  buffer: Buffer | null
+  qaFix?: string
+}
+
 async function localizeImage(
   imgBuffer: Buffer,
   mimeType: string,
@@ -192,6 +207,7 @@ async function localizeImage(
   geminiAttempts = 5,
   gptAttempts = 0,
   sizeLabel?: string,
+  onDebug?: (entry: DebugEntry) => void,
 ): Promise<Buffer> {
   let lastResult: Buffer | null = null   // most recent output (chain input for next attempt)
   let bestResult: Buffer | null = null   // last produced result (best-effort fallback)
@@ -233,6 +249,7 @@ async function localizeImage(
     const remaining = totalAttempts - attempt
     console.log(`[loc] Gemini attempt ${attempt} QA: ${qa.status}${qa.fix_prompt ? ' — ' + qa.fix_prompt : ''}`)
     onAttempt?.(attempt, qa.status === 'ok' ? 'ok' : remaining > 0 ? 'retry' : 'fail', qa.status !== 'ok' ? qa.fix_prompt : undefined)
+    onDebug?.({ attempt, phase: 'gemini', status: qa.status === 'ok' ? 'ok' : 'fail', buffer: result, qaFix: qa.fix_prompt || undefined })
 
     if (qa.status === 'ok') return result
 
@@ -275,8 +292,16 @@ async function localizeImage(
             result = Buffer.from(await imgRes.arrayBuffer())
           }
         } catch (err: any) {
+          const isSafetyBlock = err.message?.includes('safety') || err.message?.includes('policy') || err.status === 400 || err.code === 400
           failReasons.push(`#${globalAttempt}(gpt) ${err.message}`)
           console.warn(`[loc] GPT attempt ${globalAttempt} error: ${err.message}`)
+          if (isSafetyBlock) {
+            // GPT safety block — image content not accepted by GPT policy.
+            // Return best Gemini result immediately instead of retrying.
+            onAttempt?.(globalAttempt, 'fail', `GPT safety block — using best Gemini result`)
+            onDebug?.({ attempt: globalAttempt, phase: 'gpt', status: 'safety', buffer: null, qaFix: err.message })
+            break
+          }
           onAttempt?.(globalAttempt, 'fail', `GPT: ${err.message}`)
           if (attempt < gptAttempts) await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
           continue
@@ -297,6 +322,7 @@ async function localizeImage(
         const remaining = gptAttempts - attempt
         console.log(`[loc] GPT attempt ${globalAttempt} QA: ${qa.status}${qa.fix_prompt ? ' — ' + qa.fix_prompt : ''}`)
         onAttempt?.(globalAttempt, qa.status === 'ok' ? 'ok' : remaining > 0 ? 'retry' : 'fail', qa.status !== 'ok' ? `GPT QA: ${qa.fix_prompt}` : undefined)
+        onDebug?.({ attempt: globalAttempt, phase: 'gpt', status: qa.status === 'ok' ? 'ok' : 'fail', buffer: result, qaFix: qa.fix_prompt || undefined })
 
         if (qa.status === 'ok') return result
 
@@ -405,6 +431,82 @@ async function createDriveFolder(name: string, parentId: string): Promise<string
     fields: 'id',
   } as any)) as any
   return res.data.id!
+}
+
+// ── Debug helpers ──
+
+async function findOrCreateDebugFolder(parentId: string, userToken: string): Promise<string> {
+  // Search for existing _debug folder
+  const searchRes = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`name='_debug' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`)}&fields=files(id)&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+    { headers: { Authorization: `Bearer ${userToken}` } }
+  )
+  if (searchRes.ok) {
+    const data = await searchRes.json()
+    if (data.files?.[0]?.id) return data.files[0].id
+  }
+  // Create _debug folder
+  const createRes = await fetch(
+    'https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&fields=id',
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${userToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '_debug', mimeType: 'application/vnd.google-apps.folder', parents: [parentId] }),
+    }
+  )
+  if (!createRes.ok) throw new Error(`Failed to create _debug folder: ${await createRes.text()}`)
+  const created = await createRes.json()
+  return created.id
+}
+
+async function uploadDebugFiles(
+  entries: DebugEntry[],
+  imgBaseName: string,
+  lang: string,
+  langFolderId: string,
+  userToken: string,
+): Promise<void> {
+  if (entries.length === 0) return
+  // Only save debug files if there was at least one non-ok attempt
+  const hasIssues = entries.some(e => e.status !== 'ok')
+  if (!hasIssues) return
+
+  let debugFolderId: string
+  try {
+    debugFolderId = await findOrCreateDebugFolder(langFolderId, userToken)
+  } catch (err: any) {
+    console.warn('[debug] Could not create _debug folder:', err.message)
+    return
+  }
+
+  const base = imgBaseName.replace(/\.[^.]+$/, '') // strip extension
+
+  // Upload each attempt image
+  for (const entry of entries) {
+    if (!entry.buffer) continue
+    const statusStr = entry.status === 'ok' ? 'ok' : entry.status === 'safety' ? 'safety' : 'fail'
+    const fileName = `${base}_${lang}_a${entry.attempt}_${entry.phase}_${statusStr}.jpg`
+    try {
+      await uploadToDrive(entry.buffer, 'image/jpeg', fileName, debugFolderId, userToken)
+    } catch (err: any) {
+      console.warn(`[debug] Failed to upload ${fileName}:`, err.message)
+    }
+  }
+
+  // Upload QA JSON summary
+  const qaLog = entries.map(e => ({
+    attempt: e.attempt,
+    phase: e.phase,
+    status: e.status,
+    hasImage: !!e.buffer,
+    qaFix: e.qaFix || null,
+  }))
+  const jsonBuf = Buffer.from(JSON.stringify(qaLog, null, 2), 'utf-8')
+  try {
+    await uploadToDrive(jsonBuf, 'application/json', `${base}_${lang}_QA.json`, debugFolderId, userToken)
+  } catch (err: any) {
+    console.warn('[debug] Failed to upload QA JSON:', err.message)
+  }
 }
 
 async function uploadToDrive(buffer: Buffer, mimeType: string, name: string, parentId: string, userToken?: string, retryCount = 0): Promise<void> {
@@ -976,6 +1078,8 @@ export async function runLocalizationJob(
 
       // Compute missing sizes per lang (match by size label, not filename)
       const allSourceSizes = allImages.map(img => getSizeLabelFromName(img.name)).filter(Boolean) as string[]
+      // Images whose size label can't be detected — always treat as missing (conservative)
+      const hasUnknownSizeImages = allImages.some(img => getSizeLabelFromName(img.name) === null)
       const langMissingSizes: Record<string, string[]> = {}
       let anyMissing = false
 
@@ -985,7 +1089,7 @@ export async function runLocalizationJob(
         )
         const missing = allSourceSizes.filter(s => !existingSizes.has(s))
         langMissingSizes[lang] = missing
-        if (missing.length > 0) anyMissing = true
+        if (missing.length > 0 || hasUnknownSizeImages) anyMissing = true
       }
 
       if (!anyMissing) {
@@ -1204,6 +1308,7 @@ export async function runLocalizationJob(
               const imgAspectRatio = getAspectRatioFromName(img.name)
               patch(folder.id, { uploadInfo: `${lang}: ${img.name} — starting (0/${totalAttempts})...` })
               emit()
+              const debugEntries: DebugEntry[] = []
               try {
                 finalBuffer = await localizeImage(buffer, mime, lang, langPhrases,
                   (attempt, status, msg) => {
@@ -1211,9 +1316,16 @@ export async function runLocalizationJob(
                     const detail = (status === 'fail' && msg) ? `: ${msg.slice(0, 80)}` : ''
                     patch(folder.id, { uploadInfo: `${lang}: ${img.name} — attempt ${attempt}/${totalAttempts} ${icon}${detail}` })
                     emit()
-                  }, imgAspectRatio, geminiAttempts, gptAttempts, sizeLabel ?? undefined)
+                  }, imgAspectRatio, geminiAttempts, gptAttempts, sizeLabel ?? undefined,
+                  (entry) => { debugEntries.push(entry) })
               } catch (locErr: any) {
                 console.warn(`[loc] Localization failed for ${img.name}:`, locErr.message)
+              }
+              // Upload debug artifacts in background (don't block main flow)
+              const userTokenForDebug = await getAccessToken?.()
+              if (userTokenForDebug && langFolderId) {
+                uploadDebugFiles(debugEntries, img.name, lang, langFolderId, userTokenForDebug)
+                  .catch(e => console.warn('[debug] uploadDebugFiles error:', e.message))
               }
             } else {
               const copyReason = texts.size === 0 ? 'analysis returned 0 texts' : 'all texts are brand names'
@@ -1254,6 +1366,7 @@ export async function runLocalizationJob(
         }
 
         const allExisted = skippedExistsThisLang === imageDataList.length
+
         const anyProgress = uploadedThisLang > 0 || allExisted || failedNoTranslation > 0
         if (anyProgress) {
           completedLangs.push(lang)
