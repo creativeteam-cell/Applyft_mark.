@@ -159,6 +159,8 @@ ${isRTL ? `
 - Do NOT mirror the English layout — the anchor point is the RIGHT side, not the left
 - Numbers and punctuation follow RTL conventions
 - Every single text element must use RTL direction — no exceptions
+- TEXT BLOCK ALIGNMENT — MANDATORY: alignment of every text block must be flipped to match RTL reading. A block that is LEFT-aligned in the original must become RIGHT-aligned (straight right edge, ragged left edge). A centered block stays centered. A multi-line paragraph must have all its lines anchored to the RIGHT edge of the block
+- This RTL alignment rule OVERRIDES the position lock for text: the text block occupies the same area of the image, but inside that area the lines are anchored to the right, not the left
 - LAYOUT FLIP: if a line in the original has [icon LEFT] + [text RIGHT], in the RTL version it must become [text LEFT] + [icon RIGHT] — icons/emojis act as line markers and must move to the opposite side of the text` : ''}
 
 TARGET LANGUAGE: ${language}
@@ -922,7 +924,7 @@ Check IMAGE 2 against IMAGE 1 and verify ALL of the following:
 4. ${caseless ? `Font weight must match the original — if original text is regular weight, translated text must NOT be bold; flag any weight mismatch as an error. The target language (${language}) has NO letter case — NEVER flag capitalization issues, they do not apply` : 'Text style matches the original: ALL CAPS, Title Case, sentence case, AND font weight must match exactly — if original text is regular weight, translated text must NOT be bold; flag any weight mismatch as an error'}
 5. No phrases are skipped — every single item in the list must appear translated in IMAGE 2
 6. Text COLORS match the original by meaning: if the original highlights specific words in distinct colors (multi-color headline), the translated words with the same meaning must carry those same colors. Flag as error if colors are shuffled, swapped, or assigned to different words than in the original
-${['AR', 'HE', 'FA', 'UR'].includes(language.toUpperCase()) ? `7. RTL direction — ALL text must flow right-to-left. Flag any text that appears left-anchored or left-to-right as a critical error
+${['AR', 'HE', 'FA', 'UR'].includes(language.toUpperCase()) ? `7. RTL direction — ALL text must flow right-to-left. Flag any text that appears left-anchored or left-to-right as a critical error. Multi-line text blocks must be RIGHT-aligned (lines anchored to a straight right edge, ragged left). A block that was left-aligned in IMAGE 1 must be right-aligned in IMAGE 2 — flag left-aligned RTL text as an error (centered blocks stay centered)
 8. Icon/emoji flip — if original has [icon LEFT + text RIGHT], the localized version must have [text LEFT + icon RIGHT]. Icons must move to the opposite side of the text for RTL` : ''}
 
 Important:
