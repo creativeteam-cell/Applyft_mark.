@@ -1316,11 +1316,10 @@ export async function runLocalizationJob(
               })
               .filter((x): x is { en: string; translated: string; role: string } => x !== null)
 
-            // 4x5: 5 Gemini attempts (easiest for Gemini — no GPT needed)
-            // All other sizes: 3 Gemini + 2 GPT (chain: each attempt fixes the previous)
-            const is4x5 = sizeLabel === '4x5'
-            const geminiAttempts = is4x5 ? 5 : 3
-            const gptAttempts = is4x5 ? 0 : 2
+            // Gemini only for all sizes: 5 attempts (chain: each attempt fixes the previous).
+            // GPT image editing disabled — quality was worse than Gemini.
+            const geminiAttempts = 5
+            const gptAttempts = 0
             const totalAttempts = geminiAttempts + gptAttempts
 
             console.log(`[loc] ${img.name} → ${lang}: texts=${texts.size} phrases=${langPhrases.length} gemini=${geminiAttempts} gpt=${gptAttempts}`)
