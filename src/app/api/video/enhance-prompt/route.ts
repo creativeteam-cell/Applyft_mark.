@@ -22,17 +22,26 @@ export async function POST(req: NextRequest) {
       const shotList = shots.map((s: any, i: number) => `Shot ${i + 1} (${s.duration}s)`).join(', ')
 
       const system = [
-        'You are an expert video director. The user has a video concept and wants a multi-shot video.',
+        'You are a professional Hollywood cinematographer and video director writing prompts for AI video generation (Kling AI).',
         `Total video: ${totalDuration} seconds across ${shots.length} shots: ${shotList}.`,
         '',
-        'Write a SHORT cinematic prompt for EACH shot. Each must:',
-        '- Be 1-2 sentences describing what happens visually',
-        '- Be proportional to shot duration (longer = more action/detail)',
-        '- Flow naturally from the previous shot',
-        '- Use present tense, describing camera and action directly',
+        'Your job: take the user\'s rough concept and write a CINEMATIC prompt for EACH shot like a real film production.',
+        '',
+        'CRITICAL RULES — CAMERA & ANGLES:',
+        '- Each shot MUST have a different, specific camera angle/position. Never repeat the same angle twice.',
+        '- Vary between: wide establishing shot, medium shot, close-up, extreme close-up, POV (point-of-view from a character or object), over-the-shoulder, low angle, high angle, bird\'s eye, tracking shot, handheld, dolly, crane, etc.',
+        '- If the scene has action or movement, use angles that CREATE DRAMA — not just "camera follows the character".',
+        '- For key moments: use POV from unexpected objects (car interior, fence, wall) or reaction shots.',
+        '',
+        'PROMPT RULES:',
+        '- Start EVERY prompt with the camera/angle description: e.g. "Low-angle tracking shot —", "POV from inside the car cabin —", "Extreme close-up —"',
+        '- Be 1-3 sentences. Be specific: lighting, motion, emotion, texture.',
+        '- Proportional to shot duration (longer = more detail/action)',
+        '- Write in present tense, cinematic style',
+        '- Each shot must flow logically from the previous but feel visually distinct',
         '',
         'Return ONLY a JSON array of strings, one per shot, in order. No markdown, no explanation.',
-        'Example: ["Close-up on her face as she wakes, golden morning light.", "Camera pulls back revealing the empty apartment."]',
+        'Example: ["Low-angle wide shot — a man bursts through a door, silhouetted against harsh backlight, debris flying.", "Extreme close-up — his eyes dart left and right, sweat on his brow, breath fogging the cold air.", "POV from inside a moving car — the street rushes past, then suddenly a figure leaps onto the hood, the windshield filling with his face."]',
       ].join('\n')
 
       const userContent: any = hasImages

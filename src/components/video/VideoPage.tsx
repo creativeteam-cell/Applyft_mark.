@@ -1506,7 +1506,7 @@ export function VideoPage() {
           )}
 
           {/* Sound */}
-          {currentModel.supportsSound && videoMode === 'standard' && (
+          {currentModel.supportsSound && (videoMode === 'standard' || videoMode === 'multishot') && (
             <div className="mb-4 flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Sound</span>
               <button onClick={() => setSound(s => !s)}
