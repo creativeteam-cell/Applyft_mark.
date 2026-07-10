@@ -144,25 +144,44 @@ export async function extendVideo(params: {
 
 export type KlingModelAll = KlingModel | 'kling-v3-turbo' | 'kling-v3-omni' | 'kling-video-o1'
 
-// Turbo / Omni / O1 — uses "contents" array format
+// Internal model IDs → API URL slugs for the new-style endpoints
+// (docs: POST /text-to-video/kling-3.0-turbo, POST /image-to-video/kling-3.0-turbo)
+const NEW_API_MODEL_SLUGS: Record<string, string> = {
+  'kling-v3-turbo': 'kling-3.0-turbo',
+}
+
+// Kling 3.0 Turbo — new-style endpoints.
+// text-to-video: plain { prompt, settings }; image-to-video: { contents, settings }
 export async function createTurboVideoTask(params: {
   model_name: string
   prompt?: string
   first_frame?: string    // base64 or URL
   duration?: number
   resolution?: '720p' | '1080p'
+  aspect_ratio?: string   // text-to-video only; 16:9 | 9:16 | 1:1
 }): Promise<{ task_id: string }> {
-  const contents: any[] = []
-  if (params.prompt) contents.push({ type: 'prompt', text: params.prompt })
-  if (params.first_frame) contents.push({ type: 'first_frame', url: params.first_frame.startsWith('http') ? params.first_frame : `data:image/jpeg;base64,${params.first_frame}` })
-  if (!contents.length) throw new Error('Prompt or first_frame required')
-  const res = await fetch(`${KLING_BASE_URL}/image-to-video/${params.model_name}`, {
-    method: 'POST', headers: headers(),
-    body: JSON.stringify({
-      contents,
-      settings: { resolution: params.resolution ?? '1080p', duration: params.duration ?? 5 },
-    }),
-  })
+  const slug = NEW_API_MODEL_SLUGS[params.model_name] ?? params.model_name
+  const settings: any = { resolution: params.resolution ?? '1080p', duration: params.duration ?? 5 }
+  let res: Response
+
+  if (params.first_frame) {
+    const contents: any[] = []
+    if (params.prompt) contents.push({ type: 'prompt', text: params.prompt })
+    contents.push({ type: 'first_frame', url: params.first_frame.startsWith('http') ? params.first_frame : `data:image/jpeg;base64,${params.first_frame}` })
+    res = await fetch(`${KLING_BASE_URL}/image-to-video/${slug}`, {
+      method: 'POST', headers: headers(),
+      body: JSON.stringify({ contents, settings }),
+    })
+  } else {
+    if (!params.prompt) throw new Error('Prompt or first_frame required')
+    const allowedAR = new Set(['16:9', '9:16', '1:1'])
+    settings.aspect_ratio = allowedAR.has(params.aspect_ratio ?? '') ? params.aspect_ratio : '16:9'
+    res = await fetch(`${KLING_BASE_URL}/text-to-video/${slug}`, {
+      method: 'POST', headers: headers(),
+      body: JSON.stringify({ prompt: params.prompt, settings }),
+    })
+  }
+
   const data = await res.json()
   if (data.code !== 0) throw new Error(`Kling error: ${data.message}`)
   return { task_id: data.data.id }
