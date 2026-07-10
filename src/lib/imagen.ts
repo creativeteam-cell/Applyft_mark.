@@ -366,27 +366,22 @@ export async function recomposeImage(imageBase64: string, targetSize: string, fi
 
 SCENE EXTENSION TASK: Redraw this image for a ${directions[targetSize] || targetSize} aspect ratio.${extensionHints[targetSize] || ''}
 
-STEP 1 — READ THE BACKGROUND FIRST:
-Before doing anything, identify what type of background the original image has:
-- TYPE A: Solid color, dark/light flat background, gradient, or abstract graphic design (common in ad creatives, app screenshots, UI mockups)
-- TYPE B: Real-world photographic scene (room interior, street, nature, sky, people in environment)
+BACKGROUND EXTENSION RULES:
 
-STEP 2 — EXTEND BASED ON TYPE:
-- If TYPE A: Fill the new canvas area with EXACTLY the same solid color, gradient, or abstract pattern. Do NOT add any objects, props, furniture, or scene elements whatsoever. A dark background stays dark. A gradient stays that gradient.
-- If TYPE B: Extend naturally with more of the same photographic environment — as if the photographer used a wider lens from the start.
+SEAMLESSNESS IS THE #1 PRIORITY — the result must look like a single cohesive image, as if it was always this size. There must be zero visible seam, border, fade line, or transition between the original and the extended area.
 
-CRITICAL — DO NOT THEMATIZE:
-- NEVER add props, objects, or decorative elements inspired by the ad's theme or subject matter
-- Example: ad shows hands → do NOT add books, candles, crystals, tarot cards, or mystical objects
-- Example: ad shows a car → do NOT add a road, garage, or city background if the original has a plain background
-- Your ONLY job is to extend the existing background — not to decorate, theme, or interpret it
+HOW TO EXTEND:
+- Match the color grade, tone, mood, texture, and visual style of the original background exactly
+- If the background has a pattern, texture, or decorative elements — continue that same style naturally into the new area
+- If the background is a plain solid color or gradient — extend that same color/gradient smoothly
+- If the background is a real photographic scene — extend it naturally as if shot with a wider lens
+- The extended area must feel like it was always part of the original composition
 
-SEAMLESS EXTENSION:
-- NO visible seam, border, or transition line between original and extended area
-- Lighting, color grading, grain, and tone in the extended area must EXACTLY match the original
+DO NOT:
+- Leave any visible edge, halo, blur smear, or color shift at the boundary between original and extended area
+- Change the overall color tone or brightness of the whole image
 - PRESERVE ALL existing text overlays, logos, icons, UI elements, and graphical layers — reproduce them exactly (same content, same position, same style)
-- Do NOT add NEW text, logos, or UI elements that were not in the original
-- Match the original colour grade, lighting direction, atmosphere, and style perfectly${hint}${fix}`
+- Do NOT add NEW text, logos, or UI elements that were not in the original${hint}${fix}`
 
   return withRetry(prompt, cleanB64, undefined, 3, targetSize, undefined, model)
 }

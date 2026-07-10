@@ -192,7 +192,9 @@ Strict rules:
 - Erase original text completely before placing translation
 - Match font style, size, color, weight, and position exactly
 - Preserve all logos, icons, UI elements, and visual content unchanged
-- Do NOT generate or add any new visual content${fixPrompt ? `\n\nIssues from previous attempt to fix: ${fixPrompt}` : ''}`
+- Do NOT generate or add any new visual content
+- FROZEN PIXELS: Every pixel that is NOT part of the listed text strings is completely frozen and must be reproduced exactly. You are a text substitution tool — like Photoshop text layer edit. ONLY text glyphs change, NOTHING ELSE.
+- ILLUSTRATED ELEMENTS LOCK: Any illustrated graphic, cartoon, clipart, drawing, or stylized artwork (hands, faces, characters, icons) must remain 100% pixel-identical. Do NOT change skin tone, style, shading, colors, or remove/add any part. If the original has 5 fingers — output must have exactly 5 fingers. Altering illustrated graphics is a critical failure.${fixPrompt ? `\n\nIssues from previous attempt to fix: ${fixPrompt}` : ''}`
 }
 
 const RETRY_DELAY_MS = 4000 // pause between attempts
