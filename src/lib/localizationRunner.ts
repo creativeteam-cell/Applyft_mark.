@@ -95,14 +95,23 @@ async function geminiRequest(parts: any[], mimeType: string, retryCount = 0, asp
   return Buffer.from(data, 'base64')
 }
 
+// Languages whose scripts have no letter case (CJK, Arabic, Hebrew, Hindi, etc.)
+// — ALL CAPS rules are meaningless for them and must be skipped.
+const CASELESS_LANGS = new Set(['CN', 'TW', 'JP', 'KR', 'AR', 'HE', 'HI', 'FA', 'UR'])
+
+function isCaselessLanguage(language: string): boolean {
+  return CASELESS_LANGS.has(language.toUpperCase())
+}
+
 function buildGeminiPrompt(
   language: string,
   phrases: { en: string; translated: string; role?: string }[],
   fixPrompt?: string,
 ): string {
+  const caseless = isCaselessLanguage(language)
   const translationsText = phrases
     .map(p => {
-      const isAllCaps = p.en === p.en.toUpperCase() && /[A-Z]/.test(p.en)
+      const isAllCaps = !caseless && p.en === p.en.toUpperCase() && /[A-Z]/.test(p.en)
       const capsNote = isAllCaps ? ' [ALL CAPS REQUIRED]' : ''
       return `"${p.en}"${p.role ? ` [${p.role}]` : ''}${capsNote} → "${p.translated}"`
     })
@@ -123,6 +132,7 @@ Your ONLY task: replace every listed English text with its translation. Do NOT c
 RULES:
 - Completely erase each original text before placing the translation (no ghost letters, no remnants)
 - Keep the same font size, color, weight, and alignment style
+- MULTI-COLOR TEXT MAPPING — CRITICAL: if a text block uses several colors (e.g. some words white, some yellow, some pink), map colors by MEANING: the translated equivalent of each colored word/phrase must get exactly the color of that word/phrase in the original. Example: original "THE 60-SECOND SETUP (yellow) THAT LETS YOU SEE (white) EVERY HIDDEN APP (pink)" → in translation, the words meaning "60-second setup" must be yellow, the words meaning "that lets you see" white, the words meaning "every hidden app" pink. NEVER shuffle, swap, redistribute, or randomly assign colors. The set of colors and their reading order must match the original exactly
 - Do NOT add people, objects, or decorations not already in the image
 - Do NOT modify background or colors
 - ILLUSTRATED & GRAPHIC ELEMENTS — ABSOLUTE LOCK: Any illustrated element, cartoon graphic, clipart, icon, drawing, or stylized artwork must remain COMPLETELY unchanged. Do NOT alter skin tone, shading, color, line style, or artistic style of ANY illustrated element. If the image contains illustrated hands, faces, characters, or any drawn artwork — they must appear EXACTLY identical in the output. Changing illustrated graphics is a critical failure.
@@ -138,7 +148,7 @@ It is STRICTLY FORBIDDEN to have both the original English text AND the translat
 Each English phrase must be COMPLETELY removed and replaced — not supplemented, not kept alongside, not left as a second line.
 If you place the translation, the English MUST be gone. Period. No exceptions.
 After you compose the output, scan every visible text element — if you see ANY English word from the translation list still present, erase it before finalizing.
-- Match text style exactly: ALL CAPS original → ALL CAPS translation; Title Case → Title Case; sentence case → sentence case
+${caseless ? '- NOTE: the target language has NO letter case — ignore any capitalization matching, just render the translation as provided' : '- Match text style exactly: ALL CAPS original → ALL CAPS translation; Title Case → Title Case; sentence case → sentence case'}
 - FONT WEIGHT: copy the exact weight from the original — if original is regular/normal weight, translation MUST be regular/normal (NOT bold, NOT semi-bold); if original is bold, translation must be bold; never decide font weight yourself
 - POSITION LOCK — ABSOLUTE: Every UI element (app icons, logos, avatars, chat bubbles, input fields, buttons, badges, overlays) must stay at EXACTLY the same position, size, and scale as in the original image. Do NOT move, resize, shift, or reposition any element. If the app icon is in the bottom-center, it must stay bottom-center. If the chat bubble is left-aligned, it must stay left-aligned. Only replace text glyphs in-place — never reflow the layout.
 - LOGO & BRAND MARK LOCK — ABSOLUTE: Any app icon, logo, brand mark, or icon badge visible in the image must remain 100% visually unchanged. Do NOT redraw, simplify, recolor, resize, or alter any logo or brand mark in ANY way. Logos are sacred — treat them as locked pixel regions.
@@ -880,8 +890,9 @@ async function reviewLocalizedImage(
   await updateQueue('openai', 1)
   try {
   if (phrases.length === 0) return { status: 'ok', fix_prompt: '' }
+  const caseless = isCaselessLanguage(language)
   const expectedText = phrases.map(p => {
-    const isAllCaps = p.en === p.en.toUpperCase() && /[A-Z]/.test(p.en)
+    const isAllCaps = !caseless && p.en === p.en.toUpperCase() && /[A-Z]/.test(p.en)
     return `"${p.en}" → "${p.translated}"${isAllCaps ? ' [MUST BE ALL CAPS]' : ''}`
   }).join('\n')
   const response = await openai.chat.completions.create({
@@ -908,10 +919,11 @@ Check IMAGE 2 against IMAGE 1 and verify ALL of the following:
 1. Every listed phrase is fully replaced — no original English letters remain in those areas
 2. Every translation is visible, readable, and correctly placed
 3. No mixed languages or invented text
-4. Text style matches the original: ALL CAPS, Title Case, sentence case, AND font weight must match exactly — if original text is regular weight, translated text must NOT be bold; flag any weight mismatch as an error
+4. ${caseless ? `Font weight must match the original — if original text is regular weight, translated text must NOT be bold; flag any weight mismatch as an error. The target language (${language}) has NO letter case — NEVER flag capitalization issues, they do not apply` : 'Text style matches the original: ALL CAPS, Title Case, sentence case, AND font weight must match exactly — if original text is regular weight, translated text must NOT be bold; flag any weight mismatch as an error'}
 5. No phrases are skipped — every single item in the list must appear translated in IMAGE 2
-${['AR', 'HE', 'FA', 'UR'].includes(language.toUpperCase()) ? `6. RTL direction — ALL text must flow right-to-left. Flag any text that appears left-anchored or left-to-right as a critical error
-7. Icon/emoji flip — if original has [icon LEFT + text RIGHT], the localized version must have [text LEFT + icon RIGHT]. Icons must move to the opposite side of the text for RTL` : ''}
+6. Text COLORS match the original by meaning: if the original highlights specific words in distinct colors (multi-color headline), the translated words with the same meaning must carry those same colors. Flag as error if colors are shuffled, swapped, or assigned to different words than in the original
+${['AR', 'HE', 'FA', 'UR'].includes(language.toUpperCase()) ? `7. RTL direction — ALL text must flow right-to-left. Flag any text that appears left-anchored or left-to-right as a critical error
+8. Icon/emoji flip — if original has [icon LEFT + text RIGHT], the localized version must have [text LEFT + icon RIGHT]. Icons must move to the opposite side of the text for RTL` : ''}
 
 Important:
 - Brand names, logos, and proper nouns may remain unchanged — do not flag these
