@@ -18,7 +18,6 @@ const NAV = [
   { label: 'Dashboard', href: '/dashboard' },
   { label: 'Localization', href: '/localization' },
   { label: 'Generator', href: '/generator' },
-  { label: 'Video', href: '/video' },
   { label: 'Settings', href: '/settings' },
 ]
 
