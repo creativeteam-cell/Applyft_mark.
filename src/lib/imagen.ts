@@ -337,7 +337,7 @@ const RECOMPOSE_ASPECT: Record<string, [number, number]> = {
   '4x5':    [4, 5],
 }
 
-export async function recomposeImage(imageBase64: string, targetSize: string, fixNote?: string, model = DEFAULT_GEMINI_MODEL): Promise<string> {
+export async function recomposeImage(imageBase64: string, targetSize: string, fixNote?: string, model = DEFAULT_GEMINI_MODEL, teamRulesBlock?: string): Promise<string> {
   const aspect = RECOMPOSE_ASPECT[targetSize]
   if (!aspect) throw new Error(`Unknown target size: ${targetSize}`)
 
@@ -373,7 +373,11 @@ RULES:
   }
 
   const extensionHints: Record<string, string> = {
-    '9x16':   ' Extend primarily downward (and slightly upward) to fill the taller canvas.',
+    // 9x16: два горизонтальных стыка (верх и низ оригинала) — самое частое место швов
+    '9x16':   ' Extend primarily downward (and slightly upward) to fill the taller canvas.' +
+      ' SEAM WARNING — 9:16 SPECIFIC: there will be TWO horizontal boundary lines where the original image\'s top and bottom edges were. These are the most common failure points.' +
+      ' Every light beam, gradient, texture, and color MUST flow continuously ACROSS these boundary lines — same angle, same brightness, same saturation on both sides.' +
+      ' Any horizontal band, brightness step, color shift, or beam that stops/starts at these lines is a critical failure. The viewer must not be able to guess where the original image ended.',
     '1.91x1': ' Extend primarily to the left and right to fill the wider canvas.',
     '1x1':    ' Extend equally on all sides to fill the square canvas.',
     '4x5':    '',
@@ -405,7 +409,7 @@ DO NOT:
 - Leave any visible edge, halo, blur smear, or color shift at the boundary between original and extended area
 - Change the overall color tone or brightness of the whole image
 - PRESERVE ALL existing text overlays, logos, icons, UI elements, and graphical layers — reproduce them exactly (same content, same position, same style)
-- Do NOT add NEW text, logos, or UI elements that were not in the original${hint}${fix}`
+- Do NOT add NEW text, logos, or UI elements that were not in the original${hint}${fix}${teamRulesBlock || ''}`
 
   return withRetry(prompt, cleanB64, undefined, 3, targetSize, undefined, model)
 }

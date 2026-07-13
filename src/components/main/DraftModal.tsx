@@ -24,7 +24,27 @@ export function DraftModal({ apps, currentAppCode, onSelect, onClose }: DraftMod
   const [selected, setSelected] = useState<DraftFile | null>(null)
   const [fetchingImage, setFetchingImage] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  async function handleDelete(e: React.MouseEvent, file: DraftFile) {
+    e.stopPropagation() // не выделять карточку при клике по корзине
+    if (!confirm(`Delete draft "${file.name}"?`)) return
+    setDeletingId(file.id)
+    try {
+      const res = await fetch('/api/draft/delete', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId: file.id }),
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setFiles(prev => prev.filter(f => f.id !== file.id))
+      if (selected?.id === file.id) setSelected(null)
+    } catch (err: any) {
+      setFetchError(err.message)
+    }
+    setDeletingId(null)
+  }
 
   useEffect(() => {
     fetch('/api/draft/list')
@@ -193,6 +213,19 @@ export function DraftModal({ apps, currentAppCode, onSelect, onClose }: DraftMod
                       style={{ background: 'rgba(0,0,0,0.7)', color: '#fff' }}>
                       {file.appCode}
                     </div>
+                    {/* Delete draft */}
+                    <span
+                      role="button"
+                      onClick={e => handleDelete(e, file)}
+                      title="Delete draft"
+                      className="absolute top-2 right-2 w-7 h-7 rounded-lg flex items-center justify-center transition-all opacity-70 hover:opacity-100 hover:scale-105"
+                      style={{ background: 'rgba(0,0,0,0.7)', color: '#f87171' }}>
+                      {deletingId === file.id ? (
+                        <span className="animate-spin text-xs">⟳</span>
+                      ) : (
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                      )}
+                    </span>
                     {isSelected && (
                       <div className="absolute inset-0 flex items-center justify-center"
                         style={{ background: 'rgba(99,102,241,0.2)' }}>

@@ -6,6 +6,7 @@ import { AppCard } from './AppCard'
 import { AddAppModal } from './AddAppModal'
 import { MarketersSection } from './MarketersSection'
 import { LanguagesSection } from './LanguagesSection'
+import { LearnedRulesSection } from './LearnedRulesSection'
 
 interface App {
   code: string; name: string; description: string
@@ -430,6 +431,7 @@ export function SettingsPage() {
   const [appsOpen, setAppsOpen] = useState(false)
   const [producersOpen, setProducersOpen] = useState(false)
   const [languagesOpen, setLanguagesOpen] = useState(false)
+  const [rulesOpen, setRulesOpen] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
 
   // Check admin status server-side
@@ -512,6 +514,11 @@ export function SettingsPage() {
       <div className="mb-6">
         <SectionHeader title="Languages" count={languages.length} expanded={languagesOpen} onToggle={() => setLanguagesOpen(!languagesOpen)} />
         {languagesOpen && <LanguagesSection languages={languages} onChange={handleSaveLanguages} />}
+      </div>
+
+      <div className="mb-6">
+        <SectionHeader title="Learned Rules" expanded={rulesOpen} onToggle={() => setRulesOpen(!rulesOpen)} badge="AI" />
+        {rulesOpen && <LearnedRulesSection />}
       </div>
 
       {adminChecked && isAdmin && (

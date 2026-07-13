@@ -6,12 +6,15 @@ import { generatePrompt } from '@/lib/openai'
 import { generateImage, recomposeImage, DEFAULT_GEMINI_MODEL } from '@/lib/imagen'
 import { getConfig } from '@/lib/appsStore'
 import { updateQueue } from '@/lib/queue'
+import { getRulesCached, selectRulesForPrompt, buildRulesPromptBlock } from '@/lib/rulesStore'
+import { learnFromFix } from '@/lib/ruleLearner'
 
 export const maxDuration = 210
 
-// QA-проверка зон для 9x16 после рекомпозиции (экстенда).
-// Верхние 15% и нижние 40% — сейф-зоны платформ (Stories/Reels/TikTok UI),
-// текст/CTA/логотипы там запрещены. При нарушении вернёт fix-инструкцию для ретрая.
+// QA-проверка 9x16 после рекомпозиции (экстенда). Проверяет две вещи:
+// 1) сейф-зоны: верхние 15% и нижние 40% — зоны UI платформ, текст/CTA/лого запрещены;
+// 2) швы: видимые горизонтальные стыки на границах оригинала (лучи/градиенты обязаны
+//    проходить сквозь границу без ступеньки яркости). При нарушении — fix для ретрая.
 async function qaVerify9x16(imageBase64: string): Promise<{ ok: boolean; fix: string }> {
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   const url = imageBase64.startsWith('data:') ? imageBase64 : `data:image/jpeg;base64,${imageBase64}`
@@ -27,15 +30,20 @@ async function qaVerify9x16(imageBase64: string): Promise<{ ok: boolean; fix: st
             type: 'text',
             text: `You are a strict layout QA checker for 9:16 (1080x1920) mobile ad creatives.
 
-SAFE ZONES (platform UI overlays):
+CHECK 1 — SAFE ZONES (platform UI overlays):
 - TOP 15% of the image (0-288px): must contain ONLY background — no text, headlines, logos, CTA buttons, or UI elements
 - BOTTOM 40% of the image (1152-1920px): must contain ONLY background/scenery — no text, CTA, logos, or UI elements
 
-Check the image and respond ONLY with raw JSON (no markdown):
-- If layout is correct: {"status":"ok","fix_prompt":""}
-- If violated: {"status":"fail","fix_prompt":"<specific instruction: which element to move and where, e.g. 'Move the app logo down so it starts below the top 15% of the frame; move the CHECK NOW button up so it sits above the bottom 40%'>"}
+CHECK 2 — SEAMS (this image was vertically extended by AI):
+- Look for horizontal seam lines, brightness/color bands, or abrupt transitions where the extension meets the original image (typically in the upper third and lower third)
+- Look for decorative elements (light beams, patterns, gradients) that break, bend, or change brightness at a horizontal line
+- Flag any visible transition that reveals where the original image ended
 
-Be tolerant of purely decorative background elements (light rays, patterns) — only flag text, logos, buttons, icons and UI.`,
+Check the image and respond ONLY with raw JSON (no markdown):
+- If everything is correct: {"status":"ok","fix_prompt":""}
+- If violated: {"status":"fail","fix_prompt":"<specific instruction, e.g. 'Move the app logo down below the top 15%; blend the visible horizontal seam at ~25% height — continue the neon beams across it with matching angle and brightness'>"}
+
+For CHECK 1 be tolerant of purely decorative background elements (light rays, patterns) — only flag text, logos, buttons, icons and UI. For CHECK 2 flag only clearly visible seams, not subtle gradient changes.`,
           },
         ],
       }],
@@ -78,11 +86,26 @@ export async function POST(req: NextRequest) {
       assets,
     } = body
 
+    // Выученные правила команды — подмешиваются в промпты (не в fix-режиме)
+    let rulesBlock = ''
+    try {
+      const { rules } = await getRulesCached()
+      rulesBlock = buildRulesPromptBlock(selectRulesForPrompt(rules, targetSize, appCode))
+    } catch {}
+
+    // Обучение на фиксе СП: GPT видит фикс + картинку, на которую он писался.
+    // Запускаем параллельно с генерацией, await перед ответом (fire-and-forget на
+    // Vercel убивается вместе с лямбдой).
+    const fixContextImage = recomposeBase64 || previousImageBase64
+    const learnPromise = (fixNote?.trim() && fixContextImage)
+      ? learnFromFix({ fixText: fixNote, imageBase64: fixContextImage, size: targetSize, appCode, userEmail: session.user.email || undefined })
+      : null
+
     // Режим рекомпозиции
     if (recomposeBase64 && targetSize) {
       await updateQueue('gemini', 1)
       try {
-        let imageBase64 = await recomposeImage(recomposeBase64, targetSize, fixNote)
+        let imageBase64 = await recomposeImage(recomposeBase64, targetSize, fixNote, undefined, rulesBlock)
 
         // 9x16: автопроверка сейф-зон + до 2 ретраев с конкретной fix-инструкцией.
         // Пропускаем, когда СП сам прислал fixNote — его правка приоритетнее автоQA.
@@ -100,6 +123,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        if (learnPromise) await learnPromise
         return NextResponse.json({ imageBase64 })
       } finally {
         await updateQueue('gemini', -1)
@@ -176,6 +200,9 @@ export async function POST(req: NextRequest) {
       finalPromptWithLogo = finalPrompt + `\n\nLOGO PLACEMENT — CRITICAL: The last image provided is the app logo. You MUST reproduce it exactly as-is. Rules: (1) Copy every detail — icon, wordmark, text, colors, proportions — pixel-perfectly. Do NOT simplify, redraw, or omit any part including any text in the logo. (2) Size: approximately 15% of the image width. (3) Do not let it overlap headlines, subheadlines, or CTA buttons. (4) ${logoPositionRule}`
     }
 
+    // Правила команды — в конец промпта (кроме fix-режима: там команда СП главнее)
+    if (rulesBlock && !fixNote) finalPromptWithLogo += rulesBlock
+
     await updateQueue('gemini', 1)
     let imageBase64: string
     try {
@@ -193,6 +220,7 @@ export async function POST(req: NextRequest) {
       await updateQueue('gemini', -1)
     }
 
+    if (learnPromise) await learnPromise
     return NextResponse.json({ prompt: finalPrompt, imageBase64 })
 
   } catch (error: any) {
