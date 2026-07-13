@@ -26,6 +26,7 @@ export function LearnedRulesSection({ currentEmail }: { currentEmail?: string })
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
+  const [filterAuthor, setFilterAuthor] = useState<string>('all')
 
   useEffect(() => {
     fetch('/api/rules')
@@ -66,19 +67,54 @@ export function LearnedRulesSection({ currentEmail }: { currentEmail?: string })
   if (loading) return <p className="text-sm px-4 py-3" style={{ color: 'var(--text-muted)' }}>Loading rules...</p>
   if (error) return <p className="text-sm px-4 py-3" style={{ color: '#f87171' }}>{error}</p>
 
+  const authors = [...new Set(rules.map(r => r.createdBy).filter(Boolean))]
+  const filteredRules = filterAuthor === 'all' ? rules : rules.filter(r => r.createdBy === filterAuthor)
+
   return (
     <div className="rounded-xl p-4 mb-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
       <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
         Rules learned automatically from producers&apos; fix instructions. Active rules are injected into
         generation and resize prompts for matching formats/apps. Toggle off or delete anything wrong.
       </p>
+      {/* Фильтр по авторам правил */}
+      {authors.length > 1 && (
+        <div className="flex items-center gap-2 flex-wrap mb-3">
+          <button onClick={() => setFilterAuthor('all')}
+            className="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all"
+            style={{
+              background: filterAuthor === 'all' ? 'rgba(79,110,247,0.15)' : 'rgba(255,255,255,0.04)',
+              border: `1px solid ${filterAuthor === 'all' ? 'var(--accent)' : 'var(--border)'}`,
+              color: filterAuthor === 'all' ? 'var(--accent)' : 'var(--text-muted)',
+            }}>
+            All ({rules.length})
+          </button>
+          {authors.map(a => {
+            const count = rules.filter(r => r.createdBy === a).length
+            const label = a === currentEmail ? 'My rules' : a.split('@')[0]
+            return (
+              <button key={a} onClick={() => setFilterAuthor(filterAuthor === a ? 'all' : a)}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all"
+                style={{
+                  background: filterAuthor === a ? 'rgba(79,110,247,0.15)' : 'rgba(255,255,255,0.04)',
+                  border: `1px solid ${filterAuthor === a ? 'var(--accent)' : 'var(--border)'}`,
+                  color: filterAuthor === a ? 'var(--accent)' : 'var(--text-muted)',
+                }}>
+                {label} ({count})
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       {rules.length === 0 ? (
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
           No learned rules yet — they will appear as producers apply fixes.
         </p>
+      ) : filteredRules.length === 0 ? (
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No rules from this author.</p>
       ) : (
         <div className="flex flex-col gap-2">
-          {rules.map(rule => {
+          {filteredRules.map(rule => {
             const isPersonal = (rule.scope ?? 'team') === 'personal'
             const isMine = !rule.createdBy || rule.createdBy === currentEmail
             const canManage = !isPersonal || isMine

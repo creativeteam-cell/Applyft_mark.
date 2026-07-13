@@ -16,7 +16,13 @@ export const maxDuration = 210
 // 1080x1920, верх/низ заполняются зеркальным отражением краёв + блюром. Gemini
 // получает задачу "доработать размытые зоны", а не "дорисовать сверху/снизу" —
 // переход изначально плавный, и характерные горизонтальные швы не возникают.
-async function padTo916(imageBase64: string): Promise<string | null> {
+interface PadResult {
+  padded: string     // холст 1080x1920 с растушёванным оригиналом — вход для Gemini
+  overlay: Buffer    // растушёванный оригинал (PNG с альфой) — для обратной вклейки
+  top: number        // смещение оригинала на холсте
+}
+
+async function padTo916(imageBase64: string): Promise<PadResult | null> {
   try {
     const buf = Buffer.from(imageBase64.replace(/^data:image\/\w+;base64,/, ''), 'base64')
     const W = 1080, H = 1920
@@ -59,11 +65,25 @@ async function padTo916(imageBase64: string): Promise<string | null> {
       .composite([{ input: feathered, top, left: 0 }])
       .jpeg({ quality: 92 })
       .toBuffer()
-    return `data:image/jpeg;base64,${final.toString('base64')}`
+    return { padded: `data:image/jpeg;base64,${final.toString('base64')}`, overlay: feathered, top }
   } catch (e: any) {
     console.warn('[padTo916] failed, falling back to legacy extend:', e.message)
     return null
   }
+}
+
+// Гарантия сохранности контента: после дорисовки Gemini вклеиваем растушёванный
+// оригинал обратно поверх результата. Если Gemini центр не трогал — операция
+// невидима; если "съел" текст/лого (как он любит) — они физически вернутся,
+// а растушёвка сохранит плавный переход к дорисованным зонам.
+async function restoreOriginalBand(resultBase64: string, overlay: Buffer, top: number): Promise<string> {
+  const buf = Buffer.from(resultBase64.replace(/^data:image\/\w+;base64,/, ''), 'base64')
+  const resized = await sharp(buf).resize(1080, 1920, { fit: 'fill' }).toBuffer()
+  const merged = await sharp(resized)
+    .composite([{ input: overlay, top, left: 0 }])
+    .jpeg({ quality: 92 })
+    .toBuffer()
+  return `data:image/jpeg;base64,${merged.toString('base64')}`
 }
 
 // QA-проверка 9x16 после рекомпозиции (экстенда). Проверяет две вещи:
@@ -93,6 +113,10 @@ CHECK 2 — SEAMS (this image was vertically extended by AI):
 - Look for horizontal seam lines, brightness/color bands, or abrupt transitions where the extension meets the original image (typically in the upper third and lower third)
 - Look for decorative elements (light beams, patterns, gradients) that break, bend, or change brightness at a horizontal line
 - Flag any visible transition that reveals where the original image ended
+
+CHECK 3 — UNFINISHED EXTENSION:
+- The top and bottom areas must be SHARP and detailed like the rest of the image
+- Flag if the top or bottom band is heavily blurred, out-of-focus, or looks like an upside-down mirrored copy of the adjacent content — that means the AI extension was not completed (fix_prompt: "Repaint the blurred top/bottom band into a sharp, detailed continuation of the scene")
 
 Check the image and respond ONLY with raw JSON (no markdown):
 - If everything is correct: {"status":"ok","fix_prompt":""}
@@ -161,12 +185,15 @@ export async function POST(req: NextRequest) {
       await updateQueue('gemini', 1)
       try {
         // 9x16 без fixNote: пробуем путь с механической подложкой (анти-швы)
-        let padded: string | null = null
-        if (targetSize === '9x16' && !fixNote) padded = await padTo916(recomposeBase64)
+        let pad: PadResult | null = null
+        if (targetSize === '9x16' && !fixNote) pad = await padTo916(recomposeBase64)
 
-        let imageBase64 = padded
-          ? await recomposeImage(padded, targetSize, undefined, undefined, rulesBlock, true)
+        let imageBase64 = pad
+          ? await recomposeImage(pad.padded, targetSize, undefined, undefined, rulesBlock, true)
           : await recomposeImage(recomposeBase64, targetSize, fixNote, undefined, rulesBlock)
+
+        // Возвращаем оригинальную полосу поверх — Gemini не имеет права терять контент
+        if (pad) imageBase64 = await restoreOriginalBand(imageBase64, pad.overlay, pad.top)
 
         // 9x16: автопроверка сейф-зон + до 2 ретраев с конкретной fix-инструкцией.
         // Пропускаем, когда СП сам прислал fixNote — его правка приоритетнее автоQA.
@@ -177,6 +204,8 @@ export async function POST(req: NextRequest) {
             console.log(`[recompose-qa] 9x16 attempt ${attempt} fail: ${qa.fix}`)
             try {
               imageBase64 = await recomposeImage(imageBase64, targetSize, qa.fix)
+              // После каждого ретрая тоже возвращаем оригинал поверх
+              if (pad) imageBase64 = await restoreOriginalBand(imageBase64, pad.overlay, pad.top)
             } catch (e: any) {
               console.warn('[recompose-qa] retry failed:', e.message)
               break
