@@ -1,12 +1,57 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
+import OpenAI from 'openai'
 import { generatePrompt } from '@/lib/openai'
 import { generateImage, recomposeImage, DEFAULT_GEMINI_MODEL } from '@/lib/imagen'
 import { getConfig } from '@/lib/appsStore'
 import { updateQueue } from '@/lib/queue'
 
 export const maxDuration = 210
+
+// QA-проверка зон для 9x16 после рекомпозиции (экстенда).
+// Верхние 15% и нижние 40% — сейф-зоны платформ (Stories/Reels/TikTok UI),
+// текст/CTA/логотипы там запрещены. При нарушении вернёт fix-инструкцию для ретрая.
+async function qaVerify9x16(imageBase64: string): Promise<{ ok: boolean; fix: string }> {
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  const url = imageBase64.startsWith('data:') ? imageBase64 : `data:image/jpeg;base64,${imageBase64}`
+  await updateQueue('openai', 1)
+  try {
+    const res = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url, detail: 'high' } },
+          {
+            type: 'text',
+            text: `You are a strict layout QA checker for 9:16 (1080x1920) mobile ad creatives.
+
+SAFE ZONES (platform UI overlays):
+- TOP 15% of the image (0-288px): must contain ONLY background — no text, headlines, logos, CTA buttons, or UI elements
+- BOTTOM 40% of the image (1152-1920px): must contain ONLY background/scenery — no text, CTA, logos, or UI elements
+
+Check the image and respond ONLY with raw JSON (no markdown):
+- If layout is correct: {"status":"ok","fix_prompt":""}
+- If violated: {"status":"fail","fix_prompt":"<specific instruction: which element to move and where, e.g. 'Move the app logo down so it starts below the top 15% of the frame; move the CHECK NOW button up so it sits above the bottom 40%'>"}
+
+Be tolerant of purely decorative background elements (light rays, patterns) — only flag text, logos, buttons, icons and UI.`,
+          },
+        ],
+      }],
+      max_tokens: 300,
+    }, { timeout: 45000 })
+    const raw = res.choices[0]?.message?.content?.trim() || '{}'
+    const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
+    const parsed = JSON.parse(clean.slice(clean.indexOf('{'), clean.lastIndexOf('}') + 1))
+    return { ok: parsed.status === 'ok', fix: parsed.fix_prompt || '' }
+  } catch {
+    // QA недоступен — не блокируем результат
+    return { ok: true, fix: '' }
+  } finally {
+    await updateQueue('openai', -1)
+  }
+}
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -37,7 +82,24 @@ export async function POST(req: NextRequest) {
     if (recomposeBase64 && targetSize) {
       await updateQueue('gemini', 1)
       try {
-        const imageBase64 = await recomposeImage(recomposeBase64, targetSize, fixNote)
+        let imageBase64 = await recomposeImage(recomposeBase64, targetSize, fixNote)
+
+        // 9x16: автопроверка сейф-зон + до 2 ретраев с конкретной fix-инструкцией.
+        // Пропускаем, когда СП сам прислал fixNote — его правка приоритетнее автоQA.
+        if (targetSize === '9x16' && !fixNote) {
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            const qa = await qaVerify9x16(imageBase64)
+            if (qa.ok) break
+            console.log(`[recompose-qa] 9x16 attempt ${attempt} fail: ${qa.fix}`)
+            try {
+              imageBase64 = await recomposeImage(imageBase64, targetSize, qa.fix)
+            } catch (e: any) {
+              console.warn('[recompose-qa] retry failed:', e.message)
+              break
+            }
+          }
+        }
+
         return NextResponse.json({ imageBase64 })
       } finally {
         await updateQueue('gemini', -1)

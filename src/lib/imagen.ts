@@ -394,6 +394,13 @@ HOW TO EXTEND:
 - If the background is a real photographic scene — extend it naturally as if shot with a wider lens
 - The extended area must feel like it was always part of the original composition
 
+NO FLAT FILL — CRITICAL:
+- NEVER fill the extended area with a flat, empty, uniform color — that looks cheap and unfinished
+- CONTINUE every decorative element from the original into the new space: light beams, neon rays, lens flares, glows, gradients, textures, patterns, smoke, particles, shadows, floor reflections
+- Example: if the original has neon laser beams crossing the background, those beams must continue through the extended top/bottom/side areas at matching angles, brightness, and perspective
+- If the original background is genuinely plain, add subtle natural variation matching the original: soft gradient falloff, gentle vignette, faint continuation of existing lighting — still NO new objects or scene content
+- The extended area should be visually alive and indistinguishable in richness from the original background
+
 DO NOT:
 - Leave any visible edge, halo, blur smear, or color shift at the boundary between original and extended area
 - Change the overall color tone or brightness of the whole image
