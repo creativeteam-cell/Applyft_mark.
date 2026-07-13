@@ -282,10 +282,11 @@ const SIZE_HINTS: Record<string, string> = {
 
   '9x16':
     '\n\n[CRITICAL - OUTPUT FORMAT]: TALL PORTRAIT image, aspect ratio 9:16 (phone screen). ' +
-    'VERTICAL POSITIONING — MANDATORY: ALL text, headlines, CTAs, and key elements MUST be in the TOP 55% of the frame. ' +
-    'The bottom 40% is a NO-CONTENT zone (reserved for platform UI chrome on mobile) — background only there. ' +
-    'SAFE ZONE: at least 100px from top, left, and right edges; at least 400px from the bottom edge. ' +
-    'If any element is near the bottom — move it upward immediately. No exceptions.',
+    'VERTICAL POSITIONING — MANDATORY: place ALL text, headlines, CTAs, and key elements in the CENTER BAND between 15% and 60% of the frame height. The composition must feel vertically centered, NOT pinned to the top. ' +
+    'The TOP 15% is a safe zone (platform UI: profile name, close button, camera icon) — background only there. ' +
+    'The BOTTOM 40% is a NO-CONTENT zone (platform UI chrome: likes, comments, caption) — background only there. ' +
+    'SAFE ZONE: at least 280px from the TOP edge; at least 100px from left and right edges; at least 400px from the bottom edge. ' +
+    'If any element sits in the top 15% — move it DOWN into the center band. If any element is near the bottom — move it UP into the center band.',
 
   '1.91x1':
     '\n\n[CRITICAL - OUTPUT FORMAT]: LANDSCAPE image, aspect ratio 16:9 (wide horizontal). ' +
@@ -340,7 +341,14 @@ export async function recomposeImage(imageBase64: string, targetSize: string, fi
 
   // Fix mode: no rules, no safe-zone, no layout restrictions — only the user's raw instruction
   if (fixNote?.trim()) {
-    const fixPrompt = `Apply this change to the image precisely: ${fixNote.trim()}\n\nPreserve everything else exactly as shown in the original image.`
+    const fixPrompt = `USER EDIT INSTRUCTION — HIGHEST PRIORITY, MUST BE EXECUTED: ${fixNote.trim()}
+
+(The instruction may be written in any language — understand it and execute it.)
+
+RULES:
+- The instruction above OVERRIDES the current layout. If it asks to MOVE, LOWER, RAISE, RESIZE, or REPOSITION elements — actually move them, decisively and visibly. A result where the requested elements did not move is a FAILURE.
+- Apply the change boldly enough to be clearly noticeable when comparing with the original.
+- Everything NOT affected by the instruction must stay exactly as in the original image: same content, same style, same colors, same text.`
     return withRetry(fixPrompt, cleanB64, undefined, 3, targetSize, undefined, model)
   }
 

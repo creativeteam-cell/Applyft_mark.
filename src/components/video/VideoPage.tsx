@@ -669,19 +669,21 @@ function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose
               className="w-full rounded-lg resize-none outline-none text-sm p-3 mb-2"
               style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }} />
             <div className="flex items-center justify-between mb-2">
-              <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-                {[5, 10, ...(contModel === 'kling-v3-omni' ? [15] : [])].map(d => (
-                  <button key={d} onClick={() => setContDuration(d)}
-                    className="px-2.5 py-0.5 text-[10px] font-medium transition-all"
-                    style={{ background: contDuration === d ? 'rgba(79,110,247,0.2)' : 'transparent', color: contDuration === d ? 'var(--accent)' : 'var(--text-muted)' }}>
-                    {d}s
-                  </button>
-                ))}
+              <div className="flex items-center gap-2 flex-1 mr-3">
+                <input type="range" min={3} max={contModel === 'kling-v3-omni' ? 15 : 10} step={1}
+                  value={Math.min(contDuration, contModel === 'kling-v3-omni' ? 15 : 10)}
+                  onChange={e => setContDuration(Number(e.target.value))}
+                  className="flex-1 accent-[var(--accent)]" style={{ height: 4 }} />
+                <span className="text-[10px] font-mono w-6 text-right" style={{ color: 'var(--accent)' }}>
+                  {Math.min(contDuration, contModel === 'kling-v3-omni' ? 15 : 10)}s
+                </span>
               </div>
-              <label className="flex items-center gap-1.5 text-[10px] cursor-pointer" style={{ color: 'var(--text-muted)' }}>
-                <input type="checkbox" checked={contKeepSound} onChange={e => setContKeepSound(e.target.checked)} />
-                Keep source sound
-              </label>
+              {item.sound === 'on' && (
+                <label className="flex items-center gap-1.5 text-[10px] cursor-pointer" style={{ color: 'var(--text-muted)' }}>
+                  <input type="checkbox" checked={contKeepSound} onChange={e => setContKeepSound(e.target.checked)} />
+                  Keep source sound
+                </label>
+              )}
             </div>
             {contStatus === 'done' && <p className="text-xs mb-2" style={{ color: '#34a853' }}>✓ Next shot generated and saved</p>}
             {contError && <p className="text-xs mb-2" style={{ color: '#f87171' }}>{contError}</p>}
