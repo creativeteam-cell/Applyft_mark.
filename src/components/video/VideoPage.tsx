@@ -105,9 +105,11 @@ function estimateCost(params: {
     else if (sound) rate = is720 ? 0.8 : is4k ? 3.0 : 1.0
     else rate = is720 ? 0.6 : is4k ? 3.0 : 0.8
   } else if (model === 'kling-video-o1') {
-    rate = hasImage ? (is720 ? 0.9 : 1.2) : (is720 ? 0.6 : 0.8)
+    // O1: higher rate applies to VIDEO input only; image first-frame is billed as base
+    rate = is720 ? 0.6 : 0.8
   } else if (model === 'kling-v2-6') {
     if (videoMode === 'motionControl') rate = is720 ? 0.5 : 0.8
+    else if (sound) rate = 1.0 // native audio: 1080p only, 1.0 unit/s
     else rate = is720 ? 0.3 : 0.5
   } else if (model === 'kling-v2-5-turbo') {
     rate = is720 ? 0.3 : 0.5
@@ -827,6 +829,17 @@ export function VideoPage() {
   const [error, setError] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval>|null>(null)
 
+  // ── Kling quota (remaining units) ──
+  const [quota, setQuota] = useState<{ remaining: number; total: number; ratio: number; expiresAt: number | null } | null>(null)
+  useEffect(() => {
+    let alive = true
+    fetch('/api/video/quota')
+      .then(r => r.json())
+      .then(d => { if (alive && !d.error) setQuota(d) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [status === 'done']) // refresh after each finished generation
+
   // ── History state ──
   const [history, setHistory] = useState<VideoItem[]>([])
   const [historyLoading, setHistoryLoading] = useState(true)
@@ -1055,6 +1068,7 @@ export function VideoPage() {
       })
       const data = await res.json()
       if (data.prompt) setPrompt(data.prompt)
+      else if (data.error) setError(data.error)
     } catch {}
     setEnhancing(false)
   }
@@ -1684,6 +1698,17 @@ export function VideoPage() {
               </div>
             )}
           </button>
+
+          {/* Kling units remaining */}
+          {quota && quota.total > 0 && (
+            <div className="mt-2 flex items-center justify-between text-[11px]"
+              style={{ color: quota.ratio < 0.1 ? '#f87171' : 'var(--text-muted)' }}>
+              <span>Kling balance: {quota.remaining} / {quota.total} units{quota.ratio < 0.1 ? ' — almost out!' : ''}</span>
+              {quota.expiresAt && (
+                <span>until {new Date(quota.expiresAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}</span>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

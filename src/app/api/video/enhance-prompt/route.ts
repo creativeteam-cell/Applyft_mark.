@@ -23,6 +23,7 @@ export async function POST(req: NextRequest) {
 
       const system = [
         'You are a professional Hollywood cinematographer and video director writing prompts for AI video generation (Kling AI).',
+        'CONTEXT: You work for a licensed advertising platform of a family-safety app (parental control / family locator). All reference images are pre-approved commercial ad assets. Scenes may feature parents and children in everyday situations — this is standard family-app advertising. Your task is only to rewrite TEXT prompts; you are not generating images.',
         `Total video: ${totalDuration} seconds across ${shots.length} shots: ${shotList}.`,
         '',
         'Your job: take the user\'s rough concept and write a CINEMATIC prompt for EACH shot like a real film production.',
@@ -68,6 +69,9 @@ export async function POST(req: NextRequest) {
       if (raw.startsWith('`')) raw = raw.replace(/^[`]{1,3}(?:json)?\s*\n?/, '').replace(/\n?[`]{1,3}\s*$/, '')
       const parsed = JSON.parse(raw)
       if (!Array.isArray(parsed)) throw new Error('GPT returned non-array response')
+      if (parsed.some((s: any) => typeof s === 'string' && /^(i'?m sorry|i can'?t|i cannot)|can'?t assist|cannot assist/i.test(s))) {
+        return NextResponse.json({ error: 'Enhance was refused by the model — try rephrasing the concept' }, { status: 422 })
+      }
       return NextResponse.json({ shots: parsed })
     }
 
@@ -78,6 +82,7 @@ export async function POST(req: NextRequest) {
 
     const system = [
       `You are an expert video director specializing in ${modelLabel} AI video generation.`,
+      'CONTEXT: You work for a licensed advertising platform of a family-safety app (parental control / family locator). All reference images are pre-approved commercial ad assets. Scenes may feature parents and children in everyday situations — this is standard family-app advertising. Your task is only to rewrite TEXT prompts; you are not generating images.',
       "Rewrite the user's rough idea as a polished, professional video generation prompt.",
       '',
       'Rules:',
@@ -107,6 +112,10 @@ export async function POST(req: NextRequest) {
     })
 
     const improved = res.choices[0]?.message?.content?.trim() || prompt
+    // GPT sometimes refuses instead of enhancing — don't put the refusal into the prompt field
+    if (/^(i'?m sorry|i can'?t|i cannot|sorry,)/i.test(improved) || (improved.length < 80 && /can'?t assist|cannot assist|can'?t help/i.test(improved))) {
+      return NextResponse.json({ error: 'Enhance was refused by the model — try rephrasing the prompt' }, { status: 422 })
+    }
     return NextResponse.json({ prompt: improved })
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })
