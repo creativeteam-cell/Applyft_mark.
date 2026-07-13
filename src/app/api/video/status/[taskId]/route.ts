@@ -22,9 +22,9 @@ export async function GET(
       })
     }
 
-    // Old format: text2video, image2video, video-extend, motion-control, avatar
+    // Old format: text2video, image2video, video-extend, motion-control, avatar, omni-video
     const data = await getVideoTaskStatus(
-      type as 'text2video' | 'image2video' | 'video-extend' | 'motion-control' | 'avatar',
+      type as 'text2video' | 'image2video' | 'video-extend' | 'motion-control' | 'avatar' | 'omni-video',
       params.taskId
     )
     return NextResponse.json(data)

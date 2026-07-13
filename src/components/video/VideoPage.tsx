@@ -80,7 +80,9 @@ const MODE_LABELS: Record<VideoMode, string> = {
   avatar: 'Avatar',
 }
 
-const TURBO_MODELS = new Set(['kling-v3-turbo', 'kling-v3-omni', 'kling-video-o1'])
+const TURBO_MODELS = new Set(['kling-v3-turbo'])
+// O1 & Omni share the /v1/videos/omni-video endpoint
+const OMNI_MODELS = new Set(['kling-v3-omni', 'kling-video-o1'])
 
 // ── Cost estimation ────────────────────────────────────────────────────────
 
@@ -853,6 +855,7 @@ export function VideoPage() {
   const currentModel = MODELS.find(m => m.id === model)!
   const totalShotsDuration = shots.reduce((s, sh) => s + sh.duration, 0)
   const isTurboModel = TURBO_MODELS.has(model)
+  const isOmniModel = OMNI_MODELS.has(model)
 
   const estimatedCost = useMemo(() => {
     const durationSec = videoMode === 'multishot' ? totalShotsDuration : videoMode === 'avatar' ? avatarAudioDuration : duration
@@ -1184,6 +1187,21 @@ export function VideoPage() {
           })
           setStatus('processing')
           pollStatus(data.task_id, 'turbo', { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: '', sound: 'off', inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 })
+        } else if (isOmniModel) {
+          const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
+          const body: any = allShotsHavePrompts
+            ? {
+                model_name: model, multi_shot: true, duration: totalDur, mode, sound: soundParam,
+                multi_prompt: shots.map((s, i) => ({ index: i + 1, prompt: `${charPrefix}${s.prompt}`, duration: String(s.duration) })),
+              }
+            : { model_name: model, prompt: effectivePrompt, duration: totalDur, mode, sound: soundParam }
+          if (ff) body.first_frame = ff
+          else body.aspect_ratio = aspectRatio
+          const data = await fetchWithRetry('/api/video/omni', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+          })
+          setStatus('processing')
+          pollStatus(data.task_id, 'omni-video', { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: ff ? '' : aspectRatio, sound: soundParam, inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 })
         } else {
           const type = firstFrame ? 'image2video' : 'text2video'
           const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
@@ -1205,6 +1223,16 @@ export function VideoPage() {
         })
         setStatus('processing')
         pollStatus(data.task_id, 'turbo', { prompt, model, duration: String(duration), aspectRatio: '', sound: 'off', inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 })
+      } else if (isOmniModel) {
+        const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
+        const body: any = { model_name: model, prompt, duration, mode, sound: soundParam }
+        if (ff) body.first_frame = ff
+        else body.aspect_ratio = aspectRatio
+        const data = await fetchWithRetry('/api/video/omni', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        })
+        setStatus('processing')
+        pollStatus(data.task_id, 'omni-video', { prompt, model, duration: String(duration), aspectRatio: ff ? '' : aspectRatio, sound: soundParam, inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 })
       } else {
         const type = firstFrame ? 'image2video' : 'text2video'
         const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'

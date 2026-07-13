@@ -100,12 +100,14 @@ export async function createImage2VideoTask(params: {
 }
 
 export async function getVideoTaskStatus(
-  type: 'text2video' | 'image2video' | 'video-extend' | 'motion-control' | 'avatar',
+  type: 'text2video' | 'image2video' | 'video-extend' | 'motion-control' | 'avatar' | 'omni-video',
   task_id: string
 ): Promise<KlingTaskData> {
   let endpoint: string
   if (type === 'video-extend') {
     endpoint = `${KLING_BASE_URL}/v1/videos/video-extend/${task_id}`
+  } else if (type === 'omni-video') {
+    endpoint = `${KLING_BASE_URL}/v1/videos/omni-video/${task_id}`
   } else if (type === 'motion-control') {
     endpoint = `${KLING_BASE_URL}/v1/videos/motion-control/${task_id}`
   } else if (type === 'avatar') {
@@ -195,6 +197,49 @@ export async function getTurboTaskStatus(task_id: string): Promise<{ status: str
   if (!task) throw new Error('Task not found')
   const video = task.outputs?.find((o: any) => o.type === 'video')
   return { status: task.status, videoUrl: video?.url, videoId: video?.id }
+}
+
+// Kling O1 & 3.0 Omni — unified endpoint POST /v1/videos/omni-video
+// (docs: model_name enum is kling-video-o1 | kling-v3-omni)
+export async function createOmniVideoTask(params: {
+  model_name: 'kling-video-o1' | 'kling-v3-omni'
+  prompt?: string
+  first_frame?: string    // raw base64 (no data: prefix) or URL
+  duration?: string       // '3'..'15' (o1: max 10, omni: max 15)
+  mode?: 'std' | 'pro' | '4k'
+  aspect_ratio?: '16:9' | '9:16' | '1:1'
+  sound?: 'on' | 'off'
+  multi_shot?: boolean
+  multi_prompt?: { index: number; prompt: string; duration: string }[]
+}): Promise<{ task_id: string }> {
+  const body: any = {
+    model_name: params.model_name,
+    mode: params.mode ?? 'pro',
+    duration: params.duration ?? '5',
+    sound: params.sound ?? 'off',
+  }
+  if (params.multi_shot && params.multi_prompt?.length) {
+    body.multi_shot = true
+    body.shot_type = 'customize'
+    body.prompt = ''
+    body.multi_prompt = params.multi_prompt
+  } else {
+    body.prompt = params.prompt ?? ''
+  }
+  if (params.first_frame) {
+    body.image_list = [{ image_url: params.first_frame, type: 'first_frame' }]
+  } else {
+    // aspect_ratio is only valid without first-frame reference / video editing
+    body.aspect_ratio = params.aspect_ratio ?? '16:9'
+  }
+
+  const res = await fetch(`${KLING_BASE_URL}/v1/videos/omni-video`, {
+    method: 'POST', headers: headers(),
+    body: JSON.stringify(body),
+  })
+  const data: KlingResponse = await res.json()
+  if (data.code !== 0) throw new Error(`Kling error: ${data.message}`)
+  return { task_id: data.data.task_id }
 }
 
 export async function createMotionControlTask(params: {
