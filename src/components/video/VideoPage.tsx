@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'
+import { useSession } from 'next-auth/react'
 import { setQueueActive } from '@/lib/queueClient'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -41,7 +42,7 @@ const MODELS: ModelDef[] = [
     modes: ['standard', 'multishot'], aspectRatios: ALL_ASPECT_RATIOS,
   },
   {
-    id: 'kling-v3-turbo', label: 'Kling 3.0 Turbo', description: 'Faster output, lower cost, reliable quality', tags: ['NEW'],
+    id: 'kling-v3-turbo', label: 'Kling 3.0 Turbo', description: 'Faster output, lower cost, sound always on', tags: ['NEW', 'Audio'],
     supportsSound: false, supports4K: false, supportsLastFrame: false, supportsMultishot: true, supportsMotionControl: false, isAvatar: false, supportsImageList: false,
     modes: ['standard', 'multishot'], aspectRatios: ['16:9', '9:16', '1:1'],
   },
@@ -689,6 +690,7 @@ function saveLS(key: string, value: unknown) {
 // ── Main VideoPage ─────────────────────────────────────────────────────────
 
 export function VideoPage() {
+  const { data: session } = useSession()
   // ── Model & Mode ──
   const [model, setModel] = useState<KlingModel>(() => loadLS<KlingModel>('gen_vid_model', 'kling-v3'))
   const [videoMode, setVideoMode] = useState<VideoMode>(() => loadLS<VideoMode>('gen_vid_mode', 'standard'))
@@ -734,8 +736,82 @@ export function VideoPage() {
   // ── Motion Control state ──
   const [motionImage, setMotionImage] = useState<string | null>(null)
   const [motionVideoUrl, setMotionVideoUrl] = useState('')
+  const [motionVideoLabel, setMotionVideoLabel] = useState('')  // friendly name of picked/uploaded video
+  const [motionVideoPicker, setMotionVideoPicker] = useState(false)
+  const [motionVideoUploading, setMotionVideoUploading] = useState(false)
+  const [motionVideoError, setMotionVideoError] = useState('')
+  const motionVideoInputRef = useRef<HTMLInputElement>(null)
   const [motionOrientation, setMotionOrientation] = useState<'image' | 'video'>('image')
   const [motionKeepSound, setMotionKeepSound] = useState(false)
+
+  // Pick a reference video from generated history → signed public URL for Kling
+  async function pickMotionVideoFromHistory(item: VideoItem) {
+    setMotionVideoPicker(false)
+    setMotionVideoError('')
+    try {
+      const res = await fetch(`/api/video/public-url?id=${encodeURIComponent(item.id)}`)
+      const data = await res.json()
+      if (!data.url) throw new Error(data.error || 'Failed to get video URL')
+      setMotionVideoUrl(data.url)
+      setMotionVideoLabel(`From history: ${item.model.replace('kling-', '')} · ${item.duration}s${item.prompt ? ' · ' + item.prompt.slice(0, 40) : ''}`)
+    } catch (e: any) {
+      setMotionVideoError(e.message)
+    }
+  }
+
+  // Upload a local video file directly to Drive (browser → Google, bypasses Vercel 4.5MB limit)
+  async function handleMotionVideoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setMotionVideoError('')
+    if (!/\.(mp4|mov)$/i.test(file.name)) { setMotionVideoError('Only .mp4 or .mov files are supported'); return }
+    if (file.size > 100 * 1024 * 1024) { setMotionVideoError('File is too large (max 100MB)'); return }
+
+    setMotionVideoUploading(true)
+    try {
+      const token = (session as any)?.accessToken
+      if (!token) throw new Error('No Google access token — try re-signing in')
+      const metaRes = await fetch('/api/video/public-url')
+      const { folderId } = await metaRes.json()
+
+      // 1. Init resumable upload
+      const initRes = await fetch(
+        'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'X-Upload-Content-Type': file.type || 'video/mp4',
+          },
+          body: JSON.stringify({
+            name: `REF_${file.name}`,
+            ...(folderId ? { parents: [folderId] } : {}),
+            description: JSON.stringify({ uploadedBy: session?.user?.email || '', kind: 'motion-ref' }),
+          }),
+        }
+      )
+      if (!initRes.ok) throw new Error(`Upload init failed: ${await initRes.text()}`)
+      const uploadUrl = initRes.headers.get('Location')
+      if (!uploadUrl) throw new Error('No upload URL from Drive')
+
+      // 2. Upload the file
+      const upRes = await fetch(uploadUrl, { method: 'PUT', body: file })
+      if (!upRes.ok) throw new Error(`Upload failed: ${upRes.status}`)
+      const uploaded = await upRes.json()
+
+      // 3. Signed public URL for Kling
+      const urlRes = await fetch(`/api/video/public-url?id=${encodeURIComponent(uploaded.id)}`)
+      const urlData = await urlRes.json()
+      if (!urlData.url) throw new Error(urlData.error || 'Failed to get video URL')
+      setMotionVideoUrl(urlData.url)
+      setMotionVideoLabel(`Uploaded: ${file.name}`)
+    } catch (err: any) {
+      setMotionVideoError(err.message)
+    }
+    setMotionVideoUploading(false)
+  }
 
   // ── Avatar state ──
   const [avatarImage, setAvatarImage] = useState<string | null>(null)
@@ -1357,11 +1433,38 @@ export function VideoPage() {
                 onPickFromLibrary={() => setPickerTarget('motion')} />
 
               <div className="mb-3">
-                <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Motion reference video URL</div>
-                <input value={motionVideoUrl} onChange={e => setMotionVideoUrl(e.target.value)}
-                  placeholder="https://... (.mp4 or .mov)"
-                  className="w-full rounded-xl px-3 py-2 text-sm outline-none"
-                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+                <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Motion reference video</div>
+                {motionVideoUrl ? (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-xl mb-2" style={{ background: 'rgba(79,110,247,0.08)', border: '1px solid var(--border)' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--accent)', flexShrink: 0 }}>
+                      <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>
+                    </svg>
+                    <span className="text-xs truncate flex-1" style={{ color: 'var(--text)' }}>{motionVideoLabel || motionVideoUrl}</span>
+                    <button onClick={() => { setMotionVideoUrl(''); setMotionVideoLabel('') }}
+                      className="opacity-50 hover:opacity-100 flex-shrink-0" style={{ color: 'var(--text-muted)' }}>×</button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex gap-2 mb-2">
+                      <button onClick={() => setMotionVideoPicker(true)}
+                        className="flex-1 py-2.5 rounded-xl text-xs font-medium transition-all"
+                        style={{ background: 'rgba(255,255,255,0.04)', border: '1px dashed var(--border)', color: 'var(--text-muted)' }}>
+                        🎬 From history
+                      </button>
+                      <button onClick={() => motionVideoInputRef.current?.click()} disabled={motionVideoUploading}
+                        className="flex-1 py-2.5 rounded-xl text-xs font-medium transition-all"
+                        style={{ background: 'rgba(255,255,255,0.04)', border: '1px dashed var(--border)', color: 'var(--text-muted)' }}>
+                        {motionVideoUploading ? 'Uploading...' : '⬆ Upload .mp4 / .mov'}
+                      </button>
+                    </div>
+                    <input value={motionVideoUrl} onChange={e => { setMotionVideoUrl(e.target.value); setMotionVideoLabel('') }}
+                      placeholder="or paste URL: https://... (.mp4 or .mov)"
+                      className="w-full rounded-xl px-3 py-2 text-sm outline-none"
+                      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+                  </>
+                )}
+                <input ref={motionVideoInputRef} type="file" accept=".mp4,.mov,video/mp4,video/quicktime" className="hidden" onChange={handleMotionVideoUpload} />
+                {motionVideoError && <p className="text-[10px] mt-1" style={{ color: '#f87171' }}>{motionVideoError}</p>}
                 <p className="text-[10px] mt-1" style={{ color: 'rgba(255,255,255,0.2)' }}>
                   Min 3s · Max {motionOrientation === 'image' ? '10s' : '30s'} · up to 100MB
                 </p>
@@ -1520,6 +1623,14 @@ export function VideoPage() {
                 style={{ background: sound ? 'var(--accent)' : 'rgba(255,255,255,0.1)' }}>
                 <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" style={{ left: sound ? '18px' : '2px' }} />
               </button>
+            </div>
+          )}
+
+          {/* Turbo: sound is built-in and always on, no API control */}
+          {model === 'kling-v3-turbo' && (videoMode === 'standard' || videoMode === 'multishot') && (
+            <div className="mb-4 flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Sound</span>
+              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>🔊 Always on — built into the model</span>
             </div>
           )}
 
@@ -1682,6 +1793,36 @@ export function VideoPage() {
 
       {selectedItem && <VideoCardModal item={selectedItem} onClose={() => setSelectedItem(null)} onRefresh={fetchHistory} />}
       {pickerTarget && <ImagePickerModal onSelect={handlePickerSelect} onClose={() => setPickerTarget(null)} />}
+      {motionVideoPicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6"
+          style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
+          onClick={e => { if (e.target === e.currentTarget) setMotionVideoPicker(false) }}>
+          <div className="rounded-2xl p-5 w-full max-w-2xl max-h-[80vh] overflow-y-auto"
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-sm font-semibold">Pick a reference video</span>
+              <button onClick={() => setMotionVideoPicker(false)} className="opacity-50 hover:opacity-100">×</button>
+            </div>
+            {history.length === 0 ? (
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>No generated videos yet</p>
+            ) : (
+              <div className="grid grid-cols-3 gap-3">
+                {history.map(item => (
+                  <button key={item.id} onClick={() => pickMotionVideoFromHistory(item)}
+                    className="rounded-xl overflow-hidden text-left transition-all hover:ring-2"
+                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)' }}>
+                    <video src={`/api/video/file/${item.id}`} muted preload="metadata" className="w-full h-28 object-cover" />
+                    <div className="p-2">
+                      <div className="text-[10px] font-mono" style={{ color: 'var(--accent)' }}>{item.model.replace('kling-', '')} · {item.duration}s</div>
+                      {item.prompt && <div className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>{item.prompt}</div>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

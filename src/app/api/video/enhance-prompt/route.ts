@@ -36,6 +36,8 @@ export async function POST(req: NextRequest) {
         'PROMPT RULES:',
         '- Start EVERY prompt with the camera/angle description: e.g. "Low-angle tracking shot —", "POV from inside the car cabin —", "Extreme close-up —"',
         '- Be 1-3 sentences. Be specific: lighting, motion, emotion, texture.',
+        '- SOUND: Kling generates audio from the prompt — end each shot with a short sound cue matching the moment (e.g. "echoing footsteps", "tense low hum", "sharp musical sting", "door slams"). Keep it to a few words.',
+        '- HARD LIMIT: each shot prompt must be under 450 characters.',
         '- Proportional to shot duration (longer = more detail/action)',
         '- Write in present tense, cinematic style',
         '- Each shot must flow logically from the previous but feel visually distinct',

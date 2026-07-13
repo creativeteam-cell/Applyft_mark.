@@ -24,7 +24,8 @@ export async function GET(req: NextRequest) {
       pageToken,
     })
 
-    const files = (res.data.files || []) as any[]
+    // REF_ files are uploaded motion-control reference videos — not generated results
+    const files = ((res.data.files || []) as any[]).filter((f: any) => !String(f.name || '').startsWith('REF_'))
     const nextPageToken = res.data.nextPageToken || null
 
     const items = files.map((f: any) => {
