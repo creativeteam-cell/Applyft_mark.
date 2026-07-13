@@ -9,6 +9,7 @@ export interface LearnedRule {
   element: string       // cta | headline | logo | background | layout | color | text | other
   sizes: string[]       // ['9x16', ...]; пустой массив = все форматы
   appCodes: string[]    // ['FL', ...]; пустой массив = все приложения
+  scope: 'team' | 'personal'  // team — для всех; personal — применяется только когда генерит автор
   weight: number        // сколько раз правило подкреплялось фиксами
   examples: string[]    // исходные тексты фиксов (до 5 последних)
   active: boolean       // выключенные правила не попадают в промпты
@@ -81,10 +82,12 @@ export async function saveRules(data: RulesData): Promise<void> {
   }
 }
 
-/** Отбор правил для промпта: фильтр по формату и приложению, топ по весу. */
-export function selectRulesForPrompt(all: LearnedRule[], size?: string, appCode?: string, limit = 10): LearnedRule[] {
+/** Отбор правил для промпта: командные — всем, персональные — только их автору.
+ *  Плюс фильтр по формату и приложению, топ по весу. */
+export function selectRulesForPrompt(all: LearnedRule[], size?: string, appCode?: string, userEmail?: string, limit = 10): LearnedRule[] {
   return all
     .filter(r => r.active)
+    .filter(r => (r.scope ?? 'team') === 'team' || (userEmail && r.createdBy === userEmail))
     .filter(r => r.sizes.length === 0 || (size && r.sizes.includes(size)))
     .filter(r => r.appCodes.length === 0 || (appCode && r.appCodes.includes(appCode)))
     .sort((a, b) => b.weight - a.weight)

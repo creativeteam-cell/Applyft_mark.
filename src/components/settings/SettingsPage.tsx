@@ -518,7 +518,7 @@ export function SettingsPage() {
 
       <div className="mb-6">
         <SectionHeader title="Learned Rules" expanded={rulesOpen} onToggle={() => setRulesOpen(!rulesOpen)} badge="AI" />
-        {rulesOpen && <LearnedRulesSection />}
+        {rulesOpen && <LearnedRulesSection currentEmail={currentEmail} />}
       </div>
 
       {adminChecked && isAdmin && (

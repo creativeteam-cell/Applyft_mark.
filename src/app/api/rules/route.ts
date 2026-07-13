@@ -18,13 +18,19 @@ export async function PATCH(req: NextRequest) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { id, active, rule } = await req.json()
+  const { id, active, rule, scope } = await req.json()
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
   const data = await getRules()
   const target = data.rules.find(r => r.id === id)
   if (!target) return NextResponse.json({ error: 'Rule not found' }, { status: 404 })
 
+  // Личными правилами управляет только их автор
+  if ((target.scope ?? 'team') === 'personal' && target.createdBy !== session.user.email) {
+    return NextResponse.json({ error: 'This is a personal rule of another user' }, { status: 403 })
+  }
+
+  if (scope === 'team' || scope === 'personal') target.scope = scope
   if (typeof active === 'boolean') target.active = active
   if (typeof rule === 'string' && rule.trim()) target.rule = rule.trim()
   target.updatedAt = new Date().toISOString()
@@ -41,9 +47,12 @@ export async function DELETE(req: NextRequest) {
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
   const data = await getRules()
-  const before = data.rules.length
+  const target = data.rules.find(r => r.id === id)
+  if (!target) return NextResponse.json({ error: 'Rule not found' }, { status: 404 })
+  if ((target.scope ?? 'team') === 'personal' && target.createdBy !== session.user.email) {
+    return NextResponse.json({ error: 'This is a personal rule of another user' }, { status: 403 })
+  }
   data.rules = data.rules.filter(r => r.id !== id)
-  if (data.rules.length === before) return NextResponse.json({ error: 'Rule not found' }, { status: 404 })
 
   await saveRules(data)
   return NextResponse.json({ success: true })

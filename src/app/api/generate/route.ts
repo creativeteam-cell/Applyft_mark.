@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import OpenAI from 'openai'
+import sharp from 'sharp'
 import { generatePrompt } from '@/lib/openai'
 import { generateImage, recomposeImage, DEFAULT_GEMINI_MODEL } from '@/lib/imagen'
 import { getConfig } from '@/lib/appsStore'
@@ -10,6 +11,60 @@ import { getRulesCached, selectRulesForPrompt, buildRulesPromptBlock } from '@/l
 import { learnFromFix } from '@/lib/ruleLearner'
 
 export const maxDuration = 210
+
+// Подготовка подложки для 9x16-экстенда: оригинал размещается на полном холсте
+// 1080x1920, верх/низ заполняются зеркальным отражением краёв + блюром. Gemini
+// получает задачу "доработать размытые зоны", а не "дорисовать сверху/снизу" —
+// переход изначально плавный, и характерные горизонтальные швы не возникают.
+async function padTo916(imageBase64: string): Promise<string | null> {
+  try {
+    const buf = Buffer.from(imageBase64.replace(/^data:image\/\w+;base64,/, ''), 'base64')
+    const W = 1080, H = 1920
+    const resized = await sharp(buf).resize(W, null, { withoutEnlargement: false }).toBuffer()
+    const meta = await sharp(resized).metadata()
+    const h0 = meta.height || 0
+    if (!h0 || h0 >= H) return null // источник уже выше 9:16 — обычный путь
+
+    // Больше места снизу (под "мёртвую зону" платформ), меньше сверху
+    const top = Math.round((H - h0) * 0.35)
+    const bottom = H - h0 - top
+
+    const mirrored = await sharp(resized)
+      .extend({ top, bottom, left: 0, right: 0, extendWith: 'mirror' })
+      .toBuffer()
+    const blurred = await sharp(mirrored).blur(30).toBuffer()
+
+    // Растушёвка как в Photoshop generative fill: верхний и нижний край оригинала
+    // (FEATHER px) плавно растворяются в размытую подложку через альфа-градиент —
+    // жёсткой границы не существует уже на входе в Gemini.
+    const FEATHER = 40
+    const maskSvg = Buffer.from(
+      `<svg width="${W}" height="${h0}" xmlns="http://www.w3.org/2000/svg">
+        <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+          <stop offset="${(FEATHER / h0).toFixed(4)}" stop-color="#fff" stop-opacity="1"/>
+          <stop offset="${(1 - FEATHER / h0).toFixed(4)}" stop-color="#fff" stop-opacity="1"/>
+          <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+        </linearGradient></defs>
+        <rect width="100%" height="100%" fill="url(#g)"/>
+      </svg>`
+    )
+    const feathered = await sharp(resized)
+      .ensureAlpha()
+      .composite([{ input: maskSvg, blend: 'dest-in' }])
+      .png()
+      .toBuffer()
+
+    const final = await sharp(blurred)
+      .composite([{ input: feathered, top, left: 0 }])
+      .jpeg({ quality: 92 })
+      .toBuffer()
+    return `data:image/jpeg;base64,${final.toString('base64')}`
+  } catch (e: any) {
+    console.warn('[padTo916] failed, falling back to legacy extend:', e.message)
+    return null
+  }
+}
 
 // QA-проверка 9x16 после рекомпозиции (экстенда). Проверяет две вещи:
 // 1) сейф-зоны: верхние 15% и нижние 40% — зоны UI платформ, текст/CTA/лого запрещены;
@@ -90,7 +145,7 @@ export async function POST(req: NextRequest) {
     let rulesBlock = ''
     try {
       const { rules } = await getRulesCached()
-      rulesBlock = buildRulesPromptBlock(selectRulesForPrompt(rules, targetSize, appCode))
+      rulesBlock = buildRulesPromptBlock(selectRulesForPrompt(rules, targetSize, appCode, session.user.email || undefined))
     } catch {}
 
     // Обучение на фиксе СП: GPT видит фикс + картинку, на которую он писался.
@@ -105,7 +160,13 @@ export async function POST(req: NextRequest) {
     if (recomposeBase64 && targetSize) {
       await updateQueue('gemini', 1)
       try {
-        let imageBase64 = await recomposeImage(recomposeBase64, targetSize, fixNote, undefined, rulesBlock)
+        // 9x16 без fixNote: пробуем путь с механической подложкой (анти-швы)
+        let padded: string | null = null
+        if (targetSize === '9x16' && !fixNote) padded = await padTo916(recomposeBase64)
+
+        let imageBase64 = padded
+          ? await recomposeImage(padded, targetSize, undefined, undefined, rulesBlock, true)
+          : await recomposeImage(recomposeBase64, targetSize, fixNote, undefined, rulesBlock)
 
         // 9x16: автопроверка сейф-зон + до 2 ретраев с конкретной fix-инструкцией.
         // Пропускаем, когда СП сам прислал fixNote — его правка приоритетнее автоQA.

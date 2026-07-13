@@ -11,6 +11,7 @@ interface LearnedRule {
   element: string
   sizes: string[]
   appCodes: string[]
+  scope?: 'team' | 'personal'
   weight: number
   examples: string[]
   active: boolean
@@ -18,7 +19,7 @@ interface LearnedRule {
   createdAt: string
 }
 
-export function LearnedRulesSection() {
+export function LearnedRulesSection({ currentEmail }: { currentEmail?: string }) {
   const [rules, setRules] = useState<LearnedRule[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -77,11 +78,16 @@ export function LearnedRulesSection() {
         </p>
       ) : (
         <div className="flex flex-col gap-2">
-          {rules.map(rule => (
+          {rules.map(rule => {
+            const isPersonal = (rule.scope ?? 'team') === 'personal'
+            const isMine = !rule.createdBy || rule.createdBy === currentEmail
+            const canManage = !isPersonal || isMine
+            return (
             <div key={rule.id} className="rounded-lg px-3 py-2.5"
               style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', opacity: rule.active ? 1 : 0.5 }}>
               <div className="flex items-start gap-3">
-                <button onClick={() => toggleActive(rule)} title={rule.active ? 'Disable' : 'Enable'}
+                <button onClick={() => canManage && toggleActive(rule)} title={!canManage ? 'Personal rule of another user' : rule.active ? 'Disable' : 'Enable'}
+                  disabled={!canManage}
                   className="relative w-8 h-4.5 rounded-full transition-all flex-shrink-0 mt-0.5"
                   style={{ background: rule.active ? 'var(--accent)' : 'rgba(255,255,255,0.1)', height: 18, width: 32 }}>
                   <span className="absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all"
@@ -104,6 +110,13 @@ export function LearnedRulesSection() {
                   )}
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
                     <span className="text-[10px] px-1.5 py-0.5 rounded font-mono"
+                      style={{
+                        background: isPersonal ? 'rgba(251,188,5,0.12)' : 'rgba(52,168,83,0.12)',
+                        color: isPersonal ? '#fbbc05' : '#34a853',
+                      }}>
+                      {isPersonal ? `personal · ${isMine ? 'you' : (rule.createdBy.split('@')[0] || 'unknown')}` : 'team'}
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded font-mono"
                       style={{ background: 'rgba(79,110,247,0.12)', color: 'var(--accent)' }}>{rule.element}</span>
                     {(rule.sizes.length ? rule.sizes : ['all sizes']).map(s => (
                       <span key={s} className="text-[10px] px-1.5 py-0.5 rounded font-mono"
@@ -124,19 +137,21 @@ export function LearnedRulesSection() {
                     </div>
                   )}
                 </div>
-                <div className="flex gap-1 flex-shrink-0">
-                  <button onClick={() => { setEditingId(rule.id); setEditText(rule.rule) }} title="Edit"
-                    className="w-6 h-6 flex items-center justify-center rounded opacity-50 hover:opacity-100">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-                  </button>
-                  <button onClick={() => deleteRule(rule.id)} title="Delete"
-                    className="w-6 h-6 flex items-center justify-center rounded opacity-50 hover:opacity-100" style={{ color: '#f87171' }}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-                  </button>
-                </div>
+                {canManage && (
+                  <div className="flex gap-1 flex-shrink-0">
+                    <button onClick={() => { setEditingId(rule.id); setEditText(rule.rule) }} title="Edit"
+                      className="w-6 h-6 flex items-center justify-center rounded opacity-50 hover:opacity-100">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                    </button>
+                    <button onClick={() => deleteRule(rule.id)} title="Delete"
+                      className="w-6 h-6 flex items-center justify-center rounded opacity-50 hover:opacity-100" style={{ color: '#f87171' }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
-          ))}
+          )})}
         </div>
       )}
     </div>

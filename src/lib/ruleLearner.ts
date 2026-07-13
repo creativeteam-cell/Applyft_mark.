@@ -20,8 +20,10 @@ export async function learnFromFix(params: {
 
   try {
     const store = await getRules()
+    // Для сопоставления показываем только командные правила + личные правила этого автора
     const existingCompact = store.rules
       .filter(r => r.active)
+      .filter(r => (r.scope ?? 'team') === 'team' || r.createdBy === userEmail)
       .map(r => ({ id: r.id, rule: r.rule }))
 
     const url = imageBase64.startsWith('data:') ? imageBase64 : `data:image/jpeg;base64,${imageBase64}`
@@ -45,10 +47,15 @@ ${size ? `Image format: ${size}.` : ''}
 
 The instruction may be in any language (Russian/Ukrainian/English).
 
-STEP 1 — Is it generalizable?
-A fix is REUSABLE if it expresses a preference that should apply to future creatives too: element positioning, sizing, spacing, color usage, style, composition (e.g. "опусти CTA ниже", "лого слишком большое", "текст не должен перекрывать лицо").
-A fix is ONE-OFF if it's about specific content: fixing a typo, changing specific wording, replacing a specific person/object, one-time color swap of a specific element.
-If ONE-OFF → respond {"generalizable": false}
+STEP 1 — Is it generalizable? BE STRICT — most fixes are NOT.
+A fix is REUSABLE only if it expresses a lasting preference that clearly should apply to FUTURE, DIFFERENT creatives: element positioning policy, sizing policy, spacing, style, safe zones (e.g. "опусти CTA ниже", "лого всегда слишком большое делаешь", "текст не должен перекрывать лицо").
+A fix is ONE-OFF (→ {"generalizable": false}) if it references specific content of THIS image: removing/adding/extending a specific object or person ("прибери машину знизу", "extend the image of the girl and the man", "убери третью руку"), fixing a typo, changing specific wording, one-time color swap of a specific element, any instruction that only makes sense for this exact picture.
+THE TEST: would this instruction make sense as a standing order for a creative the producer has never seen? If not — ONE-OFF.
+
+STEP 1b — Team-wide or personal taste?
+If the preference reflects an objective production standard (platform safe zones, readability, brand consistency) → "scope": "team".
+If it reflects an individual stylistic taste that other producers may not share (preferred color moods, personal layout style) → "scope": "personal".
+When unsure → "personal" (safer: applies only to its author).
 
 STEP 2 — Resolve references using the IMAGE.
 "Опусти ниже" alone is meaningless. Look at the image: WHAT should move, from WHERE to WHERE (in % of frame height/width). Write a self-contained rule in English that makes sense without seeing this image.
@@ -63,6 +70,7 @@ Otherwise respond with a new rule:
   "generalizable": true,
   "rule": "self-contained English rule, one sentence, specific and actionable",
   "element": "cta|headline|logo|background|layout|color|text|other",
+  "scope": "team" | "personal",
   "size_specific": true/false,   // does this rule only make sense for the ${size || 'given'} format?
   "app_specific": false          // true only if the rule mentions a specific app's brand/logo
 }
@@ -108,6 +116,7 @@ Respond ONLY with raw JSON, no markdown.`,
       element: String(parsed.element || 'other'),
       sizes: parsed.size_specific && size ? [size] : [],
       appCodes: parsed.app_specific && appCode ? [appCode] : [],
+      scope: parsed.scope === 'team' ? 'team' : 'personal',
       weight: 1,
       examples: [fixText.trim()],
       active: true,
