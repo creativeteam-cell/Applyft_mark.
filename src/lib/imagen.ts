@@ -379,7 +379,8 @@ RULES:
 - Never modify anything deeper than the blending strip, and never touch text, logos, faces, or key subject pixels even inside the strip
 - Replace the blurred placeholder areas with a natural, detailed continuation of the scene: continue light beams, neon rays, gradients, floor, reflections, textures through them at matching angles and brightness
 - The transition between original and refined areas must be perfectly seamless — zero visible lines, bands, or brightness steps. The viewer must not be able to tell where the original ends
-- NO new objects, people, text, logos, or UI elements in the refined areas — background continuation only
+- COMPLETE CROPPED SUBJECTS — IMPORTANT: if a person or key object in the original is CUT OFF by the boundary of the sharp band (e.g. the top of a head, arms, legs, feet), you MUST naturally complete them in the refined area — continue the body/object anatomically correctly, matching pose, lighting, style, and proportions. A person whose head or limbs remain cut off at the old boundary is a failure
+- NO NEW unrelated content: do not add people, objects, text, logos, or UI elements that are not a continuation of something already visible in the original
 - PRESERVE ALL EXISTING CONTENT — CRITICAL: every text element, headline, logo, button, and UI element visible in the original MUST be present in the output, unchanged and in the same position. Removing or altering any of them is a total failure of the task
 - Match the color grade, lighting, and mood of the original exactly${hint}${teamRulesBlock || ''}`
     return withRetry(prompt, cleanB64, undefined, 3, targetSize, undefined, model)

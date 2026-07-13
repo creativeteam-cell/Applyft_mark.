@@ -117,6 +117,7 @@ CHECK 2 — SEAMS (this image was vertically extended by AI):
 CHECK 3 — UNFINISHED EXTENSION:
 - The top and bottom areas must be SHARP and detailed like the rest of the image
 - Flag if the top or bottom band is heavily blurred, out-of-focus, or looks like an upside-down mirrored copy of the adjacent content — that means the AI extension was not completed (fix_prompt: "Repaint the blurred top/bottom band into a sharp, detailed continuation of the scene")
+- Flag if a person or key object is unnaturally CUT OFF at a horizontal line (e.g. head/hands missing where the extension begins) while there is empty background above/below — the subject should have been completed (fix_prompt: "Complete the person's head/body naturally in the area above/below")
 
 Check the image and respond ONLY with raw JSON (no markdown):
 - If everything is correct: {"status":"ok","fix_prompt":""}
