@@ -280,6 +280,10 @@ const SIZE_HINTS: Record<string, string> = {
     'SAFE ZONE: ALL text, buttons, logos, and UI elements MUST be at least 100 pixels from EVERY edge. ' +
     'Elements near edges risk being cut off — push them toward the center.',
 
+  // 9x16 (Stories/Reels/TikTok): у платформ сейф-зоны с ОБЕИХ сторон —
+  // сверху ~15% (имя профиля, крестик, камера), снизу ~40% (лайки, комменты, подпись).
+  // Поэтому контент кладём в центральную полосу 15–60% высоты, а не липим к верху.
+  // Отступы: 280px сверху, 400px снизу, 100px по бокам (канвас 1080x1920).
   '9x16':
     '\n\n[CRITICAL - OUTPUT FORMAT]: TALL PORTRAIT image, aspect ratio 9:16 (phone screen). ' +
     'VERTICAL POSITIONING — MANDATORY: place ALL text, headlines, CTAs, and key elements in the CENTER BAND between 15% and 60% of the frame height. The composition must feel vertically centered, NOT pinned to the top. ' +
@@ -339,7 +343,12 @@ export async function recomposeImage(imageBase64: string, targetSize: string, fi
 
   const cleanB64 = imageBase64.replace(/^data:image\/\w+;base64,/, '')
 
-  // Fix mode: no rules, no safe-zone, no layout restrictions — only the user's raw instruction
+  // Fix mode: без правил и сейф-зон — только сырая инструкция пользователя.
+  // ВАЖНО: инструкция объявлена высшим приоритетом и ПЕРЕКРЫВАЕТ текущий макет —
+  // раньше Gemini игнорировал команды типа "опусти элементы ниже", потому что
+  // установка "сохрани всё как было" перевешивала просьбу подвинуть. Теперь явно
+  // сказано: просят подвинуть — двигай заметно, результат без изменений = провал.
+  // Инструкция может быть на любом языке (ru/uk/en).
   if (fixNote?.trim()) {
     const fixPrompt = `USER EDIT INSTRUCTION — HIGHEST PRIORITY, MUST BE EXECUTED: ${fixNote.trim()}
 
