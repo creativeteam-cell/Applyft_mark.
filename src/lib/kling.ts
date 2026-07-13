@@ -211,6 +211,10 @@ export async function createOmniVideoTask(params: {
   sound?: 'on' | 'off'
   multi_shot?: boolean
   multi_prompt?: { index: number; prompt: string; duration: string }[]
+  // Video reference (e.g. "generate the next shot" continuation): URL only
+  video_url?: string
+  video_refer_type?: 'feature' | 'base'
+  keep_original_sound?: 'yes' | 'no'
 }): Promise<{ task_id: string }> {
   const body: any = {
     model_name: params.model_name,
@@ -226,7 +230,16 @@ export async function createOmniVideoTask(params: {
   } else {
     body.prompt = params.prompt ?? ''
   }
-  if (params.first_frame) {
+  if (params.video_url) {
+    // Reference video: sound generation must be off per docs
+    body.sound = 'off'
+    body.video_list = [{
+      video_url: params.video_url,
+      refer_type: params.video_refer_type ?? 'feature',
+      keep_original_sound: params.keep_original_sound ?? 'no',
+    }]
+    if (params.video_refer_type !== 'base') body.aspect_ratio = params.aspect_ratio ?? '16:9'
+  } else if (params.first_frame) {
     body.image_list = [{ image_url: params.first_frame, type: 'first_frame' }]
   } else {
     // aspect_ratio is only valid without first-frame reference / video editing

@@ -441,6 +441,69 @@ const EXTENDABLE_MODELS = new Set(['kling-v1', 'kling-v1-5', 'kling-v1-6'])
 
 function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose: () => void; onRefresh: () => void }) {
   const canExtend = EXTENDABLE_MODELS.has(item.model) && !!item.klingVideoId
+
+  // ── Continue video (O1/Omni video reference: "generate the next shot") ──
+  const [contModel, setContModel] = useState<'kling-video-o1' | 'kling-v3-omni'>('kling-video-o1')
+  const [contPrompt, setContPrompt] = useState('')
+  const [contDuration, setContDuration] = useState(5)
+  const [contKeepSound, setContKeepSound] = useState(false)
+  const [continuing, setContinuing] = useState(false)
+  const [contStatus, setContStatus] = useState<'idle'|'processing'|'done'|'error'>('idle')
+  const [contError, setContError] = useState('')
+  const contPollRef = useRef<ReturnType<typeof setInterval>|null>(null)
+
+  function stopContPoll() { if (contPollRef.current) { clearInterval(contPollRef.current); contPollRef.current = null } }
+
+  async function handleContinue() {
+    setContinuing(true); setContStatus('processing'); setContError('')
+    try {
+      // Signed public URL so Kling can fetch the source video
+      const urlRes = await fetch(`/api/video/public-url?id=${encodeURIComponent(item.id)}`)
+      const urlData = await urlRes.json()
+      if (!urlData.url) throw new Error(urlData.error || 'Failed to get video URL')
+
+      const fullPrompt = contPrompt.trim()
+        ? `Based on <<<video_1>>>, generate the next shot: ${contPrompt.trim()}`
+        : 'Based on <<<video_1>>>, generate the next shot, continuing the scene naturally.'
+
+      const res = await fetch('/api/video/omni', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model_name: contModel, prompt: fullPrompt,
+          video_url: urlData.url, video_refer_type: 'feature',
+          keep_original_sound: contKeepSound ? 'yes' : 'no',
+          duration: contDuration, mode: 'pro',
+          aspect_ratio: ['16:9','9:16','1:1'].includes(item.aspectRatio) ? item.aspectRatio : '16:9',
+        }),
+      })
+      const d = await res.json()
+      if (d.error) throw new Error(d.error)
+      stopContPoll()
+      contPollRef.current = setInterval(async () => {
+        const sr = await fetch(`/api/video/status/${d.task_id}?type=omni-video`)
+        const sd = await sr.json()
+        if (sd.task_status === 'succeed') {
+          stopContPoll()
+          const url = sd.task_result?.videos?.[0]?.url
+          const kid = sd.task_result?.videos?.[0]?.id ?? ''
+          if (url) {
+            await fetch('/api/video/save', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                videoUrl: url, klingVideoId: kid,
+                prompt: item.prompt + (contPrompt ? ' [next shot: ' + contPrompt + ']' : ' [next shot]'),
+                model: contModel, duration: String(contDuration),
+                aspectRatio: item.aspectRatio, sound: 'off', inputType: 'video-reference',
+              }),
+            })
+          }
+          setContStatus('done'); setContinuing(false); onRefresh()
+        } else if (sd.task_status === 'failed') {
+          stopContPoll(); setContError(sd.task_status_msg || 'Continue failed'); setContStatus('error'); setContinuing(false)
+        }
+      }, 4000)
+    } catch (e: any) { setContError(e.message); setContStatus('error'); setContinuing(false) }
+  }
   const [extPrompt, setExtPrompt] = useState('')
   const [extDuration, setExtDuration] = useState<'4'|'5'>('5')
   const [extending, setExtending] = useState(false)
@@ -585,6 +648,51 @@ function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose
             </button>
           </div>
           </>)}
+
+          {/* Continue video — O1/Omni "next shot" via video reference */}
+          <div className="mb-4" style={{ height: 1, background: 'var(--border)' }} />
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Continue video (next shot)</div>
+              <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                {([['kling-video-o1','O1'],['kling-v3-omni','Omni']] as const).map(([val, label]) => (
+                  <button key={val} onClick={() => setContModel(val)}
+                    className="px-2 py-0.5 text-[10px] font-medium transition-all"
+                    style={{ background: contModel === val ? 'rgba(79,110,247,0.2)' : 'transparent', color: contModel === val ? 'var(--accent)' : 'var(--text-muted)', borderRight: val === 'kling-video-o1' ? '1px solid var(--border)' : 'none' }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <textarea value={contPrompt} onChange={e => setContPrompt(e.target.value)}
+              placeholder="Optional: what happens in the next shot..." rows={2}
+              className="w-full rounded-lg resize-none outline-none text-sm p-3 mb-2"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                {[5, 10, ...(contModel === 'kling-v3-omni' ? [15] : [])].map(d => (
+                  <button key={d} onClick={() => setContDuration(d)}
+                    className="px-2.5 py-0.5 text-[10px] font-medium transition-all"
+                    style={{ background: contDuration === d ? 'rgba(79,110,247,0.2)' : 'transparent', color: contDuration === d ? 'var(--accent)' : 'var(--text-muted)' }}>
+                    {d}s
+                  </button>
+                ))}
+              </div>
+              <label className="flex items-center gap-1.5 text-[10px] cursor-pointer" style={{ color: 'var(--text-muted)' }}>
+                <input type="checkbox" checked={contKeepSound} onChange={e => setContKeepSound(e.target.checked)} />
+                Keep source sound
+              </label>
+            </div>
+            {contStatus === 'done' && <p className="text-xs mb-2" style={{ color: '#34a853' }}>✓ Next shot generated and saved</p>}
+            {contError && <p className="text-xs mb-2" style={{ color: '#f87171' }}>{contError}</p>}
+            <button onClick={handleContinue} disabled={continuing}
+              className="w-full py-2 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2"
+              style={{ background: 'rgba(79,110,247,0.12)', color: 'var(--accent)', border: '1px solid var(--border)' }}>
+              {continuing ? (
+                <><svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>Generating next shot...</>
+              ) : '🎬 Continue'}
+            </button>
+          </div>
           {err && <p className="text-xs mb-3" style={{ color: '#f87171' }}>{err}</p>}
           <div className="flex gap-2 mt-auto">
             <a href={`/api/video/file/${item.id}?download=1`} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium" style={{ background: 'var(--accent)', color: '#fff' }}>
