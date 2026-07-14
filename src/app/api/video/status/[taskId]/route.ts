@@ -24,7 +24,7 @@ export async function GET(
 
     // Old format: text2video, image2video, video-extend, motion-control, avatar, omni-video
     const data = await getVideoTaskStatus(
-      type as 'text2video' | 'image2video' | 'video-extend' | 'motion-control' | 'avatar' | 'omni-video',
+      type as 'text2video' | 'image2video' | 'video-extend' | 'motion-control' | 'avatar' | 'omni-video' | 'advanced-lip-sync',
       params.taskId
     )
     return NextResponse.json(data)

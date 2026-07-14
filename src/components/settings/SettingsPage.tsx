@@ -303,7 +303,7 @@ function KlingBalanceCard() {
           </span>
           {quota.expiresAt && (
             <span className="text-xs" style={{ color: low ? '#f87171' : 'var(--text-muted)' }}>
-              expires {new Date(quota.expiresAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}
+              expires {new Date(quota.expiresAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
             </span>
           )}
         </div>
@@ -315,7 +315,7 @@ function KlingBalanceCard() {
             {quota.packs.map((p, i) => (
               <div key={i} className="flex justify-between text-[11px]" style={{ color: 'var(--text-muted)' }}>
                 <span>{p.name}</span>
-                <span>{p.remaining}/{p.total} · until {new Date(p.expiresAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}</span>
+                <span>{p.remaining}/{p.total} · until {new Date(p.expiresAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
               </div>
             ))}
           </div>

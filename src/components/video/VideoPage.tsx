@@ -7,11 +7,11 @@ import { UsageBadge } from '@/components/ui/UsageBadge'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type VideoMode = 'standard' | 'multishot' | 'motionControl' | 'avatar'
+type VideoMode = 'standard' | 'multishot' | 'motionControl' | 'avatar' | 'dubbing'
 type Mode = 'std' | 'pro' | '4k'
 type AspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '3:4' | '3:2' | '2:3'
 type TaskStatus = 'idle' | 'pending' | 'processing' | 'done' | 'error'
-type KlingModel = 'kling-v3' | 'kling-v3-turbo' | 'kling-v3-omni' | 'kling-video-o1' | 'kling-v2-6' | 'kling-v2-5-turbo' | 'avatar'
+type KlingModel = 'kling-v3' | 'kling-v3-turbo' | 'kling-v3-omni' | 'kling-video-o1' | 'kling-v2-6' | 'kling-v2-5-turbo' | 'avatar' | 'dubbing'
 
 interface ShotItem { id: string; prompt: string; duration: number }
 interface ModelDef {
@@ -72,6 +72,11 @@ const MODELS: ModelDef[] = [
     supportsSound: false, supports4K: false, supportsLastFrame: false, supportsMultishot: false, supportsMotionControl: false, isAvatar: true, supportsImageList: false,
     modes: ['avatar'], aspectRatios: [],
   },
+  {
+    id: 'dubbing', label: 'Dubbing', description: 'Translate any video to another language with lip-sync', tags: ['NEW'],
+    supportsSound: false, supports4K: false, supportsLastFrame: false, supportsMultishot: false, supportsMotionControl: false, isAvatar: false, supportsImageList: false,
+    modes: ['dubbing'], aspectRatios: [],
+  },
 ]
 
 const MODE_LABELS: Record<VideoMode, string> = {
@@ -79,7 +84,26 @@ const MODE_LABELS: Record<VideoMode, string> = {
   multishot: 'Multishot',
   motionControl: 'Motion Control',
   avatar: 'Avatar',
+  dubbing: 'Dubbing',
 }
+
+const DUB_LANGUAGES: [string, string][] = [
+  ['EN', 'English'], ['SP', 'Spanish'], ['PT', 'Portuguese'], ['DE', 'German'],
+  ['FR', 'French'], ['IT', 'Italian'], ['JP', 'Japanese'], ['KR', 'Korean'],
+  ['AR', 'Arabic'], ['HI', 'Hindi'], ['PL', 'Polish'], ['UA', 'Ukrainian'],
+  ['CN', 'Chinese'], ['HE', 'Hebrew'], ['CZ', 'Czech'], ['ND', 'Dutch'],
+]
+
+// Предзаписанные мультиязычные голоса ElevenLabs
+const DUB_VOICES: { id: string; label: string }[] = [
+  { id: '21m00Tcm4TlvDq8ikWAM', label: 'Rachel — female, calm' },
+  { id: 'EXAVITQu4vr4xnSDxMaL', label: 'Bella — female, energetic' },
+  { id: 'pNInz6obpgDQGcFmaJgB', label: 'Adam — male, deep' },
+  { id: 'TxGEqnHWrfWFTfGW9XjX', label: 'Josh — male, energetic' },
+]
+
+// Dubbing пока в закрытой бете — виден только этим пользователям
+const DUBBING_ALLOWED_EMAILS = new Set(['valerii.lemberov@applyft.co'])
 
 const TURBO_MODELS = new Set(['kling-v3-turbo'])
 // O1 & Omni share the /v1/videos/omni-video endpoint
@@ -118,6 +142,8 @@ function estimateCost(params: {
     rate = is720 ? 0.3 : 0.5
   } else if (model === 'avatar') {
     rate = is720 ? 0.4 : 0.8
+  } else if (model === 'dubbing') {
+    return null // липсинк 0.5 юнита/5с, длительность заранее неизвестна
   } else {
     rate = is720 ? 0.6 : 0.8
   }
@@ -193,9 +219,10 @@ function JsonPromptDisplay({ prompt }: { prompt: string }) {
 
 // ── Model Dropdown ─────────────────────────────────────────────────────────
 
-function ModelDropdown({ model, onSelect }: { model: KlingModel; onSelect: (m: KlingModel) => void }) {
+function ModelDropdown({ model, onSelect, hiddenIds }: { model: KlingModel; onSelect: (m: KlingModel) => void; hiddenIds?: Set<string> }) {
   const [open, setOpen] = useState(false)
   const current = MODELS.find(m => m.id === model)!
+  const visibleModels = MODELS.filter(m => !hiddenIds?.has(m.id))
 
   return (
     <div className="relative">
@@ -221,7 +248,7 @@ function ModelDropdown({ model, onSelect }: { model: KlingModel; onSelect: (m: K
       {open && (
         <div className="absolute top-full left-0 right-0 mt-1 rounded-xl overflow-hidden z-30"
           style={{ background: 'var(--bg)', border: '1px solid var(--border)', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}>
-          {MODELS.map(m => (
+          {visibleModels.map(m => (
             <button key={m.id} onClick={() => { onSelect(m.id); setOpen(false) }}
               className="w-full text-left px-3 py-2.5 transition-all hover:bg-white/5"
               style={{ borderBottom: '1px solid var(--border)' }}>
@@ -872,6 +899,7 @@ export function VideoPage() {
       if (!data.url) throw new Error(data.error || 'Failed to get video URL')
       setMotionVideoUrl(data.url)
       setMotionVideoLabel(`From history: ${item.model.replace('kling-', '')} · ${item.duration}s${item.prompt ? ' · ' + item.prompt.slice(0, 40) : ''}`)
+      setDubFileId(item.id)
     } catch (e: any) {
       setMotionVideoError(e.message)
     }
@@ -925,6 +953,7 @@ export function VideoPage() {
       if (!urlData.url) throw new Error(urlData.error || 'Failed to get video URL')
       setMotionVideoUrl(urlData.url)
       setMotionVideoLabel(`Uploaded: ${file.name}`)
+      setDubFileId(uploaded.id)
     } catch (err: any) {
       setMotionVideoError(err.message)
     }
@@ -937,6 +966,105 @@ export function VideoPage() {
   const [avatarAudioName, setAvatarAudioName] = useState('')
   const [avatarAudioDuration, setAvatarAudioDuration] = useState(0)
   const avatarAudioRef = useRef<HTMLInputElement>(null)
+
+  // ── Dubbing state ──
+  // Источник видео переиспользует motionVideoUrl/motionVideoLabel (режимы взаимоисключающие)
+  const [dubLang, setDubLang] = useState('SP')
+  const [dubVoice, setDubVoice] = useState(DUB_VOICES[0].id)
+  const [dubFileId, setDubFileId] = useState<string | null>(null) // fileId, если видео из истории
+  const [dubPreparing, setDubPreparing] = useState(false)
+  const [dubPrepared, setDubPrepared] = useState<{ sourceText: string; sourceLang: string; translatedText: string; audioBase64: string; speakers: number } | null>(null)
+  const [dubEditedText, setDubEditedText] = useState('')
+  const [dubRevoicing, setDubRevoicing] = useState(false)
+  const [dubProcessing, setDubProcessing] = useState(false)
+  const [dubStatus, setDubStatus] = useState<'idle'|'processing'|'done'|'error'>('idle')
+  const [dubError, setDubError] = useState('')
+  const dubPollRef = useRef<ReturnType<typeof setInterval>|null>(null)
+
+  async function handleDubPrepare() {
+    if (!motionVideoUrl) return
+    setDubPreparing(true); setDubError(''); setDubPrepared(null)
+    try {
+      const res = await fetch('/api/dubbing/prepare', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }),
+          targetLang: dubLang, voiceId: dubVoice,
+        }),
+      })
+      const d = await res.json()
+      if (d.error) throw new Error(d.error)
+      setDubPrepared(d)
+      setDubEditedText(d.translatedText)
+    } catch (e: any) { setDubError(e.message) }
+    setDubPreparing(false)
+  }
+
+  async function handleDubRevoice() {
+    if (!dubPrepared || !dubEditedText.trim()) return
+    setDubRevoicing(true); setDubError('')
+    try {
+      const res = await fetch('/api/dubbing/tts', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: dubEditedText, voiceId: dubVoice }),
+      })
+      const d = await res.json()
+      if (d.error) throw new Error(d.error)
+      setDubPrepared(prev => prev ? { ...prev, translatedText: dubEditedText, audioBase64: d.audioBase64 } : prev)
+    } catch (e: any) { setDubError(e.message) }
+    setDubRevoicing(false)
+  }
+
+  function stopDubPoll() { if (dubPollRef.current) { clearInterval(dubPollRef.current); dubPollRef.current = null } }
+
+  async function handleDubStart() {
+    if (!dubPrepared || !motionVideoUrl) return
+    setDubProcessing(true); setDubStatus('processing'); setDubError('')
+    try {
+      // Длительность mp3 берём из аудио-элемента
+      const audioDurationMs = await new Promise<number>((resolve, reject) => {
+        const a = new Audio(`data:audio/mpeg;base64,${dubPrepared.audioBase64}`)
+        a.onloadedmetadata = () => resolve(Math.round(a.duration * 1000))
+        a.onerror = () => reject(new Error('Failed to read audio duration'))
+      })
+
+      const res = await fetch('/api/dubbing/lipsync', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }),
+          audioBase64: dubPrepared.audioBase64, audioDurationMs,
+        }),
+      })
+      const d = await res.json()
+      if (d.error) throw new Error(d.error)
+
+      stopDubPoll()
+      dubPollRef.current = setInterval(async () => {
+        const sr = await fetch(`/api/video/status/${d.task_id}?type=advanced-lip-sync`)
+        const sd = await sr.json()
+        if (sd.task_status === 'succeed') {
+          stopDubPoll()
+          const url = sd.task_result?.videos?.[0]?.url
+          const kid = sd.task_result?.videos?.[0]?.id ?? ''
+          const dur = sd.task_result?.videos?.[0]?.duration ?? ''
+          if (url) {
+            await fetch('/api/video/save', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                videoUrl: url, klingVideoId: kid,
+                prompt: `[dubbed → ${dubLang}] ${dubPrepared.sourceText.slice(0, 120)}`,
+                model: 'dubbing', duration: dur || '0',
+                aspectRatio: '', sound: 'on', inputType: 'dubbing',
+              }),
+            })
+          }
+          setDubStatus('done'); setDubProcessing(false); fetchHistory()
+        } else if (sd.task_status === 'failed') {
+          stopDubPoll(); setDubError(sd.task_status_msg || 'Lip-sync failed'); setDubStatus('error'); setDubProcessing(false)
+        }
+      }, 5000)
+    } catch (e: any) { setDubError(e.message); setDubStatus('error'); setDubProcessing(false) }
+  }
 
   // ── Generation state ──
   const [status, setStatus] = useState<TaskStatus>('idle')
@@ -956,7 +1084,13 @@ export function VideoPage() {
   const sentinelRef = useRef<HTMLDivElement>(null)
 
   // ── Derived ──
+  const canUseDubbing = DUBBING_ALLOWED_EMAILS.has(session?.user?.email || '')
   const currentModel = MODELS.find(m => m.id === model)!
+
+  // Если dubbing остался в localStorage у пользователя без доступа — сбрасываем
+  useEffect(() => {
+    if (model === 'dubbing' && session && !canUseDubbing) setModel('kling-v3')
+  }, [model, session, canUseDubbing])
   const totalShotsDuration = shots.reduce((s, sh) => s + sh.duration, 0)
   const isTurboModel = TURBO_MODELS.has(model)
   const isOmniModel = OMNI_MODELS.has(model)
@@ -972,6 +1106,7 @@ export function VideoPage() {
     if (videoMode === 'multishot') return (shots.some(s => s.prompt.trim().length > 0) || shotDescription.trim().length > 0) && totalShotsDuration <= 15
     if (videoMode === 'motionControl') return !!motionImage && !!motionVideoUrl
     if (videoMode === 'avatar') return !!avatarImage && !!avatarAudioBase64
+    if (videoMode === 'dubbing') return false // у дубляжа свои кнопки
     return false
   }, [status, videoMode, prompt, shots, shotDescription, motionImage, motionVideoUrl, avatarImage, avatarAudioBase64])
 
@@ -1363,7 +1498,8 @@ export function VideoPage() {
           {/* Model selector */}
           <div className="mb-3">
             <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Model</div>
-            <ModelDropdown model={model} onSelect={setModel} />
+            <ModelDropdown model={model} onSelect={setModel}
+              hiddenIds={canUseDubbing ? undefined : new Set(['dubbing'])} />
           </div>
 
           {/* Mode selector */}
@@ -1701,11 +1837,113 @@ export function VideoPage() {
             </>
           )}
 
+          {/* ── Dubbing Mode ── */}
+          {videoMode === 'dubbing' && (
+            <>
+              <div className="mb-3">
+                <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Video to dub</div>
+                {motionVideoUrl ? (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: 'rgba(79,110,247,0.08)', border: '1px solid var(--border)' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--accent)', flexShrink: 0 }}>
+                      <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>
+                    </svg>
+                    <span className="text-xs truncate flex-1" style={{ color: 'var(--text)' }}>{motionVideoLabel || motionVideoUrl}</span>
+                    <button onClick={() => { setMotionVideoUrl(''); setMotionVideoLabel(''); setDubFileId(null); setDubPrepared(null); setDubStatus('idle') }}
+                      className="opacity-50 hover:opacity-100 flex-shrink-0" style={{ color: 'var(--text-muted)' }}>×</button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <button onClick={() => setMotionVideoPicker(true)}
+                      className="flex-1 py-2.5 rounded-xl text-xs font-medium transition-all"
+                      style={{ background: 'rgba(255,255,255,0.04)', border: '1px dashed var(--border)', color: 'var(--text-muted)' }}>
+                      🎬 From history
+                    </button>
+                    <button onClick={() => motionVideoInputRef.current?.click()} disabled={motionVideoUploading}
+                      className="flex-1 py-2.5 rounded-xl text-xs font-medium transition-all"
+                      style={{ background: 'rgba(255,255,255,0.04)', border: '1px dashed var(--border)', color: 'var(--text-muted)' }}>
+                      {motionVideoUploading ? 'Uploading...' : '⬆ Upload .mp4 / .mov'}
+                    </button>
+                  </div>
+                )}
+                <input ref={motionVideoInputRef} type="file" accept=".mp4,.mov,video/mp4,video/quicktime" className="hidden" onChange={handleMotionVideoUpload} />
+                {motionVideoError && <p className="text-[10px] mt-1" style={{ color: '#f87171' }}>{motionVideoError}</p>}
+                <p className="text-[10px] mt-1" style={{ color: 'rgba(255,255,255,0.2)' }}>2–60 seconds · one visible speaker · up to 100MB</p>
+              </div>
+
+              <div className="mb-3 flex gap-2">
+                <div className="flex-1">
+                  <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Target language</div>
+                  <select value={dubLang} onChange={e => { setDubLang(e.target.value); setDubPrepared(null); setDubStatus('idle') }}
+                    className="w-full rounded-xl px-3 py-2 text-sm outline-none"
+                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                    {DUB_LANGUAGES.map(([code, name]) => <option key={code} value={code} style={{ background: '#1a1a2e' }}>{name}</option>)}
+                  </select>
+                </div>
+                <div className="flex-1">
+                  <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Voice</div>
+                  <select value={dubVoice} onChange={e => { setDubVoice(e.target.value); setDubPrepared(null); setDubStatus('idle') }}
+                    className="w-full rounded-xl px-3 py-2 text-sm outline-none"
+                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                    {DUB_VOICES.map(v => <option key={v.id} value={v.id} style={{ background: '#1a1a2e' }}>{v.label}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {!dubPrepared && (
+                <button onClick={handleDubPrepare} disabled={!motionVideoUrl || dubPreparing}
+                  className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 mb-3"
+                  style={{ background: motionVideoUrl && !dubPreparing ? 'var(--accent)' : 'rgba(255,255,255,0.05)', color: motionVideoUrl && !dubPreparing ? '#fff' : 'var(--text-muted)' }}>
+                  {dubPreparing ? (
+                    <><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>Transcribing & translating...</>
+                  ) : '1 · Transcribe → Translate → Voice'}
+                </button>
+              )}
+
+              {dubPrepared && (
+                <>
+                  {dubPrepared.speakers > 1 && (
+                    <p className="text-[10px] mb-2 px-2 py-1.5 rounded-lg" style={{ background: 'rgba(251,188,5,0.08)', color: '#fbbc05' }}>
+                      ⚠ Detected {dubPrepared.speakers} speakers — MVP voices everything with a single voice
+                    </p>
+                  )}
+                  <div className="mb-2">
+                    <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Original ({dubPrepared.sourceLang})</div>
+                    <p className="text-xs px-2 py-1.5 rounded-lg max-h-20 overflow-y-auto" style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--text-muted)' }}>{dubPrepared.sourceText}</p>
+                  </div>
+                  <div className="mb-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Translation — edit if needed</div>
+                      <button onClick={handleDubRevoice} disabled={dubRevoicing || dubEditedText === dubPrepared.translatedText}
+                        className="text-[10px] px-2 py-0.5 rounded-lg font-medium"
+                        style={{ background: 'rgba(79,110,247,0.12)', color: dubEditedText !== dubPrepared.translatedText ? 'var(--accent)' : 'rgba(255,255,255,0.2)', border: '1px solid var(--border)' }}>
+                        {dubRevoicing ? 'Voicing...' : '↻ Re-voice'}
+                      </button>
+                    </div>
+                    <textarea value={dubEditedText} onChange={e => setDubEditedText(e.target.value)} rows={3}
+                      className="w-full rounded-lg resize-none outline-none text-xs p-2"
+                      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+                  </div>
+                  {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                  <audio controls src={`data:audio/mpeg;base64,${dubPrepared.audioBase64}`} className="w-full mb-2" style={{ height: 32 }} />
+                  {dubStatus === 'done' && <p className="text-xs mb-2" style={{ color: '#34a853' }}>✓ Dubbed video saved to history</p>}
+                  <button onClick={handleDubStart} disabled={dubProcessing}
+                    className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 mb-3"
+                    style={{ background: !dubProcessing ? 'var(--accent)' : 'rgba(255,255,255,0.05)', color: !dubProcessing ? '#fff' : 'var(--text-muted)' }}>
+                    {dubProcessing ? (
+                      <><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>Lip-syncing...</>
+                    ) : '2 · Dub video (lip-sync)'}
+                  </button>
+                </>
+              )}
+              {dubError && <p className="text-xs mb-2" style={{ color: '#f87171' }}>{dubError}</p>}
+            </>
+          )}
+
           {/* ── Settings (model-dependent) ── */}
           <div style={{ height: 1, background: 'var(--border)', marginBottom: 12, marginTop: 4 }} />
 
           {/* Quality */}
-          {videoMode !== 'avatar' && videoMode !== 'motionControl' && (
+          {videoMode !== 'avatar' && videoMode !== 'motionControl' && videoMode !== 'dubbing' && (
             <div className="mb-3">
               <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Quality</div>
               <div className="flex gap-2">
@@ -1728,7 +1966,7 @@ export function VideoPage() {
           )}
 
           {/* Duration slider */}
-          {videoMode !== 'multishot' && videoMode !== 'avatar' && (
+          {videoMode !== 'multishot' && videoMode !== 'avatar' && videoMode !== 'dubbing' && videoMode !== 'motionControl' && (
             <div className="mb-3">
               <div className="flex items-center justify-between mb-1.5">
                 <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Duration</div>
@@ -1812,7 +2050,8 @@ export function VideoPage() {
             </div>
           )}
 
-          {/* Generate button */}
+          {/* Generate button (у дубляжа свой двухшаговый флоу) */}
+          {videoMode !== 'dubbing' && (
           <button onClick={handleGenerate} disabled={!canGenerate}
             className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
             style={{ background: canGenerate ? 'var(--accent)' : 'rgba(255,255,255,0.05)', color: canGenerate ? '#fff' : 'var(--text-muted)', cursor: canGenerate ? 'pointer' : 'not-allowed' }}>
@@ -1830,6 +2069,7 @@ export function VideoPage() {
               </div>
             )}
           </button>
+          )}
 
           {/* Личный лимит видео-юнитов (полная инфа по Kling-балансу — в админке) */}
           <div className="mt-2 flex justify-center">

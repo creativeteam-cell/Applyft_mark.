@@ -100,7 +100,7 @@ export async function createImage2VideoTask(params: {
 }
 
 export async function getVideoTaskStatus(
-  type: 'text2video' | 'image2video' | 'video-extend' | 'motion-control' | 'avatar' | 'omni-video',
+  type: 'text2video' | 'image2video' | 'video-extend' | 'motion-control' | 'avatar' | 'omni-video' | 'advanced-lip-sync',
   task_id: string
 ): Promise<KlingTaskData> {
   let endpoint: string
@@ -108,6 +108,8 @@ export async function getVideoTaskStatus(
     endpoint = `${KLING_BASE_URL}/v1/videos/video-extend/${task_id}`
   } else if (type === 'omni-video') {
     endpoint = `${KLING_BASE_URL}/v1/videos/omni-video/${task_id}`
+  } else if (type === 'advanced-lip-sync') {
+    endpoint = `${KLING_BASE_URL}/v1/videos/advanced-lip-sync/${task_id}`
   } else if (type === 'motion-control') {
     endpoint = `${KLING_BASE_URL}/v1/videos/motion-control/${task_id}`
   } else if (type === 'avatar') {
@@ -274,6 +276,56 @@ export async function createMotionControlTask(params: {
       character_orientation: params.character_orientation,
       keep_original_sound: params.keep_original_sound ?? 'no',
       mode: params.mode ?? 'std',
+    }),
+  })
+  const data: KlingResponse = await res.json()
+  if (data.code !== 0) throw new Error(`Kling error: ${data.message}`)
+  return { task_id: data.data.task_id }
+}
+
+// ── Lip Sync (для дубляжа) ─────────────────────────────────────────────────
+// identify-face принимает произвольные видео по URL (mp4/mov, 2-60s, ≤100MB)
+
+export interface KlingFace {
+  face_id: string
+  face_image: string
+  start_time: number  // ms
+  end_time: number
+}
+
+export async function identifyFace(video_url: string): Promise<{ session_id: string; faces: KlingFace[] }> {
+  const res = await fetch(`${KLING_BASE_URL}/v1/videos/identify-face`, {
+    method: 'POST', headers: headers(),
+    body: JSON.stringify({ video_url }),
+  })
+  const data = await res.json()
+  if (data.code !== 0) throw new Error(`Kling error: ${data.message}`)
+  return { session_id: data.data.session_id, faces: data.data.face_data || [] }
+}
+
+export async function createLipSyncTask(params: {
+  session_id: string
+  face_id: string
+  sound_file: string          // raw base64 (без data:-префикса) или URL; mp3/wav ≤5MB, 2-60s
+  sound_start_time: number    // ms
+  sound_end_time: number      // ms
+  sound_insert_time: number   // ms
+  sound_volume?: number       // [0..2]
+  original_audio_volume?: number // [0..2]; 0 = заглушить оригинальную дорожку
+}): Promise<{ task_id: string }> {
+  const res = await fetch(`${KLING_BASE_URL}/v1/videos/advanced-lip-sync`, {
+    method: 'POST', headers: headers(),
+    body: JSON.stringify({
+      session_id: params.session_id,
+      face_choose: [{
+        face_id: params.face_id,
+        sound_file: params.sound_file,
+        sound_start_time: params.sound_start_time,
+        sound_end_time: params.sound_end_time,
+        sound_insert_time: params.sound_insert_time,
+        sound_volume: params.sound_volume ?? 1,
+        original_audio_volume: params.original_audio_volume ?? 0,
+      }],
     }),
   })
   const data: KlingResponse = await res.json()
