@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { setQueueActive } from '@/lib/queueClient'
+import { UsageBadge } from '@/components/ui/UsageBadge'
 
 interface Asset {
   name: string
@@ -724,6 +725,9 @@ export function GenerateModal({ appCode, selectedPain, selectedHook, selectedCon
               <button onClick={() => setStage('preview')}
                 className="px-6 py-3 rounded-xl"
                 style={{ background: 'var(--border)' }}>Back</button>
+            </div>
+            <div className="flex justify-center mt-2">
+              <UsageBadge kind="images" />
             </div>
           </div>
         )}

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useSession } from 'next-auth/react'
+import { UsageBadge } from '@/components/ui/UsageBadge'
 import { setQueueActive } from '@/lib/queueClient'
 import { VideoPage } from '@/components/video/VideoPage'
 
@@ -771,6 +772,9 @@ function ImageCardModal({ item, onClose, onGenerated }: {
                 </svg>{newPrompt.trim() ? 'Generate' : 'Resize'}</>
               )}
             </button>
+            <div className="flex items-center">
+              <UsageBadge kind="images" refreshKey={generating} />
+            </div>
             <button onClick={handleDownload}
               className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all"
               style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>
@@ -1154,6 +1158,9 @@ export function GeneratorPage() {
                   </svg>{btnLabel}</>
                 )}
               </button>
+              <div className="flex justify-center mt-2">
+                <UsageBadge kind="images" refreshKey={generating} />
+              </div>
 
             </div>
           </div>

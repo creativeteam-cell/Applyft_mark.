@@ -3,6 +3,7 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useSession } from 'next-auth/react'
 import { setQueueActive } from '@/lib/queueClient'
+import { UsageBadge } from '@/components/ui/UsageBadge'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -687,6 +688,9 @@ function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose
             </div>
             {contStatus === 'done' && <p className="text-xs mb-2" style={{ color: '#34a853' }}>✓ Next shot generated and saved</p>}
             {contError && <p className="text-xs mb-2" style={{ color: '#f87171' }}>{contError}</p>}
+            <div className="flex justify-center mb-1.5">
+              <UsageBadge kind="video" refreshKey={contStatus} />
+            </div>
             <button onClick={handleContinue} disabled={continuing}
               className="w-full py-2 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2"
               style={{ background: 'rgba(79,110,247,0.12)', color: 'var(--accent)', border: '1px solid var(--border)' }}>
@@ -941,16 +945,6 @@ export function VideoPage() {
   const [error, setError] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval>|null>(null)
 
-  // ── Kling quota (remaining units) ──
-  const [quota, setQuota] = useState<{ remaining: number; total: number; ratio: number; expiresAt: number | null } | null>(null)
-  useEffect(() => {
-    let alive = true
-    fetch('/api/video/quota')
-      .then(r => r.json())
-      .then(d => { if (alive && !d.error) setQuota(d) })
-      .catch(() => {})
-    return () => { alive = false }
-  }, [status === 'done']) // refresh after each finished generation
 
   // ── History state ──
   const [history, setHistory] = useState<VideoItem[]>([])
@@ -1837,16 +1831,10 @@ export function VideoPage() {
             )}
           </button>
 
-          {/* Kling units remaining */}
-          {quota && quota.total > 0 && (
-            <div className="mt-2 flex items-center justify-between text-[11px]"
-              style={{ color: quota.ratio < 0.1 ? '#f87171' : 'var(--text-muted)' }}>
-              <span>Kling balance: {quota.remaining} / {quota.total} units{quota.ratio < 0.1 ? ' — almost out!' : ''}</span>
-              {quota.expiresAt && (
-                <span>until {new Date(quota.expiresAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}</span>
-              )}
-            </div>
-          )}
+          {/* Личный лимит видео-юнитов (полная инфа по Kling-балансу — в админке) */}
+          <div className="mt-2 flex justify-center">
+            <UsageBadge kind="video" refreshKey={status} />
+          </div>
         </div>
       </div>
 

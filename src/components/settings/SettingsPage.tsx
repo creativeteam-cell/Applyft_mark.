@@ -273,6 +273,61 @@ function MonthlyReports() {
   )
 }
 
+// Глобальный баланс Kling-аккаунта: остаток / всего / до какой даты.
+// Видно только админам (панель отрисовывается только для них).
+function KlingBalanceCard() {
+  const [quota, setQuota] = useState<{ remaining: number; total: number; ratio: number; expiresAt: number | null; packs: { name: string; remaining: number; total: number; expiresAt: number }[] } | null>(null)
+  const [qError, setQError] = useState('')
+
+  useEffect(() => {
+    fetch('/api/video/quota')
+      .then(r => r.json())
+      .then(d => { if (d.error) setQError(d.error); else setQuota(d) })
+      .catch(e => setQError(e.message))
+  }, [])
+
+  if (qError) return <div className="text-xs" style={{ color: '#f87171' }}>Kling balance: {qError}</div>
+  if (!quota) return <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading Kling balance...</div>
+
+  const pct = Math.round(quota.ratio * 100)
+  const low = quota.ratio < 0.15
+  return (
+    <div>
+      <div className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>
+        Kling Account Balance
+      </div>
+      <div className="px-4 py-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${low ? 'rgba(248,113,113,0.4)' : 'var(--border)'}` }}>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-lg font-bold" style={{ color: low ? '#f87171' : 'var(--text)' }}>
+            {quota.remaining} <span className="text-sm font-normal" style={{ color: 'var(--text-muted)' }}>/ {quota.total} units ({pct}%)</span>
+          </span>
+          {quota.expiresAt && (
+            <span className="text-xs" style={{ color: low ? '#f87171' : 'var(--text-muted)' }}>
+              expires {new Date(quota.expiresAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}
+            </span>
+          )}
+        </div>
+        <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+          <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: low ? '#f87171' : 'var(--accent)' }} />
+        </div>
+        {quota.packs.length > 1 && (
+          <div className="mt-2 flex flex-col gap-0.5">
+            {quota.packs.map((p, i) => (
+              <div key={i} className="flex justify-between text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                <span>{p.name}</span>
+                <span>{p.remaining}/{p.total} · until {new Date(p.expiresAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="text-[10px] mt-2" style={{ color: 'rgba(255,255,255,0.25)' }}>
+          Data from Kling API, updated with up to 12h delay
+        </p>
+      </div>
+    </div>
+  )
+}
+
 function AdminPanel({ currentEmail }: { currentEmail: string }) {
   const [stats, setStats] = useState<UserStat[]>([])
   const [adminEmails, setAdminEmails] = useState<string[]>([])
@@ -325,6 +380,9 @@ function AdminPanel({ currentEmail }: { currentEmail: string }) {
 
   return (
     <div className="flex flex-col gap-6">
+
+      {/* Kling account balance (глобальный, с датой сгорания) */}
+      <KlingBalanceCard />
 
       {/* Admins */}
       <div>
