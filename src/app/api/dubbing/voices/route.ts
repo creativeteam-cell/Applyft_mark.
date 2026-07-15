@@ -20,6 +20,7 @@ export async function GET() {
         id: v.voice_id,
         // "Rachel — female, young, calm"
         label: `${v.name}${Object.keys(v.labels).length ? ' — ' + ['gender', 'age', 'descriptive', 'accent'].map(k => v.labels[k]).filter(Boolean).join(', ') : ''}`,
+        previewUrl: v.preview_url || null,
       })),
     })
   } catch (e: any) {

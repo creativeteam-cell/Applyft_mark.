@@ -16,14 +16,17 @@ export async function POST(req: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!ALLOWED.has(session.user.email || '')) return NextResponse.json({ error: 'Dubbing is in private beta' }, { status: 403 })
 
-  const { fileId, videoUrl, audioBase64, audioDurationMs, window, originalAudioVolume } = await req.json() as {
+  const { fileId, videoUrl, audioBase64, audioDurationMs, window, originalAudioVolume, faceRef } = await req.json() as {
     fileId?: string; videoUrl?: string; audioBase64: string; audioDurationMs: number
-    // Окно (мс): синкаем губы только в этом диапазоне; звук режется из полной
-    // дорожки [startMs..endMs] и вставляется на ту же позицию видео.
-    window?: { startMs: number; endMs: number }
+    // Окно: из аудио режется [soundStartMs..soundEndMs] и вставляется в видео
+    // на insertMs (позиция может отличаться — озвучка выравнивается по паузам оригинала)
+    window?: { soundStartMs: number; soundEndMs: number; insertMs: number }
     // 0 на первом проходе (глушим оригинал), 1 на последующих (сохраняем
     // уже вставленные куски из предыдущих проходов)
     originalAudioVolume?: number
+    // Интервал видимости лица, выбранного пользователем на исходнике (мс) —
+    // на каждом проходе ищем лицо с максимальным пересечением с этим интервалом
+    faceRef?: { startMs: number; endMs: number }
   }
   if (!fileId && !videoUrl) return NextResponse.json({ error: 'Video required' }, { status: 400 })
   if (!audioBase64 || !audioDurationMs) return NextResponse.json({ error: 'audioBase64 and audioDurationMs required' }, { status: 400 })
@@ -36,25 +39,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No face detected in this video — lip-sync is not possible' }, { status: 422 })
     }
 
-    // Выбор лица: при окне — то, что дольше всех видно ВНУТРИ окна
-    // (говорящий в этот момент и есть лицо в кадре); без окна — самое долгое в целом
+    // Выбор лица, по приоритету:
+    // 1. faceRef — привязка, сделанная пользователем по миниатюрам (самая надёжная)
+    // 2. при окне — лицо, дольше всех видимое внутри окна вставки
+    // 3. без окна — самое долгое в кадре
     const overlap = (f: { start_time: number; end_time: number }, s: number, e: number) =>
       Math.max(0, Math.min(f.end_time, e) - Math.max(f.start_time, s))
-    const face = window
-      ? faces.reduce((best, f) => overlap(f, window.startMs, window.endMs) > overlap(best, window.startMs, window.endMs) ? f : best, faces[0])
-      : faces.reduce((best, f) => (f.end_time - f.start_time) > (best.end_time - best.start_time) ? f : best, faces[0])
+    const insertStart = Math.round(window?.insertMs ?? 0)
+    const insertEnd = insertStart + Math.round((window ? window.soundEndMs - window.soundStartMs : audioDurationMs))
+    const face = faceRef
+      ? faces.reduce((best, f) => overlap(f, faceRef.startMs, faceRef.endMs) > overlap(best, faceRef.startMs, faceRef.endMs) ? f : best, faces[0])
+      : window
+        ? faces.reduce((best, f) => overlap(f, insertStart, insertEnd) > overlap(best, insertStart, insertEnd) ? f : best, faces[0])
+        : faces.reduce((best, f) => (f.end_time - f.start_time) > (best.end_time - best.start_time) ? f : best, faces[0])
 
-    if (window && overlap(face, window.startMs, window.endMs) < 2000) {
-      return NextResponse.json({ error: `No face visible for ≥2s in window ${Math.round(window.startMs / 1000)}–${Math.round(window.endMs / 1000)}s` }, { status: 422 })
+    if (window && overlap(face, insertStart, insertEnd) < 2000) {
+      return NextResponse.json({ error: `Selected face is not visible for ≥2s in window ${Math.round(insertStart / 1000)}–${Math.round(insertEnd / 1000)}s` }, { status: 422 })
     }
 
     const result = await createLipSyncTask({
       session_id,
       face_id: face.face_id,
       sound_file: String(audioBase64).replace(/^data:audio\/\w+;base64,/, ''),
-      sound_start_time: Math.round(window?.startMs ?? 0),
-      sound_end_time: Math.round(window?.endMs ?? audioDurationMs),
-      sound_insert_time: Math.round(window?.startMs ?? 0),
+      sound_start_time: Math.round(window?.soundStartMs ?? 0),
+      sound_end_time: Math.round(window?.soundEndMs ?? audioDurationMs),
+      sound_insert_time: insertStart,
       sound_volume: 1,
       original_audio_volume: originalAudioVolume ?? 0,
     })

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import OpenAI from 'openai'
-import { scribeTranscribe, elevenTTS, listElevenVoices } from '@/lib/elevenlabs'
+import { scribeTranscribe, listElevenVoices } from '@/lib/elevenlabs'
 import { matchSpeakerVoices } from '@/lib/speakerVoices'
 import { buildPublicVideoUrl } from '@/lib/videoSign'
 import { updateQueue } from '@/lib/queue'
@@ -27,9 +27,9 @@ export async function POST(req: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!ALLOWED.has(session.user.email || '')) return NextResponse.json({ error: 'Dubbing is in private beta' }, { status: 403 })
 
-  const { fileId, videoUrl, targetLang, voiceId } = await req.json()
+  const { fileId, videoUrl, targetLang } = await req.json()
   if (!fileId && !videoUrl) return NextResponse.json({ error: 'Video required' }, { status: 400 })
-  if (!targetLang || !voiceId) return NextResponse.json({ error: 'targetLang and voiceId required' }, { status: 400 })
+  if (!targetLang) return NextResponse.json({ error: 'targetLang required' }, { status: 400 })
 
   try {
     const url: string = fileId ? buildPublicVideoUrl(req.nextUrl.origin, fileId) : videoUrl!
@@ -82,6 +82,14 @@ Rules:
     const speakerIds = [...new Set(segments.map(s => s.speaker))]
     const translatedText = segments.map(s => s.text).join('\n')
 
+    // Оригинальные тайминги реплик (мс) — для выравнивания озвучки по паузам видео.
+    // GPT сохраняет количество и порядок строк, так что маппинг по индексу.
+    const segmentsWithTiming = segments.map((s, i) => ({
+      ...s,
+      origStartMs: Math.round((transcript.segments[i]?.start ?? 0) * 1000),
+      origEndMs: Math.round((transcript.segments[i]?.end ?? 0) * 1000),
+    }))
+
     // Инфо по говорящим для UI: роль, первая фраза оригинала, тайминг для прослушивания
     const speakerInfo: any[] = speakerIds.map(id => {
       const first = transcript.segments.find(s => s.speaker === id)
@@ -112,21 +120,15 @@ Rules:
       console.warn('[dubbing/prepare] voice matching skipped:', e.message)
     }
 
-    // 3. Озвучка: один говорящий — сразу TTS (авто-подобранным голосом, если есть).
-    // Диалог — аудио генерится отдельным вызовом /api/dubbing/dialogue после того,
-    // как пользователь подтвердит раскладку голосов в UI.
-    let audioBase64: string | null = null
-    if (speakerIds.length === 1) {
-      const chosenVoice = suggestedVoiceMap[speakerIds[0]] || voiceId
-      const audio = await elevenTTS(translatedText, chosenVoice)
-      audioBase64 = audio.toString('base64')
-    }
+    // Озвучка всегда отдельным шагом после подтверждения голосов в UI
+    // (/api/dubbing/tts для одного говорящего, /api/dubbing/dialogue для диалога)
+    const audioBase64: string | null = null
 
     return NextResponse.json({
       sourceText: transcript.text,
       sourceLang: transcript.language,
       translatedText,
-      segments,
+      segments: segmentsWithTiming,
       speakerIds,
       speakerInfo,
       speakers: speakerIds.length,

@@ -29,7 +29,13 @@ export async function POST(req: NextRequest) {
   const userToken = (session as any).accessToken
   if (!userToken) return NextResponse.json({ error: 'No access token' }, { status: 401 })
 
-  const { fileId, videoUrl, audioBase64, prompt, targetLang, duration } = await req.json()
+  const { fileId, videoUrl, audioBase64, prompt, targetLang, duration, align } = await req.json() as {
+    fileId?: string; videoUrl?: string; audioBase64: string
+    prompt?: string; targetLang?: string; duration?: string
+    // Выравнивание: кусок [srcStartMs..srcEndMs] из озвучки кладётся на dstStartMs
+    // видео (тайминги оригинальных реплик) — паузы видео сохраняются в аудио
+    align?: { srcStartMs: number; srcEndMs: number; dstStartMs: number }[]
+  }
   if (!fileId && !videoUrl) return NextResponse.json({ error: 'Video required' }, { status: 400 })
   if (!audioBase64) return NextResponse.json({ error: 'audioBase64 required' }, { status: 400 })
 
@@ -55,12 +61,28 @@ export async function POST(req: NextRequest) {
     await fs.writeFile(audPath, Buffer.from(String(audioBase64).replace(/^data:audio\/\w+;base64,/, ''), 'base64'))
 
     // Видео не перекодируем (copy), звук — в AAC; -shortest на случай расхождения длин
-    await execFileAsync(ffmpegPath, [
-      '-y', '-i', vidPath, '-i', audPath,
-      '-map', '0:v', '-map', '1:a',
-      '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
-      '-shortest', outPath,
-    ], { timeout: 120000 })
+    if (align?.length) {
+      // Раскладка озвучки по оригинальным таймингам: каждый кусок вырезается
+      // из mp3 и задерживается до позиции реплики в видео, затем сводится
+      const parts = align.map((a, i) =>
+        `[1:a]atrim=start=${(a.srcStartMs / 1000).toFixed(3)}:end=${(a.srcEndMs / 1000).toFixed(3)},asetpts=PTS-STARTPTS,adelay=${Math.round(a.dstStartMs)}|${Math.round(a.dstStartMs)}[a${i}]`
+      )
+      const filter = `${parts.join(';')};${align.map((_, i) => `[a${i}]`).join('')}amix=inputs=${align.length}:normalize=0[aout]`
+      await execFileAsync(ffmpegPath, [
+        '-y', '-i', vidPath, '-i', audPath,
+        '-filter_complex', filter,
+        '-map', '0:v', '-map', '[aout]',
+        '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
+        '-shortest', outPath,
+      ], { timeout: 120000 })
+    } else {
+      await execFileAsync(ffmpegPath, [
+        '-y', '-i', vidPath, '-i', audPath,
+        '-map', '0:v', '-map', '1:a',
+        '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
+        '-shortest', outPath,
+      ], { timeout: 120000 })
+    }
 
     const outBuffer = await fs.readFile(outPath)
 

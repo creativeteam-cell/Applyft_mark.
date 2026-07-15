@@ -78,6 +78,7 @@ export interface ElevenVoice {
   voice_id: string
   name: string
   labels: Record<string, string> // gender, age, accent, descriptive, use_case
+  preview_url?: string           // готовый mp3-сэмпл голоса (хостится у EL)
 }
 
 let voicesCache: { at: number; voices: ElevenVoice[] } | null = null
@@ -91,6 +92,7 @@ export async function listElevenVoices(): Promise<ElevenVoice[]> {
     voice_id: v.voice_id,
     name: v.name,
     labels: v.labels || {},
+    preview_url: v.preview_url || undefined,
   }))
   voicesCache = { at: Date.now(), voices }
   return voices

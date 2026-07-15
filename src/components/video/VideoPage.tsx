@@ -970,13 +970,24 @@ export function VideoPage() {
   // ── Dubbing state ──
   // Источник видео переиспользует motionVideoUrl/motionVideoLabel (режимы взаимоисключающие)
   const [dubLang, setDubLang] = useState('SP')
-  const [dubVoice, setDubVoice] = useState(DUB_VOICES[0].id)
+  // Прослушка голоса: играем готовый preview_url от ElevenLabs (бесплатно, без генерации)
+  const voicePreviewRef = useRef<HTMLAudioElement | null>(null)
+  function playVoicePreview(voiceId: string) {
+    const v = dubVoices.find(x => x.id === voiceId)
+    if (!v?.previewUrl) return
+    voicePreviewRef.current?.pause()
+    voicePreviewRef.current = new Audio(v.previewUrl)
+    voicePreviewRef.current.play().catch(() => {})
+  }
   const [dubFileId, setDubFileId] = useState<string | null>(null) // fileId, если видео из истории
   const [dubPreparing, setDubPreparing] = useState(false)
   const [dubPrepared, setDubPrepared] = useState<{ sourceText: string; sourceLang: string; translatedText: string; audioBase64: string | null; speakers: number; segments?: { speaker: string; text: string }[]; speakerIds?: string[]; speakerInfo?: { id: string; role: string; sample: string; start: number; voiceProfile?: string }[]; timings?: { index: number; start: number; end: number }[]; suggestedVoiceMap?: Record<string, string> } | null>(null)
   const [dubOnScreen, setDubOnScreen] = useState<Record<string, boolean>>({})
   const [dubProgress, setDubProgress] = useState('')
-  const [dubVoices, setDubVoices] = useState<{ id: string; label: string }[]>(DUB_VOICES)
+  const [dubLipsync, setDubLipsync] = useState(true) // выкл = просто заменить дорожку без движения губ
+  const [dubFaces, setDubFaces] = useState<{ image: string; startMs: number; endMs: number }[] | null>(null)
+  const [dubFaceMap, setDubFaceMap] = useState<Record<string, number>>({}) // speaker → индекс лица
+  const [dubVoices, setDubVoices] = useState<{ id: string; label: string; previewUrl?: string | null }[]>(DUB_VOICES)
 
   // Полный список голосов ElevenLabs — один раз при входе в режим дубляжа
   useEffect(() => {
@@ -1034,16 +1045,17 @@ export function VideoPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...(dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }),
-          targetLang: dubLang, voiceId: dubVoice,
+          targetLang: dubLang,
         }),
       })
       const d = await res.json()
       if (d.error) throw new Error(d.error)
       setDubPrepared(d)
       setDubEditedText(d.translatedText)
-      // Диалог: стартовая раскладка — автоподбор по голосам из видео (GPT слушал
-      // сэмплы), чего не хватило — добираем по кругу. Закадровых помечаем off-screen.
-      if (d.speakerIds?.length > 1) {
+      // Стартовая раскладка голосов (и для одного говорящего, и для диалога):
+      // автоподбор по голосам из видео, чего не хватило — по кругу.
+      // Закадровых (narrator/voice-over) помечаем off-screen.
+      if (d.speakerIds?.length) {
         const map: Record<string, string> = {}
         const onScreen: Record<string, boolean> = {}
         d.speakerIds.forEach((sp: string, i: number) => {
@@ -1054,6 +1066,17 @@ export function VideoPage() {
         setDubVoiceMap(map)
         setDubOnScreen(onScreen)
       }
+      // Лица из видео — для привязки говорящих к лицам (важно, когда в кадре двое)
+      if (d.speakerIds?.length > 1) {
+        setDubFaces(null); setDubFaceMap({})
+        fetch('/api/dubbing/faces', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }),
+        })
+          .then(r => r.json())
+          .then(f => { if (f.faces?.length) setDubFaces(f.faces) })
+          .catch(() => {})
+      }
     } catch (e: any) { setDubError(e.message) }
     setDubPreparing(false)
   }
@@ -1062,9 +1085,10 @@ export function VideoPage() {
     if (!dubPrepared || !dubEditedText.trim()) return
     setDubRevoicing(true); setDubError('')
     try {
+      const sp = dubPrepared.speakerIds?.[0] || ''
       const res = await fetch('/api/dubbing/tts', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: dubEditedText, voiceId: dubVoice }),
+        body: JSON.stringify({ text: dubEditedText, voiceId: dubVoiceMap[sp] || dubVoices[0].id }),
       })
       const d = await res.json()
       if (d.error) throw new Error(d.error)
@@ -1089,6 +1113,34 @@ export function VideoPage() {
       })
 
       const isDialog = (prepared.speakers > 1) && prepared.segments && prepared.timings?.length
+
+      // Выравнивание озвучки по оригинальным таймингам реплик (паузы сохраняются)
+      const align = isDialog
+        ? prepared.segments!.map((seg: any, i: number) => {
+            const t = prepared.timings!.find(x => x.index === i)
+            return t ? { srcStartMs: Math.round(t.start * 1000), srcEndMs: Math.round(t.end * 1000), dstStartMs: seg.origStartMs ?? Math.round(t.start * 1000) } : null
+          }).filter(Boolean)
+        : undefined
+
+      // Галочка Lip-sync выключена: губы не трогаем, просто кладём озвучку
+      // поверх видео (оригинальный звук выключается), с выравниванием по паузам
+      if (!dubLipsync) {
+        setDubProgress('Mixing audio...')
+        const finRes = await fetch('/api/dubbing/finalize', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...(dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }),
+            audioBase64: audioB64, align,
+            prompt: `[dubbed → ${dubLang}, no lip-sync] ${prepared.sourceText.slice(0, 120)}`,
+            targetLang: dubLang,
+            duration: String(Math.round(audioDurationMs / 1000)),
+          }),
+        })
+        const fin = await finRes.json()
+        if (fin.error) throw new Error(fin.error)
+        setDubStatus('done'); setDubProcessing(false); setDubProgress(''); fetchHistory()
+        return
+      }
 
       if (!isDialog) {
         // Один говорящий: один проход на всю дорожку + сохранение результата Kling как есть
@@ -1117,41 +1169,55 @@ export function VideoPage() {
       }
 
       // ── Диалог: окна по репликам экранных говорящих ──
-      // 1. Строим окна: соседние реплики одного говорящего сливаем (зазор < 600мс)
-      type Win = { startMs: number; endMs: number; speaker: string }
+      // Звук режется по таймингам сгенерированной озвучки, вставляется по таймингам
+      // оригинала (выравнивание по паузам). Соседние реплики одного говорящего
+      // сливаются, только если близки и там, и там.
+      type Win = { soundStartMs: number; soundEndMs: number; insertMs: number; speaker: string }
       const wins: Win[] = []
-      prepared.segments!.forEach((seg, i) => {
+      prepared.segments!.forEach((seg: any, i) => {
         if (dubOnScreen[seg.speaker] === false) return // закадровый — губы не трогаем
         const t = prepared.timings!.find(x => x.index === i)
         if (!t) return
-        const startMs = Math.round(t.start * 1000), endMs = Math.round(t.end * 1000)
+        const soundStartMs = Math.round(t.start * 1000), soundEndMs = Math.round(t.end * 1000)
+        const insertMs = seg.origStartMs ?? soundStartMs
         const last = wins[wins.length - 1]
-        if (last && last.speaker === seg.speaker && startMs - last.endMs < 600) last.endMs = endMs
-        else wins.push({ startMs, endMs, speaker: seg.speaker })
+        if (last && last.speaker === seg.speaker
+          && soundStartMs - last.soundEndMs < 600
+          && insertMs - (last.insertMs + (last.soundEndMs - last.soundStartMs)) < 600) {
+          last.soundEndMs = soundEndMs
+        } else {
+          wins.push({ soundStartMs, soundEndMs, insertMs, speaker: seg.speaker })
+        }
       })
 
-      // 2. Минимум Kling — 2 секунды: тянем окно в паузу после него, не наезжая на следующее
+      // Минимум Kling — 2 секунды: тянем кроп в паузу после него, не наезжая на следующее
       for (let i = 0; i < wins.length; i++) {
         const w = wins[i]
-        if (w.endMs - w.startMs < 2000) {
-          const nextStart = wins[i + 1]?.startMs ?? audioDurationMs
-          w.endMs = Math.min(w.startMs + 2000, nextStart)
+        if (w.soundEndMs - w.soundStartMs < 2000) {
+          const nextStart = wins[i + 1]?.soundStartMs ?? audioDurationMs
+          w.soundEndMs = Math.min(w.soundStartMs + 2000, nextStart)
         }
       }
-      const runnable = wins.filter(w => w.endMs - w.startMs >= 2000)
+      const runnable = wins.filter(w => w.soundEndMs - w.soundStartMs >= 2000)
       const skipped = wins.length - runnable.length
 
-      // 3. Последовательные проходы: каждый следующий работает по результату предыдущего
+      // Последовательные проходы: каждый следующий работает по результату предыдущего.
+      // Лицо каждого прохода — то, что пользователь привязал к говорящему (faceRef).
       let curUrl: string | null = null
       for (let i = 0; i < runnable.length; i++) {
         setDubProgress(`Lip-sync pass ${i + 1}/${runnable.length}...`)
+        const faceIdx = dubFaceMap[runnable[i].speaker]
+        const faceRef = (dubFaces && faceIdx !== undefined && dubFaces[faceIdx])
+          ? { startMs: dubFaces[faceIdx].startMs, endMs: dubFaces[faceIdx].endMs }
+          : undefined
         const res = await fetch('/api/dubbing/lipsync', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             ...(curUrl ? { videoUrl: curUrl } : dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }),
             audioBase64: audioB64, audioDurationMs,
-            window: { startMs: runnable[i].startMs, endMs: runnable[i].endMs },
+            window: { soundStartMs: runnable[i].soundStartMs, soundEndMs: runnable[i].soundEndMs, insertMs: runnable[i].insertMs },
             originalAudioVolume: i === 0 ? 0 : 1,
+            faceRef,
           }),
         })
         const d = await res.json()
@@ -1160,13 +1226,13 @@ export function VideoPage() {
         curUrl = result.url
       }
 
-      // 4. Финал: полная озвучка поверх (закадровые реплики появляются здесь)
+      // 4. Финал: полная озвучка поверх, выровненная по паузам оригинала
       setDubProgress('Mixing final audio...')
       const finRes = await fetch('/api/dubbing/finalize', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...(curUrl ? { videoUrl: curUrl } : dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }),
-          audioBase64: audioB64,
+          audioBase64: audioB64, align,
           prompt: `[dubbed → ${dubLang}] ${prepared.sourceText.slice(0, 120)}${skipped ? ` (${skipped} short lines kept original lips)` : ''}`,
           targetLang: dubLang,
           duration: String(Math.round(audioDurationMs / 1000)),
@@ -2013,23 +2079,13 @@ export function VideoPage() {
                 <p className="text-[10px] mt-1" style={{ color: 'rgba(255,255,255,0.2)' }}>2–60 seconds · one visible speaker · up to 100MB</p>
               </div>
 
-              <div className="mb-3 flex gap-2">
-                <div className="flex-1">
-                  <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Target language</div>
-                  <select value={dubLang} onChange={e => { setDubLang(e.target.value); setDubPrepared(null); setDubStatus('idle') }}
-                    className="w-full rounded-xl px-3 py-2 text-sm outline-none"
-                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }}>
-                    {DUB_LANGUAGES.map(([code, name]) => <option key={code} value={code} style={{ background: '#1a1a2e' }}>{name}</option>)}
-                  </select>
-                </div>
-                <div className="flex-1">
-                  <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Voice</div>
-                  <select value={dubVoice} onChange={e => { setDubVoice(e.target.value); setDubPrepared(null); setDubStatus('idle') }}
-                    className="w-full rounded-xl px-3 py-2 text-sm outline-none"
-                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }}>
-                    {dubVoices.map(v => <option key={v.id} value={v.id} style={{ background: '#1a1a2e' }}>{v.label}</option>)}
-                  </select>
-                </div>
+              <div className="mb-3">
+                <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Target language</div>
+                <select value={dubLang} onChange={e => { setDubLang(e.target.value); setDubPrepared(null); setDubStatus('idle') }}
+                  className="w-full rounded-xl px-3 py-2 text-sm outline-none"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                  {DUB_LANGUAGES.map(([code, name]) => <option key={code} value={code} style={{ background: '#1a1a2e' }}>{name}</option>)}
+                </select>
               </div>
 
               {!dubPrepared && (
@@ -2082,12 +2138,36 @@ export function VideoPage() {
                                   🎙 voice in source: {info.voiceProfile}{dubPrepared.suggestedVoiceMap?.[sp] === dubVoiceMap[sp] ? ' · auto-matched' : ''}
                                 </div>
                               )}
-                              <select value={dubVoiceMap[sp] || dubVoices[0].id}
-                                onChange={e => setDubVoiceMap(prev => ({ ...prev, [sp]: e.target.value }))}
-                                className="w-full rounded-lg px-2 py-1 text-xs outline-none"
-                                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }}>
-                                {dubVoices.map(v => <option key={v.id} value={v.id} style={{ background: '#1a1a2e' }}>{v.label}</option>)}
-                              </select>
+                              {/* Привязка к лицу: критично, когда в кадре несколько человек */}
+                              {dubOnScreen[sp] !== false && dubFaces && dubFaces.length > 1 && (
+                                <div className="flex items-center gap-1.5 mb-1.5">
+                                  <span className="text-[9px] flex-shrink-0" style={{ color: 'var(--text-muted)' }}>Face:</span>
+                                  {dubFaces.map((f, fi) => (
+                                    <button key={fi} onClick={() => setDubFaceMap(prev => ({ ...prev, [sp]: fi }))}
+                                      title={`Face ${fi + 1} · visible ${Math.round(f.startMs / 1000)}–${Math.round(f.endMs / 1000)}s`}
+                                      className="rounded-lg overflow-hidden transition-all flex-shrink-0"
+                                      style={{
+                                        width: 32, height: 32, padding: 0,
+                                        border: dubFaceMap[sp] === fi ? '2px solid var(--accent)' : '2px solid var(--border)',
+                                        opacity: dubFaceMap[sp] === fi ? 1 : 0.6,
+                                      }}>
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img src={f.image} alt={`Face ${fi + 1}`} className="w-full h-full object-cover" />
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="flex items-center gap-1.5">
+                                <select value={dubVoiceMap[sp] || dubVoices[0].id}
+                                  onChange={e => setDubVoiceMap(prev => ({ ...prev, [sp]: e.target.value }))}
+                                  className="flex-1 rounded-lg px-2 py-1 text-xs outline-none"
+                                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                                  {dubVoices.map(v => <option key={v.id} value={v.id} style={{ background: '#1a1a2e' }}>{v.label}</option>)}
+                                </select>
+                                <button onClick={() => playVoicePreview(dubVoiceMap[sp] || dubVoices[0].id)} title="Listen to a sample of this voice"
+                                  className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 transition-all hover:scale-105"
+                                  style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)', fontSize: 9 }}>▶</button>
+                              </div>
                             </div>
                           )
                         })}
@@ -2109,14 +2189,40 @@ export function VideoPage() {
                       </button>
                     </div>
                   ) : (
-                    /* Один говорящий: редактируемый перевод как раньше */
+                    /* Один говорящий: голос + редактируемый перевод */
                     <div className="mb-2">
+                      {(() => {
+                        const sp = dubPrepared.speakerIds?.[0] || ''
+                        const info = dubPrepared.speakerInfo?.[0]
+                        return (
+                          <div className="mb-2">
+                            <div className="flex items-center justify-between mb-1">
+                              <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Voice</div>
+                              {info?.voiceProfile && (
+                                <span className="text-[9px]" style={{ color: 'rgba(255,255,255,0.3)' }}>🎙 voice in source: {info.voiceProfile}</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <select value={dubVoiceMap[sp] || dubVoices[0].id}
+                                onChange={e => { setDubVoiceMap(prev => ({ ...prev, [sp]: e.target.value })); setDubPrepared(prev => prev ? { ...prev, audioBase64: null } : prev) }}
+                                className="flex-1 rounded-lg px-2 py-1.5 text-xs outline-none"
+                                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                                {dubVoices.map(v => <option key={v.id} value={v.id} style={{ background: '#1a1a2e' }}>{v.label}</option>)}
+                              </select>
+                              <button onClick={() => playVoicePreview(dubVoiceMap[sp] || dubVoices[0].id)} title="Listen to a sample of this voice"
+                                className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-all hover:scale-105"
+                                style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)', fontSize: 10 }}>▶</button>
+                            </div>
+                          </div>
+                        )
+                      })()}
                       <div className="flex items-center justify-between mb-1">
                         <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Translation — edit if needed</div>
-                        <button onClick={handleDubRevoice} disabled={dubRevoicing || dubEditedText === dubPrepared.translatedText}
+                        <button onClick={handleDubRevoice}
+                          disabled={dubRevoicing || (!!dubPrepared.audioBase64 && dubEditedText === dubPrepared.translatedText)}
                           className="text-[10px] px-2 py-0.5 rounded-lg font-medium"
-                          style={{ background: 'rgba(79,110,247,0.12)', color: dubEditedText !== dubPrepared.translatedText ? 'var(--accent)' : 'rgba(255,255,255,0.2)', border: '1px solid var(--border)' }}>
-                          {dubRevoicing ? 'Voicing...' : '↻ Re-voice'}
+                          style={{ background: 'rgba(79,110,247,0.12)', color: (!dubPrepared.audioBase64 || dubEditedText !== dubPrepared.translatedText) ? 'var(--accent)' : 'rgba(255,255,255,0.2)', border: '1px solid var(--border)' }}>
+                          {dubRevoicing ? 'Voicing...' : dubPrepared.audioBase64 ? '↻ Re-voice' : '🔊 Voice'}
                         </button>
                       </div>
                       <textarea value={dubEditedText} onChange={e => setDubEditedText(e.target.value)} rows={3}
@@ -2129,6 +2235,12 @@ export function VideoPage() {
                     /* eslint-disable-next-line jsx-a11y/media-has-caption */
                     <audio controls src={`data:audio/mpeg;base64,${dubPrepared.audioBase64}`} className="w-full mb-2" style={{ height: 32 }} />
                   )}
+                  {/* Липсинк можно выключить: тогда озвучка просто ляжет поверх видео
+                      по таймингам оригинала — быстро и без затрат юнитов Kling */}
+                  <label className="flex items-center gap-2 mb-2 cursor-pointer text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                    <input type="checkbox" checked={dubLipsync} onChange={e => setDubLipsync(e.target.checked)} />
+                    Lip-sync (Kling) — {dubLipsync ? 'lips will match the new audio' : 'off: audio overlay only, free & fast'}
+                  </label>
                   {dubStatus === 'done' && <p className="text-xs mb-2" style={{ color: '#34a853' }}>✓ Dubbed video saved to history</p>}
                   <button onClick={handleDubStart} disabled={dubProcessing || !dubPrepared.audioBase64}
                     className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 mb-3"
