@@ -66,8 +66,9 @@ Rules:
           },
           { role: 'user', content: JSON.stringify(transcript.segments.map(s => ({ speaker: s.speaker, text: s.text }))) },
         ],
-        max_tokens: 2000,
+        max_tokens: 4000,
         temperature: 0.4,
+        response_format: { type: 'json_object' },
       }, { timeout: 60000 })
       const raw = res.choices[0]?.message?.content?.trim() || '{}'
       const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()

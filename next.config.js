@@ -16,6 +16,7 @@ const nextConfig = {
     outputFileTracingIncludes: {
       '/api/dubbing/prepare': ['./node_modules/ffmpeg-static/**'],
       '/api/dubbing/finalize': ['./node_modules/ffmpeg-static/**'],
+      '/api/dubbing/align': ['./node_modules/ffmpeg-static/**'],
     },
   },
 }
