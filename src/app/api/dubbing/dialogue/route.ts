@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { elevenDialogue } from '@/lib/elevenlabs'
+import { elevenDialogueTimed } from '@/lib/elevenlabs'
 
 // Озвучка диалога: реплики → text-to-dialogue (eleven_v3) → один mp3.
 // voiceMap: { speaker_0: voiceId, speaker_1: voiceId, ... }
@@ -27,14 +27,13 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const inputs = segments
-      .filter(s => s.text.trim())
-      .map(s => ({
-        text: s.text.trim(),
-        voice_id: voiceMap[s.speaker] || Object.values(voiceMap)[0],
-      }))
-    const audio = await elevenDialogue(inputs)
-    return NextResponse.json({ audioBase64: audio.toString('base64') })
+    // Порядок inputs = порядок segments — timings[i] соответствует segments[i]
+    const inputs = segments.map(s => ({
+      text: s.text.trim() || '...',
+      voice_id: voiceMap[s.speaker] || Object.values(voiceMap)[0],
+    }))
+    const { audio, timings } = await elevenDialogueTimed(inputs)
+    return NextResponse.json({ audioBase64: audio.toString('base64'), timings })
   } catch (e: any) {
     console.error('[dubbing/dialogue]', e)
     return NextResponse.json({ error: e.message }, { status: 500 })

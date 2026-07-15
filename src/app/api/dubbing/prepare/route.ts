@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
   if (!targetLang || !voiceId) return NextResponse.json({ error: 'targetLang and voiceId required' }, { status: 400 })
 
   try {
-    const url = fileId ? buildPublicVideoUrl(req.nextUrl.origin, fileId) : videoUrl
+    const url: string = fileId ? buildPublicVideoUrl(req.nextUrl.origin, fileId) : videoUrl!
 
     // 1. Транскрипция с диаризацией
     const transcript = await scribeTranscribe(url)
@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
     await updateQueue('openai', 1)
     let segments: { speaker: string; text: string }[]
+    let speakerRoles: Record<string, string> = {}
     try {
       const res = await openai.chat.completions.create({
         model: 'gpt-4o',
@@ -59,16 +60,20 @@ Rules:
 - Natural conversational language, as a native voice actor would say it
 - Keep brand names, app names, and numbers exactly as-is
 - Prepend ONE fitting emotion tag in square brackets to each line based on its tone, in English (e.g. [serious], [shocked], [crying], [excited], [calm])
-- Respond ONLY with raw JSON array: [{"speaker":"speaker_0","text":"[tag] translated line"}, ...] — no markdown`,
+- Additionally, infer WHO each speaker is from the dialogue content: a short role label in English (e.g. "Narrator (voice-over)", "Girl", "Father", "Mother"). Voice-overs/announcers usually speak in ad-copy style; characters speak conversationally.
+- Respond ONLY with raw JSON object, no markdown:
+{"segments":[{"speaker":"speaker_0","text":"[tag] translated line"},...],"speaker_roles":{"speaker_0":"Narrator (voice-over)","speaker_1":"Girl"}}`,
           },
           { role: 'user', content: JSON.stringify(transcript.segments.map(s => ({ speaker: s.speaker, text: s.text }))) },
         ],
         max_tokens: 2000,
         temperature: 0.4,
       }, { timeout: 60000 })
-      const raw = res.choices[0]?.message?.content?.trim() || '[]'
+      const raw = res.choices[0]?.message?.content?.trim() || '{}'
       const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
-      segments = JSON.parse(clean.slice(clean.indexOf('['), clean.lastIndexOf(']') + 1))
+      const parsed = JSON.parse(clean.slice(clean.indexOf('{'), clean.lastIndexOf('}') + 1))
+      segments = parsed.segments || []
+      speakerRoles = parsed.speaker_roles || {}
     } finally {
       await updateQueue('openai', -1)
     }
@@ -76,6 +81,17 @@ Rules:
 
     const speakerIds = [...new Set(segments.map(s => s.speaker))]
     const translatedText = segments.map(s => s.text).join('\n')
+
+    // Инфо по говорящим для UI: роль, первая фраза оригинала, тайминг для прослушивания
+    const speakerInfo = speakerIds.map(id => {
+      const first = transcript.segments.find(s => s.speaker === id)
+      return {
+        id,
+        role: speakerRoles[id] || '',
+        sample: first?.text.slice(0, 60) || '',
+        start: first?.start ?? 0, // секунды в исходном видео — для кнопки ▶
+      }
+    })
 
     // 3. Озвучка: один говорящий — сразу TTS выбранным голосом.
     // Диалог — аудио генерится отдельным вызовом /api/dubbing/dialogue после того,
@@ -92,6 +108,7 @@ Rules:
       translatedText,
       segments,
       speakerIds,
+      speakerInfo,
       speakers: speakerIds.length,
       audioBase64,
     })

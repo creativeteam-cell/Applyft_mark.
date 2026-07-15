@@ -7,7 +7,7 @@ const nextConfig = {
     ],
   },
   experimental: {
-    serverComponentsExternalPackages: ['sharp'],
+    serverComponentsExternalPackages: ['sharp', 'ffmpeg-static'],
     serverActions: {
       bodySizeLimit: '20mb',
     },

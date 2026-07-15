@@ -73,6 +73,36 @@ export async function elevenDialogue(inputs: { text: string; voice_id: string }[
   return Buffer.from(await res.arrayBuffer())
 }
 
+// Диалог с таймстемпами: voice_segments говорят, где в сгенерированном mp3
+// начинается и кончается каждая реплика — нужно для окон липсинка.
+export interface DialogueTiming { index: number; start: number; end: number } // секунды
+
+export async function elevenDialogueTimed(inputs: { text: string; voice_id: string }[]): Promise<{ audio: Buffer; timings: DialogueTiming[] }> {
+  const res = await fetch(`${EL_BASE}/v1/text-to-dialogue/with-timestamps?output_format=mp3_44100_128`, {
+    method: 'POST',
+    headers: { ...elHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ inputs, model_id: 'eleven_v3' }),
+  })
+  if (!res.ok) throw new Error(`ElevenLabs Dialogue ${res.status}: ${await res.text()}`)
+  const data = await res.json()
+
+  // Одна реплика может состоять из нескольких сегментов — берём min start / max end
+  const byIndex = new Map<number, { start: number; end: number }>()
+  for (const seg of data.voice_segments || []) {
+    const i = seg.dialogue_input_index
+    const cur = byIndex.get(i)
+    byIndex.set(i, {
+      start: cur ? Math.min(cur.start, seg.start_time_seconds) : seg.start_time_seconds,
+      end: cur ? Math.max(cur.end, seg.end_time_seconds) : seg.end_time_seconds,
+    })
+  }
+  const timings: DialogueTiming[] = [...byIndex.entries()]
+    .map(([index, t]) => ({ index, start: t.start, end: t.end }))
+    .sort((a, b) => a.index - b.index)
+
+  return { audio: Buffer.from(data.audio_base64, 'base64'), timings }
+}
+
 // Мультиязычный TTS; один и тот же голос говорит на любом языке
 export async function elevenTTS(text: string, voiceId: string): Promise<Buffer> {
   const res = await fetch(`${EL_BASE}/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
