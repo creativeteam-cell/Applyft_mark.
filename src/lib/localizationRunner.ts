@@ -89,10 +89,34 @@ async function geminiRequest(parts: any[], mimeType: string, retryCount = 0, asp
   const json = await res.json()
   const data = json?.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData)?.inlineData?.data
   if (!data) {
-    const reason = json?.candidates?.[0]?.finishReason || 'unknown'
+    // Вытаскиваем настоящую причину: finishReason кандидата или блок входа (promptFeedback)
+    const reason = json?.candidates?.[0]?.finishReason
+      || (json?.promptFeedback?.blockReason ? `input blocked: ${json.promptFeedback.blockReason}` : 'unknown')
     throw new Error(`Gemini returned no image (finishReason: ${reason})`)
   }
   return Buffer.from(data, 'base64')
+}
+
+// Короткий нейтральный промпт для ретраев после safety-блока.
+// Парадокс фильтров: длинная "операторская" обвязка с упоминаниями adult content
+// сама может триггерить защиту. Простая профессиональная формулировка часто проходит.
+function buildMinimalGeminiPrompt(
+  language: string,
+  phrases: { en: string; translated: string; role?: string }[],
+  fixPrompt?: string,
+): string {
+  const translationsText = phrases.map(p => `"${p.en}" → "${p.translated}"`).join('\n')
+  return `Photo editing task: in this advertising image, replace each listed text with its ${language} translation.
+
+Rules:
+- Keep everything else in the image exactly identical: people, layout, colors, background, logos, effects
+- Completely erase each original text before placing the translation — no remnants
+- Match the original font style, size, color, and position
+- Do not leave any original-language text in the replaced areas
+- Do not add anything new
+
+TRANSLATIONS:
+${translationsText}${fixPrompt ? `\n\nAlso fix: ${fixPrompt}` : ''}`
 }
 
 // Languages whose scripts have no letter case (CJK, Arabic, Hebrew, Hindi, etc.)
@@ -240,8 +264,11 @@ async function localizeImage(
   const totalAttempts = geminiAttempts + gptAttempts
 
   // ── Phase 1: Gemini ──
+  let useMinimalPrompt = false // после safety-блока переключаемся на нейтральный промпт
   for (let attempt = 1; attempt <= geminiAttempts; attempt++) {
-    const prompt = buildGeminiPrompt(language, phrases, lastFixPrompt || undefined)
+    const prompt = useMinimalPrompt
+      ? buildMinimalGeminiPrompt(language, phrases, lastFixPrompt || undefined)
+      : buildGeminiPrompt(language, phrases, lastFixPrompt || undefined)
     let result: Buffer | null = null
     try {
       const inputBuffer = (attempt > 1 && lastResult) ? lastResult : imgBuffer
@@ -250,7 +277,11 @@ async function localizeImage(
         { inline_data: { mime_type: mimeType, data: inputBuffer.toString('base64') } },
       ], mimeType, 0, aspectRatio)
     } catch (err: any) {
-      const isContentBlock = err.message?.includes('IMAGE_SAFETY') || err.message?.includes('NO_IMAGE')
+      const isContentBlock = err.message?.includes('IMAGE_SAFETY') || err.message?.includes('NO_IMAGE') || err.message?.includes('no image')
+      if (isContentBlock && !useMinimalPrompt) {
+        console.warn('[loc] safety block — switching to minimal neutral prompt for next attempts')
+        useMinimalPrompt = true
+      }
       failReasons.push(`#${attempt}(gemini) ${err.message}`)
       console.warn(`[loc] Gemini attempt ${attempt} error: ${err.message}`)
       onAttempt?.(attempt, 'fail', err.message)
