@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import OpenAI from 'openai'
-import { scribeTranscribe } from '@/lib/elevenlabs'
-import { elevenTTS } from '@/lib/elevenlabs'
+import { scribeTranscribe, elevenTTS, listElevenVoices } from '@/lib/elevenlabs'
+import { matchSpeakerVoices } from '@/lib/speakerVoices'
 import { buildPublicVideoUrl } from '@/lib/videoSign'
 import { updateQueue } from '@/lib/queue'
 
@@ -60,7 +60,7 @@ Rules:
 - Natural conversational language, as a native voice actor would say it
 - Keep brand names, app names, and numbers exactly as-is
 - Prepend ONE fitting emotion tag in square brackets to each line based on its tone, in English (e.g. [serious], [shocked], [crying], [excited], [calm])
-- Additionally, infer WHO each speaker is from the dialogue content: a short role label in English (e.g. "Narrator (voice-over)", "Girl", "Father", "Mother"). Voice-overs/announcers usually speak in ad-copy style; characters speak conversationally.
+- Additionally, infer WHO each speaker is from the dialogue content: a short role label in English (e.g. "Narrator (voice-over)", "Girl", "Father", "Mother"). Voice-overs/announcers usually speak in ad-copy style; characters speak conversationally. IMPORTANT: only specify gender/age in the label when the text clearly indicates it — otherwise use a neutral label like "Parent", "Teenager", "Speaker". Never guess.
 - Respond ONLY with raw JSON object, no markdown:
 {"segments":[{"speaker":"speaker_0","text":"[tag] translated line"},...],"speaker_roles":{"speaker_0":"Narrator (voice-over)","speaker_1":"Girl"}}`,
           },
@@ -83,7 +83,7 @@ Rules:
     const translatedText = segments.map(s => s.text).join('\n')
 
     // Инфо по говорящим для UI: роль, первая фраза оригинала, тайминг для прослушивания
-    const speakerInfo = speakerIds.map(id => {
+    const speakerInfo: any[] = speakerIds.map(id => {
       const first = transcript.segments.find(s => s.speaker === id)
       return {
         id,
@@ -93,12 +93,32 @@ Rules:
       }
     })
 
-    // 3. Озвучка: один говорящий — сразу TTS выбранным голосом.
+    // Автоподбор голосов: GPT слушает сэмпл каждого говорящего, матчим по тегам EL.
+    // Ошибки не блокируют дубляж — просто не будет предложенной раскладки.
+    let suggestedVoiceMap: Record<string, string> = {}
+    try {
+      const voices = await listElevenVoices()
+      const { profiles, voiceMap } = await matchSpeakerVoices(
+        url,
+        speakerInfo.map(s => ({ speaker: s.id, startSec: s.start })),
+        voices,
+      )
+      suggestedVoiceMap = voiceMap
+      for (const info of speakerInfo) {
+        const p = profiles[info.id]
+        if (p) info.voiceProfile = [p.gender, p.age, p.tone].filter(x => x && x !== 'unknown').join(', ')
+      }
+    } catch (e: any) {
+      console.warn('[dubbing/prepare] voice matching skipped:', e.message)
+    }
+
+    // 3. Озвучка: один говорящий — сразу TTS (авто-подобранным голосом, если есть).
     // Диалог — аудио генерится отдельным вызовом /api/dubbing/dialogue после того,
-    // как пользователь раздаст голоса по говорящим в UI.
+    // как пользователь подтвердит раскладку голосов в UI.
     let audioBase64: string | null = null
     if (speakerIds.length === 1) {
-      const audio = await elevenTTS(translatedText, voiceId)
+      const chosenVoice = suggestedVoiceMap[speakerIds[0]] || voiceId
+      const audio = await elevenTTS(translatedText, chosenVoice)
       audioBase64 = audio.toString('base64')
     }
 
@@ -110,6 +130,7 @@ Rules:
       speakerIds,
       speakerInfo,
       speakers: speakerIds.length,
+      suggestedVoiceMap,
       audioBase64,
     })
   } catch (e: any) {

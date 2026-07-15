@@ -73,6 +73,29 @@ export async function elevenDialogue(inputs: { text: string; voice_id: string }[
   return Buffer.from(await res.arrayBuffer())
 }
 
+// Список голосов аккаунта (premade + добавленные), с тегами для автоподбора
+export interface ElevenVoice {
+  voice_id: string
+  name: string
+  labels: Record<string, string> // gender, age, accent, descriptive, use_case
+}
+
+let voicesCache: { at: number; voices: ElevenVoice[] } | null = null
+
+export async function listElevenVoices(): Promise<ElevenVoice[]> {
+  if (voicesCache && Date.now() - voicesCache.at < 60 * 60 * 1000) return voicesCache.voices
+  const res = await fetch(`${EL_BASE}/v1/voices`, { headers: elHeaders() })
+  if (!res.ok) throw new Error(`ElevenLabs voices ${res.status}: ${await res.text()}`)
+  const data = await res.json()
+  const voices: ElevenVoice[] = (data.voices || []).map((v: any) => ({
+    voice_id: v.voice_id,
+    name: v.name,
+    labels: v.labels || {},
+  }))
+  voicesCache = { at: Date.now(), voices }
+  return voices
+}
+
 // Диалог с таймстемпами: voice_segments говорят, где в сгенерированном mp3
 // начинается и кончается каждая реплика — нужно для окон липсинка.
 export interface DialogueTiming { index: number; start: number; end: number } // секунды

@@ -861,6 +861,32 @@ export function GeneratorPage() {
     setHistoryLoading(false)
   }, [])
 
+  // Тихое автообновление сетки каждые 3 минуты:
+  // - если последний элемент совпадает с Drive — состояние не трогаем (нет перерендера)
+  // - новые элементы подклеиваются сверху, скролл и догруженные страницы сохраняются
+  // - пауза, пока открыта карточка — чтобы не сбивать пользователя
+  const selectedItemRef = useRef(selectedItem)
+  selectedItemRef.current = selectedItem
+  useEffect(() => {
+    const id = setInterval(async () => {
+      if (selectedItemRef.current) return
+      try {
+        const res = await fetch('/api/generator/history')
+        const data = await res.json()
+        const fresh: HistoryItem[] = data.items || []
+        if (!fresh.length) return
+        setHistory(prev => {
+          if (!prev.length) return fresh
+          if (prev[0]?.id === fresh[0]?.id) return prev // ничего нового
+          const known = new Set(prev.map(p => p.id))
+          const newOnes = fresh.filter(it => !known.has(it.id))
+          return newOnes.length ? [...newOnes, ...prev] : prev
+        })
+      } catch {}
+    }, 3 * 60 * 1000)
+    return () => clearInterval(id)
+  }, [])
+
   const loadMore = useCallback(async () => {
     if (!nextPageToken || loadingMore) return
     setLoadingMore(true)
