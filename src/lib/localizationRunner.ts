@@ -289,6 +289,16 @@ async function localizeImage(
   }
 
   // ── Phase 2: GPT image edit (chain: starts from last Gemini result + QA fix prompt) ──
+  // GPT в обычном режиме отключён (качество хуже Gemini), НО: если Gemini
+  // заблокировал ВСЕ попытки по content policy и не выдал ни одной картинки —
+  // GPT остаётся единственным шансом (аварийный фолбэк, у него другие фильтры).
+  const geminiFullyBlocked = !bestResult && failReasons.some(r => r.includes('IMAGE_SAFETY') || r.includes('NO_IMAGE') || r.includes('no image'))
+  let emergencyFallback = false
+  if (geminiFullyBlocked && gptAttempts === 0) {
+    console.warn('[loc] Gemini fully content-blocked — emergency GPT fallback (2 attempts, QA-gated)')
+    gptAttempts = 2
+    emergencyFallback = true
+  }
   if (gptAttempts > 0) {
     const gptSize = sizeLabel ? GPT_IMAGE_SIZE_MAP[sizeLabel] : undefined
     if (!gptSize) {
@@ -363,12 +373,16 @@ async function localizeImage(
     }
   }
 
-  if (bestResult) {
-    console.warn(`[loc] All ${totalAttempts} attempts done, using best-effort.\nReasons: ${failReasons.join(' | ')}`)
-  } else {
-    console.warn(`[loc] All ${totalAttempts} attempts threw errors, using original.`)
+  // В аварийном GPT-фолбэке best-effort запрещён: GPT любит дофантазировать,
+  // без пройденного QA его результат не отдаём (QA-ok выше уже вернулся бы return'ом)
+  if (bestResult && !emergencyFallback) {
+    console.warn(`[loc] All attempts done, using best-effort.\nReasons: ${failReasons.join(' | ')}`)
+    return bestResult
   }
-  return bestResult ?? imgBuffer
+  // Ни одной сгенерированной картинки — НЕ подсовываем оригинал молча,
+  // а сигналим наверх: пусть раннер пометит файл как требующий ручной работы
+  console.warn(`[loc] All attempts blocked/failed, no image produced.\nReasons: ${failReasons.join(' | ')}`)
+  throw new Error('CONTENT_BLOCKED')
 }
 
 // --- Types ---
@@ -1317,6 +1331,7 @@ export async function runLocalizationJob(
 
           try {
             let finalBuffer = buffer
+            let contentBlocked = false // все AI-попытки заблокированы политикой — нужна ручная работа
 
             const SKIP_TYPES = new Set(['logo', 'watermark'])
             const langPhrases = Array.from(texts)
@@ -1354,6 +1369,7 @@ export async function runLocalizationJob(
                   (entry) => { debugEntries.push(entry) })
               } catch (locErr: any) {
                 console.warn(`[loc] Localization failed for ${img.name}:`, locErr.message)
+                if (locErr.message === 'CONTENT_BLOCKED') contentBlocked = true
               }
               // Upload debug artifacts in background — only for Valera
               if (userEmail === DEBUG_EMAIL) {
@@ -1372,8 +1388,11 @@ export async function runLocalizationJob(
             // HARD RULE: never upload original English image to translated folder
             if (finalBuffer === buffer && langPhrases.length > 0) {
               failedNoTranslation++
-              console.warn(`[loc] ${img.name}/${lang}: all attempts failed, skipping upload (no English fallback allowed)`)
-              patch(folder.id, { uploadInfo: `${lang}: ${img.name} — skipped (translation failed, English not uploaded)` })
+              const reason = contentBlocked
+                ? 'blocked by AI content policy (both Gemini & GPT) — needs MANUAL localization'
+                : 'translation failed, English not uploaded'
+              console.warn(`[loc] ${img.name}/${lang}: ${reason}`)
+              patch(folder.id, { uploadInfo: `${lang}: ${img.name} — ⚠ ${reason}`, error: contentBlocked ? `${lang}/${img.name}: content policy block — manual work needed` : undefined })
               emit()
               continue
             }
