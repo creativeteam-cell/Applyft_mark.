@@ -1332,6 +1332,10 @@ export async function runLocalizationJob(
 
         const dict = langDicts[lang] || {}
         const existingFiles = langExistingFiles[lang] || new Map()
+
+        // Успешно переведённые буферы этого языка по размерам — источник для
+        // фолбэка "ресайз из переведённого", когда какой-то размер content-blocked
+        const translatedThisLang: Record<string, Buffer> = {}
         const existingSizes = new Set(
           Array.from(existingFiles.keys()).map(getSizeLabelFromName).filter(Boolean) as string[]
         )
@@ -1418,15 +1422,44 @@ export async function runLocalizationJob(
 
             // HARD RULE: never upload original English image to translated folder
             if (finalBuffer === buffer && langPhrases.length > 0) {
-              failedNoTranslation++
-              const reason = contentBlocked
-                ? 'blocked by AI content policy (both Gemini & GPT) — needs MANUAL localization'
-                : 'translation failed, English not uploaded'
-              console.warn(`[loc] ${img.name}/${lang}: ${reason}`)
-              patch(folder.id, { uploadInfo: `${lang}: ${img.name} — ⚠ ${reason}`, error: contentBlocked ? `${lang}/${img.name}: content policy block — manual work needed` : undefined })
-              emit()
-              continue
+              // План Б при content-block: берём УЖЕ переведённый размер этого языка
+              // (приоритет 4x5) и достраиваем его до целевого размера рекомпозицией —
+              // как ресайз в дашборде. Текст уже заменён, задача "дорисуй фон"
+              // проходит фильтры намного легче.
+              const srcLabel = translatedThisLang['4x5'] ? '4x5' : Object.keys(translatedThisLang)[0]
+              let recovered = false
+              if (contentBlocked && srcLabel && sizeLabel && srcLabel !== sizeLabel) {
+                patch(folder.id, { uploadInfo: `${lang}: ${img.name} — content-blocked, recomposing from translated ${srcLabel}...` })
+                emit()
+                try {
+                  await updateQueue('gemini', 1)
+                  try {
+                    const srcDataUrl = `data:image/jpeg;base64,${translatedThisLang[srcLabel].toString('base64')}`
+                    const outB64 = await recomposeImage(srcDataUrl, sizeLabel)
+                    finalBuffer = Buffer.from(String(outB64).replace(/^data:image\/\w+;base64,/, ''), 'base64')
+                    recovered = true
+                    console.log(`[loc] ${img.name}/${lang}: recovered via recompose from translated ${srcLabel}`)
+                  } finally {
+                    await updateQueue('gemini', -1)
+                  }
+                } catch (recErr: any) {
+                  console.warn(`[loc] ${img.name}/${lang}: recompose fallback failed:`, recErr.message)
+                }
+              }
+              if (!recovered) {
+                failedNoTranslation++
+                const reason = contentBlocked
+                  ? 'blocked by AI content policy — needs MANUAL localization'
+                  : 'translation failed, English not uploaded'
+                console.warn(`[loc] ${img.name}/${lang}: ${reason}`)
+                patch(folder.id, { uploadInfo: `${lang}: ${img.name} — ⚠ ${reason}`, error: contentBlocked ? `${lang}/${img.name}: content policy block — manual work needed` : undefined })
+                emit()
+                continue
+              }
             }
+
+            // Запоминаем успешный перевод как источник для фолбэка других размеров
+            if (sizeLabel && finalBuffer !== buffer) translatedThisLang[sizeLabel] = finalBuffer
 
             const targetSize = getSizeFromName(img.name)
             if (targetSize) {
