@@ -1426,15 +1426,34 @@ export async function runLocalizationJob(
               // (приоритет 4x5) и достраиваем его до целевого размера рекомпозицией —
               // как ресайз в дашборде. Текст уже заменён, задача "дорисуй фон"
               // проходит фильтры намного легче.
-              const srcLabel = translatedThisLang['4x5'] ? '4x5' : Object.keys(translatedThisLang)[0]
+              // Источник для фолбэка: сначала переводы этого прогона (в памяти),
+              // затем — уже лежащие в языковой папке на Drive (прошлые прогоны)
+              let srcLabel = translatedThisLang['4x5'] ? '4x5' : Object.keys(translatedThisLang).find(l => l !== sizeLabel)
+              let srcBuffer: Buffer | undefined = srcLabel ? translatedThisLang[srcLabel] : undefined
+              if (contentBlocked && !srcBuffer && sizeLabel) {
+                try {
+                  const langImages = await listImages(langFolderId)
+                  const candidates = langImages
+                    .map(f => ({ f, label: getSizeLabelFromName(f.name) }))
+                    .filter(c => c.label && c.label !== sizeLabel)
+                  const pick = candidates.find(c => c.label === '4x5') || candidates[0]
+                  if (pick) {
+                    srcBuffer = await downloadFileAsBuffer(pick.f.id)
+                    srcLabel = pick.label!
+                    console.log(`[loc] fallback source from Drive: ${pick.f.name}`)
+                  }
+                } catch (e: any) {
+                  console.warn('[loc] failed to fetch fallback source from Drive:', e.message)
+                }
+              }
               let recovered = false
-              if (contentBlocked && srcLabel && sizeLabel && srcLabel !== sizeLabel) {
+              if (contentBlocked && srcBuffer && srcLabel && sizeLabel && srcLabel !== sizeLabel) {
                 patch(folder.id, { uploadInfo: `${lang}: ${img.name} — content-blocked, recomposing from translated ${srcLabel}...` })
                 emit()
                 try {
                   await updateQueue('gemini', 1)
                   try {
-                    const srcDataUrl = `data:image/jpeg;base64,${translatedThisLang[srcLabel].toString('base64')}`
+                    const srcDataUrl = `data:image/jpeg;base64,${srcBuffer.toString('base64')}`
                     const outB64 = await recomposeImage(srcDataUrl, sizeLabel)
                     finalBuffer = Buffer.from(String(outB64).replace(/^data:image\/\w+;base64,/, ''), 'base64')
                     recovered = true
