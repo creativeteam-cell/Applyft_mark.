@@ -60,6 +60,19 @@ export async function scribeTranscribe(videoUrl: string): Promise<ScribeResult> 
   }
 }
 
+// Text to Dialogue (eleven_v3): массив реплик разными голосами → один mp3.
+// Поддерживает эмоции тегами в тексте: "[crying] Пап, прости..."
+// Лимиты: до 10 уникальных голосов, суммарно ≤2000 символов на запрос.
+export async function elevenDialogue(inputs: { text: string; voice_id: string }[]): Promise<Buffer> {
+  const res = await fetch(`${EL_BASE}/v1/text-to-dialogue?output_format=mp3_44100_128`, {
+    method: 'POST',
+    headers: { ...elHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ inputs, model_id: 'eleven_v3' }),
+  })
+  if (!res.ok) throw new Error(`ElevenLabs Dialogue ${res.status}: ${await res.text()}`)
+  return Buffer.from(await res.arrayBuffer())
+}
+
 // Мультиязычный TTS; один и тот же голос говорит на любом языке
 export async function elevenTTS(text: string, voiceId: string): Promise<Buffer> {
   const res = await fetch(`${EL_BASE}/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {

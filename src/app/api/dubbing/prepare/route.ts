@@ -40,45 +40,60 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No speech detected in this video' }, { status: 422 })
     }
 
-    // 2. Перевод с подгонкой под хронометраж
+    // 2. Перевод по репликам: сохраняем говорящих, добавляем эмоцию тегом
+    // (eleven_v3 понимает [crying]/[serious]/[excited] прямо в тексте)
     const langName = LANG_NAMES[targetLang] || targetLang
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
     await updateQueue('openai', 1)
-    let translated: string
+    let segments: { speaker: string; text: string }[]
     try {
       const res = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages: [
           {
             role: 'system',
-            content: `You are a professional dubbing translator for ad videos. Translate the voiceover into ${langName}.
+            content: `You are a professional dubbing translator for ad videos. Translate each dialogue line into ${langName}.
 Rules:
-- The translation will be spoken aloud and must fit the SAME duration as the original — keep spoken length as close as possible (same number of syllables ± 15%)
-- Natural conversational ad language, as a native voice actor would say it
+- Keep the same number of lines, same order, same speaker for each line
+- Each translated line will be spoken aloud and must fit roughly the SAME duration as the original (similar syllable count ± 15%)
+- Natural conversational language, as a native voice actor would say it
 - Keep brand names, app names, and numbers exactly as-is
-- Return ONLY the translated text, no explanations, no quotes`,
+- Prepend ONE fitting emotion tag in square brackets to each line based on its tone, in English (e.g. [serious], [shocked], [crying], [excited], [calm])
+- Respond ONLY with raw JSON array: [{"speaker":"speaker_0","text":"[tag] translated line"}, ...] — no markdown`,
           },
-          { role: 'user', content: transcript.text },
+          { role: 'user', content: JSON.stringify(transcript.segments.map(s => ({ speaker: s.speaker, text: s.text }))) },
         ],
-        max_tokens: 1500,
+        max_tokens: 2000,
         temperature: 0.4,
       }, { timeout: 60000 })
-      translated = res.choices[0]?.message?.content?.trim() || ''
+      const raw = res.choices[0]?.message?.content?.trim() || '[]'
+      const clean = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
+      segments = JSON.parse(clean.slice(clean.indexOf('['), clean.lastIndexOf(']') + 1))
     } finally {
       await updateQueue('openai', -1)
     }
-    if (!translated) throw new Error('Translation failed')
+    if (!segments?.length) throw new Error('Translation failed')
 
-    // 3. Озвучка
-    const audio = await elevenTTS(translated, voiceId)
+    const speakerIds = [...new Set(segments.map(s => s.speaker))]
+    const translatedText = segments.map(s => s.text).join('\n')
 
-    const speakers = new Set(transcript.segments.map(s => s.speaker)).size
+    // 3. Озвучка: один говорящий — сразу TTS выбранным голосом.
+    // Диалог — аудио генерится отдельным вызовом /api/dubbing/dialogue после того,
+    // как пользователь раздаст голоса по говорящим в UI.
+    let audioBase64: string | null = null
+    if (speakerIds.length === 1) {
+      const audio = await elevenTTS(translatedText, voiceId)
+      audioBase64 = audio.toString('base64')
+    }
+
     return NextResponse.json({
       sourceText: transcript.text,
       sourceLang: transcript.language,
-      translatedText: translated,
-      speakers, // >1 — предупредим в UI, что MVP озвучивает одним голосом
-      audioBase64: audio.toString('base64'),
+      translatedText,
+      segments,
+      speakerIds,
+      speakers: speakerIds.length,
+      audioBase64,
     })
   } catch (e: any) {
     console.error('[dubbing/prepare]', e)

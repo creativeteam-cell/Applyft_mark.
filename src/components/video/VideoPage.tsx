@@ -973,7 +973,24 @@ export function VideoPage() {
   const [dubVoice, setDubVoice] = useState(DUB_VOICES[0].id)
   const [dubFileId, setDubFileId] = useState<string | null>(null) // fileId, если видео из истории
   const [dubPreparing, setDubPreparing] = useState(false)
-  const [dubPrepared, setDubPrepared] = useState<{ sourceText: string; sourceLang: string; translatedText: string; audioBase64: string; speakers: number } | null>(null)
+  const [dubPrepared, setDubPrepared] = useState<{ sourceText: string; sourceLang: string; translatedText: string; audioBase64: string | null; speakers: number; segments?: { speaker: string; text: string }[]; speakerIds?: string[] } | null>(null)
+  const [dubVoiceMap, setDubVoiceMap] = useState<Record<string, string>>({})
+  const [dubVoicingDialogue, setDubVoicingDialogue] = useState(false)
+
+  async function handleDubDialogueVoice() {
+    if (!dubPrepared?.segments) return
+    setDubVoicingDialogue(true); setDubError('')
+    try {
+      const res = await fetch('/api/dubbing/dialogue', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ segments: dubPrepared.segments, voiceMap: dubVoiceMap }),
+      })
+      const d = await res.json()
+      if (d.error) throw new Error(d.error)
+      setDubPrepared(prev => prev ? { ...prev, audioBase64: d.audioBase64 } : prev)
+    } catch (e: any) { setDubError(e.message) }
+    setDubVoicingDialogue(false)
+  }
   const [dubEditedText, setDubEditedText] = useState('')
   const [dubRevoicing, setDubRevoicing] = useState(false)
   const [dubProcessing, setDubProcessing] = useState(false)
@@ -996,6 +1013,12 @@ export function VideoPage() {
       if (d.error) throw new Error(d.error)
       setDubPrepared(d)
       setDubEditedText(d.translatedText)
+      // Диалог: раздаём голоса по кругу как стартовый вариант
+      if (d.speakerIds?.length > 1) {
+        const map: Record<string, string> = {}
+        d.speakerIds.forEach((sp: string, i: number) => { map[sp] = DUB_VOICES[i % DUB_VOICES.length].id })
+        setDubVoiceMap(map)
+      }
     } catch (e: any) { setDubError(e.message) }
     setDubPreparing(false)
   }
@@ -1018,12 +1041,13 @@ export function VideoPage() {
   function stopDubPoll() { if (dubPollRef.current) { clearInterval(dubPollRef.current); dubPollRef.current = null } }
 
   async function handleDubStart() {
-    if (!dubPrepared || !motionVideoUrl) return
+    if (!dubPrepared?.audioBase64 || !motionVideoUrl) return
+    const audioB64 = dubPrepared.audioBase64
     setDubProcessing(true); setDubStatus('processing'); setDubError('')
     try {
       // Длительность mp3 берём из аудио-элемента
       const audioDurationMs = await new Promise<number>((resolve, reject) => {
-        const a = new Audio(`data:audio/mpeg;base64,${dubPrepared.audioBase64}`)
+        const a = new Audio(`data:audio/mpeg;base64,${audioB64}`)
         a.onloadedmetadata = () => resolve(Math.round(a.duration * 1000))
         a.onerror = () => reject(new Error('Failed to read audio duration'))
       })
@@ -1032,7 +1056,7 @@ export function VideoPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...(dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }),
-          audioBase64: dubPrepared.audioBase64, audioDurationMs,
+          audioBase64: audioB64, audioDurationMs,
         }),
       })
       const d = await res.json()
@@ -1901,32 +1925,69 @@ export function VideoPage() {
 
               {dubPrepared && (
                 <>
-                  {dubPrepared.speakers > 1 && (
-                    <p className="text-[10px] mb-2 px-2 py-1.5 rounded-lg" style={{ background: 'rgba(251,188,5,0.08)', color: '#fbbc05' }}>
-                      ⚠ Detected {dubPrepared.speakers} speakers — MVP voices everything with a single voice
-                    </p>
-                  )}
                   <div className="mb-2">
                     <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Original ({dubPrepared.sourceLang})</div>
                     <p className="text-xs px-2 py-1.5 rounded-lg max-h-20 overflow-y-auto" style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--text-muted)' }}>{dubPrepared.sourceText}</p>
                   </div>
-                  <div className="mb-2">
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Translation — edit if needed</div>
-                      <button onClick={handleDubRevoice} disabled={dubRevoicing || dubEditedText === dubPrepared.translatedText}
-                        className="text-[10px] px-2 py-0.5 rounded-lg font-medium"
-                        style={{ background: 'rgba(79,110,247,0.12)', color: dubEditedText !== dubPrepared.translatedText ? 'var(--accent)' : 'rgba(255,255,255,0.2)', border: '1px solid var(--border)' }}>
-                        {dubRevoicing ? 'Voicing...' : '↻ Re-voice'}
+
+                  {dubPrepared.speakers > 1 && dubPrepared.segments ? (
+                    /* Диалог: реплики + раздача голосов по говорящим */
+                    <div className="mb-2">
+                      <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>
+                        Dialogue — {dubPrepared.speakers} speakers, assign voices
+                      </div>
+                      <div className="flex flex-col gap-1.5 mb-2">
+                        {(dubPrepared.speakerIds || []).map((sp, i) => (
+                          <div key={sp} className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono w-16 flex-shrink-0" style={{ color: 'var(--accent)' }}>Speaker {i + 1}</span>
+                            <select value={dubVoiceMap[sp] || DUB_VOICES[0].id}
+                              onChange={e => setDubVoiceMap(prev => ({ ...prev, [sp]: e.target.value }))}
+                              className="flex-1 rounded-lg px-2 py-1 text-xs outline-none"
+                              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                              {DUB_VOICES.map(v => <option key={v.id} value={v.id} style={{ background: '#1a1a2e' }}>{v.label}</option>)}
+                            </select>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="max-h-32 overflow-y-auto rounded-lg px-2 py-1.5 mb-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                        {dubPrepared.segments.map((s, i) => (
+                          <p key={i} className="text-xs mb-1">
+                            <span className="font-mono text-[10px]" style={{ color: 'var(--accent)' }}>
+                              S{(dubPrepared.speakerIds || []).indexOf(s.speaker) + 1}:
+                            </span>{' '}
+                            <span style={{ color: 'var(--text)' }}>{s.text}</span>
+                          </p>
+                        ))}
+                      </div>
+                      <button onClick={handleDubDialogueVoice} disabled={dubVoicingDialogue}
+                        className="w-full py-2 rounded-lg text-xs font-medium transition-all mb-1"
+                        style={{ background: 'rgba(79,110,247,0.12)', color: 'var(--accent)', border: '1px solid var(--border)' }}>
+                        {dubVoicingDialogue ? 'Voicing dialogue...' : dubPrepared.audioBase64 ? '↻ Re-voice dialogue' : '🎭 Voice dialogue'}
                       </button>
                     </div>
-                    <textarea value={dubEditedText} onChange={e => setDubEditedText(e.target.value)} rows={3}
-                      className="w-full rounded-lg resize-none outline-none text-xs p-2"
-                      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }} />
-                  </div>
-                  {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                  <audio controls src={`data:audio/mpeg;base64,${dubPrepared.audioBase64}`} className="w-full mb-2" style={{ height: 32 }} />
+                  ) : (
+                    /* Один говорящий: редактируемый перевод как раньше */
+                    <div className="mb-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Translation — edit if needed</div>
+                        <button onClick={handleDubRevoice} disabled={dubRevoicing || dubEditedText === dubPrepared.translatedText}
+                          className="text-[10px] px-2 py-0.5 rounded-lg font-medium"
+                          style={{ background: 'rgba(79,110,247,0.12)', color: dubEditedText !== dubPrepared.translatedText ? 'var(--accent)' : 'rgba(255,255,255,0.2)', border: '1px solid var(--border)' }}>
+                          {dubRevoicing ? 'Voicing...' : '↻ Re-voice'}
+                        </button>
+                      </div>
+                      <textarea value={dubEditedText} onChange={e => setDubEditedText(e.target.value)} rows={3}
+                        className="w-full rounded-lg resize-none outline-none text-xs p-2"
+                        style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+                    </div>
+                  )}
+
+                  {dubPrepared.audioBase64 && (
+                    /* eslint-disable-next-line jsx-a11y/media-has-caption */
+                    <audio controls src={`data:audio/mpeg;base64,${dubPrepared.audioBase64}`} className="w-full mb-2" style={{ height: 32 }} />
+                  )}
                   {dubStatus === 'done' && <p className="text-xs mb-2" style={{ color: '#34a853' }}>✓ Dubbed video saved to history</p>}
-                  <button onClick={handleDubStart} disabled={dubProcessing}
+                  <button onClick={handleDubStart} disabled={dubProcessing || !dubPrepared.audioBase64}
                     className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 mb-3"
                     style={{ background: !dubProcessing ? 'var(--accent)' : 'rgba(255,255,255,0.05)', color: !dubProcessing ? '#fff' : 'var(--text-muted)' }}>
                     {dubProcessing ? (
