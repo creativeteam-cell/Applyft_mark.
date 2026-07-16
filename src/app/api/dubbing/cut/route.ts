@@ -39,11 +39,18 @@ export async function POST(req: NextRequest) {
     const r = await fetch(url); if (!r.ok) throw new Error(`fetch video ${r.status}`)
     await fs.writeFile(inPath, Buffer.from(await r.arrayBuffer()))
 
-    const args = ['-y']
+    // Seek ПОСЛЕ -i (точный, покадровый) + обнуление таймстемпов и постоянный
+    // фреймрейт 30 — иначе в начале куска "зависает" первый кадр (стоп-кадр),
+    // а на стыках при склейке случается микрофриз из-за плавающего FPS.
+    const args = ['-y', '-i', inPath]
     if (typeof startMs === 'number') args.push('-ss', (startMs / 1000).toFixed(3))
     if (typeof endMs === 'number') args.push('-to', (endMs / 1000).toFixed(3))
-    // -to задаётся ДО -i для точного seek от начала файла
-    args.push('-i', inPath, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-an', outPath)
+    args.push(
+      '-vf', 'fps=30,setpts=PTS-STARTPTS',
+      '-vsync', 'cfr', '-r', '30',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18',
+      '-an', '-reset_timestamps', '1', outPath,
+    )
     await execFileAsync(ffmpegPath, args, { timeout: 90000, maxBuffer: 1024 * 1024 * 20 })
 
     const buf = await fs.readFile(outPath)

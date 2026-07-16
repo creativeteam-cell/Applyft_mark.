@@ -57,6 +57,7 @@ export async function POST(req: NextRequest) {
     await fs.writeFile(listPath, clipPaths.map(p => `file '${p}'`).join('\n'))
     await execFileAsync(ffmpegPath, [
       '-y', '-f', 'concat', '-safe', '0', '-i', listPath,
+      '-vf', 'fps=30,setpts=PTS-STARTPTS', '-vsync', 'cfr', '-r', '30',
       '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-an', concatPath,
     ], { timeout: 150000, maxBuffer: 1024 * 1024 * 40 })
 
