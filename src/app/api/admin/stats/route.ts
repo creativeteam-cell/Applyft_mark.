@@ -5,6 +5,7 @@ import { getAdminEmails, getAllUserStats, getAllLimits, checkAndResetMonth, getA
 import { getDriveClient } from '@/lib/googleDrive'
 
 const FOLDER_ID = process.env.GENERATOR_DRIVE_FOLDER_ID!
+const VIDEO_FOLDER_ID = process.env.VIDEO_DRIVE_FOLDER_ID!
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -16,16 +17,23 @@ export async function GET(req: NextRequest) {
   }
 
   const drive = getDriveClient()
-  const res = await drive.files.list({
+  // Собираем пользователей из ОБЕИХ папок — картинок и видео, иначе тот, кто
+  // делал только видео (без картинок), не попадёт в список
+  const listFolder = (folderId: string) => drive.files.list({
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
-    q: `'${FOLDER_ID}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
+    q: `'${folderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
     fields: 'files(description)',
     orderBy: 'createdTime desc',
     pageSize: 200,
   } as any) as any
 
-  const files = (res.data.files || []) as any[]
+  const results = await Promise.all([
+    listFolder(FOLDER_ID),
+    VIDEO_FOLDER_ID ? listFolder(VIDEO_FOLDER_ID) : Promise.resolve({ data: { files: [] } }),
+  ])
+  const files = results.flatMap((r: any) => (r.data.files || [])) as any[]
+
   const userMap = new Map<string, { email: string; name: string; image: string }>()
   for (const f of files) {
     try {

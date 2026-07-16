@@ -1153,9 +1153,8 @@ export function VideoPage() {
             const ad = await ar.json()
             if (ad.audioBase64) {
               workAudio = ad.audioBase64
-              // align добавляет 500мс подушку в начало — учитываем в таймингах,
-              // иначе окна липсинка разъедутся с аудио на полсекунды
-              const LEAD = 0.5
+              // align добавляет 0.2с подушку в начало — учитываем в таймингах
+              const LEAD = 0.2
               workTimings = prepared.segments!.map((seg: any, i: number) =>
                 ({ index: i, start: (seg.origStartMs ?? 0) / 1000 + LEAD, end: (seg.origEndMs ?? 0) / 1000 + LEAD }))
             }
@@ -1209,94 +1208,85 @@ export function VideoPage() {
         return
       }
 
-      // ── Диалог: окна по репликам экранных говорящих ──
-      // Звук режется по таймингам сгенерированной озвучки, вставляется по таймингам
-      // оригинала (выравнивание по паузам). Соседние реплики одного говорящего
-      // сливаются, только если близки и там, и там.
-      // Дорожка уже выровнена (workAudio): реплики стоят на оригинальных позициях,
-      // поэтому soundStart == insert — окно и лицо совпадают с видео автоматически
-      type Win = { soundStartMs: number; soundEndMs: number; insertMs: number; speaker: string }
-      const wins: Win[] = []
-      prepared.segments!.forEach((seg: any, i) => {
-        if (dubOnScreen[seg.speaker] === false) return // закадровый — губы не трогаем
-        const t = (workTimings || prepared.timings!).find(x => x.index === i)
-        if (!t) return
-        const soundStartMs = Math.round(t.start * 1000), soundEndMs = Math.round(t.end * 1000)
-        const insertMs = soundStartMs
-        const last = wins[wins.length - 1]
-        if (last && last.speaker === seg.speaker
-          && soundStartMs - last.soundEndMs < 600
-          && insertMs - (last.insertMs + (last.soundEndMs - last.soundStartMs)) < 600) {
-          last.soundEndMs = soundEndMs
-        } else {
-          wins.push({ soundStartMs, soundEndMs, insertMs, speaker: seg.speaker })
-        }
-      })
+      // ── Диалог: НАРЕЗКА оригинала на непрерывные куски + липсинк по кускам ──
+      // Каждая реплика = один кусок [origStart..origEnd]. Экранная и ≥2с → в Kling
+      // (в куске одно активное лицо, наложения проходов нет). Закадровая/короткая →
+      // кусок без липсинка. Промежутки между репликами — тоже отдельные куски.
+      // В конце всё склеивается, звук — выровненный workAudio.
+      const LEAD_MS = 200
+      const segs = prepared.segments!.map((seg: any) => ({
+        startMs: seg.origStartMs ?? 0,
+        endMs: seg.origEndMs ?? 0,
+        speaker: seg.speaker,
+        onScreen: dubOnScreen[seg.speaker] !== false,
+      })).filter((s: any) => s.endMs > s.startMs).sort((a: any, b: any) => a.startMs - b.startMs)
 
-      // Минимум Kling — 2 секунды. Тянем вперёд/назад ТОЛЬКО в паузы, никогда
-      // не заходя в соседнее окно — иначе проход одного говорящего перезапишет
-      // губы другого (та самая "дочка повторяет фразу отца").
-      for (let i = 0; i < wins.length; i++) {
-        const w = wins[i]
-        const nextStart = wins[i + 1]?.soundStartMs ?? audioDurationMs
-        const prevEnd = wins[i - 1]?.soundEndMs ?? 0
-        if (w.soundEndMs - w.soundStartMs < 2000) {
-          w.soundEndMs = Math.min(w.soundStartMs + 2000, nextStart) // не наезжаем на следующее
-        }
-        if (w.soundEndMs - w.soundStartMs < 2000) {
-          w.soundStartMs = Math.max(prevEnd, w.soundEndMs - 2000) // не наезжаем на предыдущее
-          w.insertMs = w.soundStartMs
-        }
+      // Строим непрерывное покрытие [0..videoEnd]: реплики + промежутки-паузы
+      type Piece = { startMs: number; endMs: number; lipsync: boolean; speaker?: string }
+      const pieces: Piece[] = []
+      let cursor = 0
+      const videoEndMs = Math.max(...segs.map((s: any) => s.endMs), Math.round(audioDurationMs))
+      for (const s of segs) {
+        if (s.startMs > cursor + 50) pieces.push({ startMs: cursor, endMs: s.startMs, lipsync: false }) // пауза
+        const longEnough = (s.endMs - s.startMs) >= 2000
+        pieces.push({ startMs: s.startMs, endMs: s.endMs, lipsync: s.onScreen && longEnough, speaker: s.speaker })
+        cursor = s.endMs
       }
-      // Финальная страховка: режем любые остаточные пересечения
-      for (let i = 1; i < wins.length; i++) {
-        if (wins[i].soundStartMs < wins[i - 1].soundEndMs) {
-          wins[i - 1].soundEndMs = wins[i].soundStartMs
-        }
-      }
-      const runnable = wins.filter(w => w.soundEndMs - w.soundStartMs >= 2000)
-      const skipped = wins.length - runnable.length
-      if (skipped > 0) console.warn(`[dub] ${skipped} lines shorter than 2s — lips left original there`)
+      if (cursor < videoEndMs - 50) pieces.push({ startMs: cursor, endMs: videoEndMs, lipsync: false })
 
-      // Последовательные проходы: каждый следующий работает по результату предыдущего.
-      // Лицо каждого прохода — то, что пользователь привязал к говорящему (faceRef).
-      let curUrl: string | null = null
-      for (let i = 0; i < runnable.length; i++) {
-        setDubProgress(`Lip-sync pass ${i + 1}/${runnable.length}...`)
-        const faceIdx = dubFaceMap[runnable[i].speaker]
-        const faceRef = (dubFaces && faceIdx !== undefined && dubFaces[faceIdx])
-          ? { startMs: dubFaces[faceIdx].startMs, endMs: dubFaces[faceIdx].endMs }
-          : undefined
-        const res = await fetch('/api/dubbing/lipsync', {
+      const lipCount = pieces.filter(p => p.lipsync).length
+      const clipUrls: string[] = []
+      const tempFileIds: string[] = []
+      let done = 0
+
+      for (const p of pieces) {
+        // 1. Вырезаем кусок оригинала
+        setDubProgress(`Preparing clips (${clipUrls.length + 1}/${pieces.length})...`)
+        const cutRes = await fetch('/api/dubbing/cut', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...(curUrl ? { videoUrl: curUrl } : dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }),
-            audioBase64: workAudio, audioDurationMs,
-            window: { soundStartMs: runnable[i].soundStartMs, soundEndMs: runnable[i].soundEndMs, insertMs: runnable[i].insertMs },
-            originalAudioVolume: i === 0 ? 0 : 1,
-            faceRef,
-          }),
+          body: JSON.stringify({ ...(dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }), startMs: p.startMs, endMs: p.endMs }),
         })
-        const d = await res.json()
-        if (d.error) throw new Error(`Pass ${i + 1}: ${d.error}`)
-        const result = await waitKlingTask(d.task_id, 'advanced-lip-sync')
-        curUrl = result.url
+        const cut = await cutRes.json()
+        if (cut.error) throw new Error(`cut: ${cut.error}`)
+        tempFileIds.push(cut.fileId)
+        let clipUrl: string = cut.url
+
+        // 2. Если кусок под липсинк — прогоняем его через Kling целиком.
+        // Звук — срез workAudio для этой реплики, вставляется с 0 (кусок начинается с неё)
+        if (p.lipsync) {
+          done++
+          setDubProgress(`Lip-sync ${done}/${lipCount}...`)
+          // faceRef не нужен: в куске одного говорящего активное лицо одно,
+          // Kling выберет его как самое видимое
+          const lipRes = await fetch('/api/dubbing/lipsync', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              videoUrl: clipUrl,
+              audioBase64: workAudio, audioDurationMs,
+              window: { soundStartMs: p.startMs + LEAD_MS, soundEndMs: p.endMs + LEAD_MS, insertMs: 0 },
+              originalAudioVolume: 0,
+            }),
+          })
+          const ld = await lipRes.json()
+          if (ld.error) throw new Error(`lip-sync: ${ld.error}`)
+          const result = await waitKlingTask(ld.task_id, 'advanced-lip-sync')
+          clipUrl = result.url
+        }
+        clipUrls.push(clipUrl)
       }
 
-      // 4. Финал: выровненная озвучка целиком поверх видео (реплики уже на местах)
-      setDubProgress('Mixing final audio...')
-      const finRes = await fetch('/api/dubbing/finalize', {
+      // 3. Склейка кусков + выровненная озвучка поверх
+      setDubProgress('Stitching final video...')
+      const stRes = await fetch('/api/dubbing/stitch', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...(curUrl ? { videoUrl: curUrl } : dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }),
-          audioBase64: workAudio,
-          prompt: `[dubbed → ${dubLang}] ${prepared.sourceText.slice(0, 120)}${skipped ? ` (${skipped} short lines kept original lips)` : ''}`,
-          targetLang: dubLang,
-          duration: String(Math.round(audioDurationMs / 1000)),
+          clipUrls, audioBase64: workAudio, tempFileIds,
+          prompt: `[dubbed → ${dubLang}] ${prepared.sourceText.slice(0, 120)}`,
+          targetLang: dubLang, duration: String(Math.round(audioDurationMs / 1000)),
         }),
       })
-      const fin = await finRes.json()
-      if (fin.error) throw new Error(fin.error)
+      const st = await stRes.json()
+      if (st.error) throw new Error(`stitch: ${st.error}`)
 
       setDubStatus('done'); setDubProcessing(false); setDubProgress(''); fetchHistory(); cleanupClonedVoices()
     } catch (e: any) { setDubError(e.message); setDubStatus('error'); setDubProcessing(false); setDubProgress(''); cleanupClonedVoices() }

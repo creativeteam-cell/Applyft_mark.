@@ -17,6 +17,8 @@ const nextConfig = {
       '/api/dubbing/prepare': ['./node_modules/ffmpeg-static/**'],
       '/api/dubbing/finalize': ['./node_modules/ffmpeg-static/**'],
       '/api/dubbing/align': ['./node_modules/ffmpeg-static/**'],
+      '/api/dubbing/cut': ['./node_modules/ffmpeg-static/**'],
+      '/api/dubbing/stitch': ['./node_modules/ffmpeg-static/**'],
     },
   },
 }
