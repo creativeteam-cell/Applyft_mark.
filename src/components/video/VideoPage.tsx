@@ -1031,53 +1031,37 @@ export function VideoPage() {
     if (!dubPrepared?.segments) return
     setDubVoicingDialogue(true); setDubError('')
     try {
-      const res = await fetch('/api/dubbing/dialogue', {
+      const segs = dubPrepared.segments || []
+      // Каждая реплика — отдельная озвучка своим голосом, подгонка под её слот
+      // из Scribe. Тайминги эталонные (Scribe), чужие таймстемпы не нужны.
+      const lines = segs.map((seg: any) => ({
+        text: seg.text,
+        voiceId: dubVoiceMap[seg.speaker] || dubVoices[0].id,
+        dstStartMs: seg.origStartMs ?? 0,
+        dstEndMs: seg.origEndMs ?? 0,
+      })).filter((l: any) => l.text?.trim() && l.dstEndMs > l.dstStartMs)
+
+      // Длина дорожки = длина видео (не конец последней реплики)
+      let totalMs = Math.max(...segs.map((s: any) => s.origEndMs || 0))
+      try {
+        const vDur = await new Promise<number>((resolve, reject) => {
+          const v = document.createElement('video')
+          v.preload = 'metadata'
+          v.onloadedmetadata = () => resolve(Math.round(v.duration * 1000))
+          v.onerror = () => reject(new Error('no video duration'))
+          v.src = dubFileId ? `/api/video/file/${dubFileId}` : motionVideoUrl
+        })
+        if (vDur > totalMs) totalMs = vDur
+      } catch {}
+
+      const res = await fetch('/api/dubbing/voice-lines', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ segments: dubPrepared.segments, voiceMap: dubVoiceMap }),
+        body: JSON.stringify({ lines, totalMs }),
       })
       const d = await res.json()
       if (d.error) throw new Error(d.error)
-
-      // Сразу выравниваем озвучку под тайминг видео (atempo + расстановка по
-      // оригинальным позициям реплик) — чтобы в превью уже был финальный тайминг,
-      // а на нарезке/склейке ничего не разъезжалось.
-      let finalAudio = d.audioBase64
-      const segs = dubPrepared.segments || []
-      const missing = segs.filter((_: any, i: number) => !(d.timings || []).some((x: any) => x.index === i))
-      if (missing.length) console.warn('[dub] lines without timing (will be silent):', missing.map((m: any) => m.text))
-      const alignSegs = segs.map((seg: any, i: number) => {
-        const t = (d.timings || []).find((x: any) => x.index === i)
-        if (!t || seg.origStartMs == null || seg.origEndMs == null) return null
-        return {
-          srcStartMs: Math.round(t.start * 1000), srcEndMs: Math.round(t.end * 1000),
-          dstStartMs: seg.origStartMs, dstEndMs: seg.origEndMs,
-        }
-      }).filter(Boolean)
-      if (alignSegs.length) {
-        try {
-          // Длина дорожки = длина ВИДЕО (не конец последней реплики), иначе
-          // хвост видео после последней фразы обрежется
-          let totalMs = Math.max(...segs.map((s: any) => s.origEndMs || 0))
-          try {
-            const vDur = await new Promise<number>((resolve, reject) => {
-              const v = document.createElement('video')
-              v.preload = 'metadata'
-              v.onloadedmetadata = () => resolve(Math.round(v.duration * 1000))
-              v.onerror = () => reject(new Error('no video duration'))
-              v.src = dubFileId ? `/api/video/file/${dubFileId}` : motionVideoUrl
-            })
-            if (vDur > totalMs) totalMs = vDur
-          } catch {}
-          const ar = await fetch('/api/dubbing/align', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ audioBase64: d.audioBase64, segments: alignSegs, totalMs }),
-          })
-          const ad = await ar.json()
-          if (ad.audioBase64) finalAudio = ad.audioBase64
-        } catch {}
-      }
-      // aligned=true — дорожка уже выровнена, handleDubStart её не трогает
-      setDubPrepared(prev => prev ? { ...prev, audioBase64: finalAudio, timings: d.timings, aligned: true } : prev)
+      // aligned=true — дорожка уже собрана по таймингам Scribe
+      setDubPrepared(prev => prev ? { ...prev, audioBase64: d.audioBase64, aligned: true } : prev)
     } catch (e: any) { setDubError(e.message) }
     setDubVoicingDialogue(false)
   }
@@ -1185,7 +1169,7 @@ export function VideoPage() {
         a.onerror = () => reject(new Error('Failed to read audio duration'))
       })
 
-      const isDialog = (prepared.speakers > 1) && prepared.segments && prepared.timings?.length
+      const isDialog = (prepared.speakers > 1) && !!prepared.segments?.length
 
       // Аудио уже выровнено на шаге Voice dialogue (prepared.aligned) — не трогаем.
       const workAudio = audioB64
