@@ -77,7 +77,9 @@ function scoreVoice(v: ElevenVoice, p: SpeakerProfile): number {
  *  clonedVoiceIds — клоны, которые вызывающий обязан удалить после дубляжа. */
 export async function matchSpeakerVoices(
   videoUrl: string,
-  samples: { speaker: string; startSec: number }[],
+  // intervals — ВСЕ куски речи этого говорящего (диаризация Scribe). Клон делаем
+  // из склейки только его кусков → чистый голос, без примеси других спикеров.
+  samples: { speaker: string; intervals: { startSec: number; endSec: number }[] }[],
   voices: ElevenVoice[],
   doClone = true,
 ): Promise<{ profiles: Record<string, SpeakerProfile>; voiceMap: Record<string, string>; clonedVoiceIds: string[]; voiceNote: string }> {
@@ -101,14 +103,19 @@ export async function matchSpeakerVoices(
 
     for (const s of samples) {
       try {
-        // Для клона нужен более длинный сэмпл (до ~40с речи этого говорящего),
-        // для классификации хватит начала. Берём один кусок с его первой реплики.
+        // Склеиваем ТОЛЬКО куски этого говорящего в одну чистую дорожку —
+        // из неё и клон, и классификация. Так голоса не мешаются.
         const outPath = path.join(tmp, `spk_${ts}_${s.speaker}.mp3`)
         cleanup.push(outPath)
+        const iv = s.intervals.filter(x => x.endSec > x.startSec)
+        if (!iv.length) throw new Error('no speech intervals for speaker')
+        const parts = iv.map((x, i) =>
+          `[0:a]atrim=start=${x.startSec.toFixed(3)}:end=${x.endSec.toFixed(3)},asetpts=N/SR/TB[s${i}]`)
+        const filter = `${parts.join(';')};${iv.map((_, i) => `[s${i}]`).join('')}concat=n=${iv.length}:v=0:a=1[out]`
         await execFileAsync(ffmpegPath, [
-          '-y', '-ss', String(Math.max(0, s.startSec)), '-t', doClone ? '40' : '4',
-          '-i', vidPath, '-vn', '-acodec', 'libmp3lame', '-b:a', '128k', outPath,
-        ], { timeout: 40000 })
+          '-y', '-i', vidPath, '-filter_complex', filter,
+          '-map', '[out]', '-acodec', 'libmp3lame', '-b:a', '128k', outPath,
+        ], { timeout: 60000, maxBuffer: 1024 * 1024 * 20 })
         const mp3 = await fs.readFile(outPath)
 
         // Классификация пола/возраста — необязательна: если модель недоступна,

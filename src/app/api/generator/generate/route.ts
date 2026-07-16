@@ -7,6 +7,7 @@ import { getDriveClient } from '@/lib/googleDrive'
 import { updateQueue } from '@/lib/queue'
 import { incrementImageCount, checkLimitExceeded } from '@/lib/adminStats'
 import OpenAI, { toFile } from 'openai'
+import sharp from 'sharp'
 
 export const maxDuration = 120
 
@@ -71,14 +72,22 @@ async function generateWithGptImage(prompt: string, size: string, referenceBase6
     })
   }
 
+  // gpt-image-1 отдаёт PNG. Конвертируем в JPEG — весь пайплайн (сохранение,
+  // скачивание с .jpg, ресайз) рассчитан на jpg; иначе AE ругается "bad header",
+  // т.к. файл с расширением .jpg внутри оказывается PNG.
+  let rawBuf: Buffer
   const b64 = res.data?.[0]?.b64_json
-  if (b64) return `data:image/png;base64,${b64}`
-  const url = res.data?.[0]?.url
-  if (!url) throw new Error('No image in gpt-image-1 response')
-  const imgRes = await fetch(url)
-  if (!imgRes.ok) throw new Error('Failed to fetch image from URL')
-  const buf2 = await imgRes.arrayBuffer()
-  return `data:image/png;base64,${Buffer.from(buf2).toString('base64')}`
+  if (b64) {
+    rawBuf = Buffer.from(b64, 'base64')
+  } else {
+    const url = res.data?.[0]?.url
+    if (!url) throw new Error('No image in gpt-image-1 response')
+    const imgRes = await fetch(url)
+    if (!imgRes.ok) throw new Error('Failed to fetch image from URL')
+    rawBuf = Buffer.from(await imgRes.arrayBuffer())
+  }
+  const jpeg = await sharp(rawBuf).jpeg({ quality: 92 }).toBuffer()
+  return `data:image/jpeg;base64,${jpeg.toString('base64')}`
 }
 
 async function saveToDrive(

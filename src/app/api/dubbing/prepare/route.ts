@@ -109,9 +109,16 @@ Rules:
     let voiceNote = ''
     try {
       const voices = await listElevenVoices()
+      // Все интервалы речи каждого говорящего (для чистого клона)
+      const speakerSamples = speakerIds.map(id => ({
+        speaker: id,
+        intervals: transcript.segments
+          .filter(s => s.speaker === id)
+          .map(s => ({ startSec: s.start ?? 0, endSec: s.end ?? 0 })),
+      }))
       const { profiles, voiceMap, clonedVoiceIds: cloned, voiceNote: note } = await matchSpeakerVoices(
         url,
-        speakerInfo.map(s => ({ speaker: s.id, startSec: s.start })),
+        speakerSamples,
         voices,
         true, // клонируем родные голоса по умолчанию
       )

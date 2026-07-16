@@ -2330,14 +2330,30 @@ export function VideoPage() {
                     <input type="checkbox" checked={dubLipsync} onChange={e => setDubLipsync(e.target.checked)} />
                     Lip-sync (Kling) — {dubLipsync ? 'lips will match the new audio' : 'off: audio overlay only, free & fast'}
                   </label>
-                  {dubStatus === 'done' && <p className="text-xs mb-2" style={{ color: '#34a853' }}>✓ Dubbed video saved to history</p>}
-                  <button onClick={handleDubStart} disabled={dubProcessing || !dubPrepared.audioBase64}
-                    className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 mb-3"
-                    style={{ background: !dubProcessing ? 'var(--accent)' : 'rgba(255,255,255,0.05)', color: !dubProcessing ? '#fff' : 'var(--text-muted)' }}>
-                    {dubProcessing ? (
-                      <><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>{dubProgress || 'Lip-syncing...'}</>
-                    ) : '2 · Dub video (lip-sync)'}
-                  </button>
+                  {(() => {
+                    // Если лиц несколько и включён липсинк — требуем привязать лицо
+                    // каждому экранному говорящему, иначе Kling озвучит не того
+                    const onScreenSpeakers = (dubPrepared.speakerIds || []).filter(sp => dubOnScreen[sp] !== false)
+                    const needFace = dubLipsync && !!dubFaces && dubFaces.length > 1 &&
+                      onScreenSpeakers.some(sp => dubFaceMap[sp] === undefined)
+                    if (dubStatus === 'done') return <p className="text-xs mb-2" style={{ color: '#34a853' }}>✓ Dubbed video saved to history</p>
+                    return (
+                      <>
+                        {needFace && (
+                          <p className="text-[11px] mb-2 px-2 py-1.5 rounded-lg" style={{ background: 'rgba(251,188,5,0.1)', color: '#fbbc05' }}>
+                            ⚠ Choose a face for each on-screen speaker above before dubbing
+                          </p>
+                        )}
+                        <button onClick={handleDubStart} disabled={dubProcessing || !dubPrepared.audioBase64 || needFace}
+                          className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 mb-3"
+                          style={{ background: (!dubProcessing && !needFace) ? 'var(--accent)' : 'rgba(255,255,255,0.05)', color: (!dubProcessing && !needFace) ? '#fff' : 'var(--text-muted)' }}>
+                          {dubProcessing ? (
+                            <><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>{dubProgress || 'Lip-syncing...'}</>
+                          ) : '2 · Dub video (lip-sync)'}
+                        </button>
+                      </>
+                    )
+                  })()}
                 </>
               )}
               {dubError && <p className="text-xs mb-2" style={{ color: '#f87171' }}>{dubError}</p>}
