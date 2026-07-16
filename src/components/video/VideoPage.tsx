@@ -2212,17 +2212,23 @@ export function VideoPage() {
                                   ))}
                                 </div>
                               )}
-                              <div className="flex items-center gap-1.5">
-                                <select value={dubVoiceMap[sp] || dubVoices[0].id}
-                                  onChange={e => setDubVoiceMap(prev => ({ ...prev, [sp]: e.target.value }))}
-                                  className="flex-1 min-w-0 rounded-lg px-2 py-1 text-xs outline-none"
-                                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', textOverflow: 'ellipsis' }}>
-                                  {dubVoices.map(v => <option key={v.id} value={v.id} style={{ background: '#1a1a2e' }}>{v.label}</option>)}
-                                </select>
-                                <button onClick={() => playVoicePreview(dubVoiceMap[sp] || dubVoices[0].id)} title="Listen to a sample of this voice"
-                                  className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 transition-all hover:scale-105"
-                                  style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)', fontSize: 9 }}>▶</button>
-                              </div>
+                              {dubClonedIds.includes(dubVoiceMap[sp]) ? (
+                                <div className="text-[11px] px-2 py-1 rounded-lg" style={{ background: 'rgba(52,168,83,0.1)', color: '#34a853' }}>
+                                  🎙 Original voice (cloned)
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1.5">
+                                  <select value={dubVoiceMap[sp] || dubVoices[0].id}
+                                    onChange={e => setDubVoiceMap(prev => ({ ...prev, [sp]: e.target.value }))}
+                                    className="flex-1 min-w-0 rounded-lg px-2 py-1 text-xs outline-none"
+                                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', textOverflow: 'ellipsis' }}>
+                                    {dubVoices.map(v => <option key={v.id} value={v.id} style={{ background: '#1a1a2e' }}>{v.label}</option>)}
+                                  </select>
+                                  <button onClick={() => playVoicePreview(dubVoiceMap[sp] || dubVoices[0].id)} title="Listen to a sample of this voice"
+                                    className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 transition-all hover:scale-105"
+                                    style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)', fontSize: 9 }}>▶</button>
+                                </div>
+                              )}
                             </div>
                           )
                         })}
@@ -2251,23 +2257,24 @@ export function VideoPage() {
                         const info = dubPrepared.speakerInfo?.[0]
                         return (
                           <div className="mb-2">
-                            <div className="flex items-center justify-between mb-1">
-                              <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Voice</div>
-                              {info?.voiceProfile && (
-                                <span className="text-[9px]" style={{ color: 'rgba(255,255,255,0.3)' }}>🎙 voice in source: {info.voiceProfile}</span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <select value={dubVoiceMap[sp] || dubVoices[0].id}
-                                onChange={e => { setDubVoiceMap(prev => ({ ...prev, [sp]: e.target.value })); setDubPrepared(prev => prev ? { ...prev, audioBase64: null } : prev) }}
-                                className="flex-1 min-w-0 rounded-lg px-2 py-1.5 text-xs outline-none"
-                                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', textOverflow: 'ellipsis' }}>
-                                {dubVoices.map(v => <option key={v.id} value={v.id} style={{ background: '#1a1a2e' }}>{v.label}</option>)}
-                              </select>
-                              <button onClick={() => playVoicePreview(dubVoiceMap[sp] || dubVoices[0].id)} title="Listen to a sample of this voice"
-                                className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-all hover:scale-105"
-                                style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)', fontSize: 10 }}>▶</button>
-                            </div>
+                            <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Voice</div>
+                            {dubClonedIds.includes(dubVoiceMap[sp]) ? (
+                              <div className="text-[11px] px-2 py-1.5 rounded-lg" style={{ background: 'rgba(52,168,83,0.1)', color: '#34a853' }}>
+                                🎙 Original voice (cloned from the source)
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <select value={dubVoiceMap[sp] || dubVoices[0].id}
+                                  onChange={e => { setDubVoiceMap(prev => ({ ...prev, [sp]: e.target.value })); setDubPrepared(prev => prev ? { ...prev, audioBase64: null } : prev) }}
+                                  className="flex-1 min-w-0 rounded-lg px-2 py-1.5 text-xs outline-none"
+                                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', textOverflow: 'ellipsis' }}>
+                                  {dubVoices.map(v => <option key={v.id} value={v.id} style={{ background: '#1a1a2e' }}>{v.label}</option>)}
+                                </select>
+                                <button onClick={() => playVoicePreview(dubVoiceMap[sp] || dubVoices[0].id)} title="Listen to a sample of this voice"
+                                  className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-all hover:scale-105"
+                                  style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)', fontSize: 10 }}>▶</button>
+                              </div>
+                            )}
                           </div>
                         )
                       })()}
