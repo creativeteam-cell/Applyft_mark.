@@ -58,30 +58,22 @@ export async function POST(req: NextRequest) {
     // не создаёт отставания аудио от губ. Должна совпадать с LEAD_MS на клиенте.
     const LEAD_MS = 80
 
-    // Границы реплик в источнике неточные (ElevenLabs), поэтому куски могут
-    // пересекаться — тогда слышно хвост соседней фразы дважды. Считаем чистые
-    // границы: конец текущей реплики не заходит за начало следующей.
-    const sorted = [...segments].sort((a, b) => a.srcStartMs - b.srcStartMs)
-    const bounds = sorted.map((s, i) => {
-      const next = sorted[i + 1]
-      // конец = min(свой конец, начало следующей) — без нахлёста
-      const srcEnd = next ? Math.min(s.srcEndMs, next.srcStartMs) : s.srcEndMs
-      return { ...s, srcStart: s.srcStartMs, srcEnd: Math.max(s.srcStartMs + 1, srcEnd) }
-    })
-
+    // Каждую реплику берём по её собственным границам от ElevenLabs (без обрезки
+    // «в стык» — она резала слова). Небольшой запас справа НЕ добавляем, чтобы не
+    // хватать начало следующей фразы (это давало эхо).
     // Для каждой реплики: обрезка → atempo до целевой длины → короткий фейд по
-    // краям (убирает щелчки на резких стыках) → задержка до dst
+    // краям (убирает щелчки) → задержка до dst
     const FADE = 0.015 // 15мс, на слух незаметно
     const filters: string[] = []
-    bounds.forEach((s, i) => {
-      const srcDur = Math.max(1, s.srcEnd - s.srcStart)
+    segments.forEach((s, i) => {
+      const srcDur = Math.max(1, s.srcEndMs - s.srcStartMs)
       const dstDur = Math.max(1, s.dstEndMs - s.dstStartMs)
       const ratio = srcDur / dstDur // >1 = ускорить (реплика длиннее слота)
       const delay = Math.round(s.dstStartMs + LEAD_MS)
       const outDurSec = dstDur / 1000
       const fadeOutSt = Math.max(0, outDurSec - FADE)
       filters.push(
-        `[0:a]atrim=start=${(s.srcStart / 1000).toFixed(3)}:end=${(s.srcEnd / 1000).toFixed(3)},` +
+        `[0:a]atrim=start=${(s.srcStartMs / 1000).toFixed(3)}:end=${(s.srcEndMs / 1000).toFixed(3)},` +
         `asetpts=PTS-STARTPTS,${atempoChain(ratio)},` +
         `afade=t=in:st=0:d=${FADE},afade=t=out:st=${fadeOutSt.toFixed(3)}:d=${FADE},` +
         `adelay=${delay}|${delay}[a${i}]`

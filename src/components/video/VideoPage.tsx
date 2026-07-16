@@ -1043,6 +1043,8 @@ export function VideoPage() {
       // а на нарезке/склейке ничего не разъезжалось.
       let finalAudio = d.audioBase64
       const segs = dubPrepared.segments || []
+      const missing = segs.filter((_: any, i: number) => !(d.timings || []).some((x: any) => x.index === i))
+      if (missing.length) console.warn('[dub] lines without timing (will be silent):', missing.map((m: any) => m.text))
       const alignSegs = segs.map((seg: any, i: number) => {
         const t = (d.timings || []).find((x: any) => x.index === i)
         if (!t || seg.origStartMs == null || seg.origEndMs == null) return null
