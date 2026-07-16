@@ -148,6 +148,45 @@ export async function deleteVoice(voiceId: string): Promise<void> {
   await fetch(`${EL_BASE}/v1/voices/${voiceId}`, { method: 'DELETE', headers: elHeaders() }).catch(() => {})
 }
 
+// Освобождает один слот при нехватке места:
+// 1) сначала наши временные клоны dub_* (безопасно),
+// 2) если их нет — самый СТАРЫЙ клонированный голос (category='cloned').
+// Premade/professional голоса не трогает никогда. Возвращает имя удалённого.
+export async function freeVoiceSlot(): Promise<string | null> {
+  try {
+    const res = await fetch(`${EL_BASE}/v1/voices`, { headers: elHeaders() })
+    if (!res.ok) return null
+    const data = await res.json()
+    const cloned = (data.voices || []).filter((v: any) => v.category === 'cloned')
+    if (!cloned.length) return null
+
+    // приоритет — свои dub_*, затем самый старый по дате создания
+    const dub = cloned.filter((v: any) => typeof v.name === 'string' && v.name.startsWith('dub_'))
+    const pickFrom = dub.length ? dub : cloned
+    pickFrom.sort((a: any, b: any) =>
+      (a.created_at_unix ?? a.created_at_unix_secs ?? 0) - (b.created_at_unix ?? b.created_at_unix_secs ?? 0))
+    const victim = pickFrom[0]
+    await deleteVoice(victim.voice_id)
+    return victim.name || victim.voice_id
+  } catch { return null }
+}
+
+// Клон с автоочисткой: при ошибке лимита освобождаем слот и пробуем снова (до 3 раз)
+export async function cloneVoiceWithRetry(name: string, sampleMp3: Buffer): Promise<string> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      return await cloneVoice(name, sampleMp3)
+    } catch (e: any) {
+      const isLimit = /limit|maximum|quota|too many|no.*slot/i.test(e.message || '')
+      if (!isLimit || attempt === 3) throw e
+      const freed = await freeVoiceSlot()
+      console.warn(`[elevenlabs] voice limit — freed slot "${freed ?? 'none'}", retry ${attempt + 1}`)
+      if (!freed) throw e // освобождать нечего — дальше бессмысленно
+    }
+  }
+  throw new Error('clone failed after freeing slots')
+}
+
 // Мультиязычный TTS; один и тот же голос говорит на любом языке
 export async function elevenTTS(text: string, voiceId: string): Promise<Buffer> {
   const res = await fetch(`${EL_BASE}/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {

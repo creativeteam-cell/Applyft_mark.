@@ -106,9 +106,10 @@ Rules:
     // Ошибки не блокируют дубляж — просто не будет предложенной раскладки.
     let suggestedVoiceMap: Record<string, string> = {}
     let clonedVoiceIds: string[] = []
+    let voiceNote = ''
     try {
       const voices = await listElevenVoices()
-      const { profiles, voiceMap, clonedVoiceIds: cloned } = await matchSpeakerVoices(
+      const { profiles, voiceMap, clonedVoiceIds: cloned, voiceNote: note } = await matchSpeakerVoices(
         url,
         speakerInfo.map(s => ({ speaker: s.id, startSec: s.start })),
         voices,
@@ -116,6 +117,7 @@ Rules:
       )
       suggestedVoiceMap = voiceMap
       clonedVoiceIds = cloned
+      voiceNote = note
       for (const info of speakerInfo) {
         const p = profiles[info.id]
         if (p) info.voiceProfile = [p.gender, p.age, p.tone].filter(x => x && x !== 'unknown').join(', ')
@@ -138,6 +140,7 @@ Rules:
       speakers: speakerIds.length,
       suggestedVoiceMap,
       clonedVoiceIds, // клиент вернёт их в /api/dubbing/cleanup после дубляжа
+      voiceNote,      // статус клонирования для UI
       audioBase64,
     })
   } catch (e: any) {

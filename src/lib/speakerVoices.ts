@@ -8,7 +8,7 @@ import { promisify } from 'util'
 import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
-import { ElevenVoice, cloneVoice } from './elevenlabs'
+import { ElevenVoice, cloneVoiceWithRetry } from './elevenlabs'
 import { updateQueue } from './queue'
 
 const execFileAsync = promisify(execFile)
@@ -80,13 +80,14 @@ export async function matchSpeakerVoices(
   samples: { speaker: string; startSec: number }[],
   voices: ElevenVoice[],
   doClone = true,
-): Promise<{ profiles: Record<string, SpeakerProfile>; voiceMap: Record<string, string>; clonedVoiceIds: string[] }> {
+): Promise<{ profiles: Record<string, SpeakerProfile>; voiceMap: Record<string, string>; clonedVoiceIds: string[]; voiceNote: string }> {
   const profiles: Record<string, SpeakerProfile> = {}
   const voiceMap: Record<string, string> = {}
   const clonedVoiceIds: string[] = []
+  let cloneError = '' // текст первой ошибки клонирования — для показа в UI
 
   const ffmpegPath = await getFfmpegPath()
-  if (!ffmpegPath) return { profiles, voiceMap, clonedVoiceIds } // нет ffmpeg — пропускаем
+  if (!ffmpegPath) return { profiles, voiceMap, clonedVoiceIds, voiceNote: 'Voice cloning unavailable (audio tooling missing) — using library voices' }
 
   const tmp = os.tmpdir()
   const ts = Date.now()
@@ -113,10 +114,11 @@ export async function matchSpeakerVoices(
 
         if (doClone) {
           try {
-            const vid = await cloneVoice(`dub_${s.speaker}_${ts}`, mp3)
+            const vid = await cloneVoiceWithRetry(`dub_${s.speaker}_${ts}`, mp3)
             voiceMap[s.speaker] = vid
             clonedVoiceIds.push(vid)
           } catch (ce: any) {
+            if (!cloneError) cloneError = ce.message || 'unknown error'
             console.warn(`[speakerVoices] clone ${s.speaker} failed, will fall back:`, ce.message)
           }
         }
@@ -142,9 +144,19 @@ export async function matchSpeakerVoices(
     }
   } catch (e: any) {
     console.warn('[speakerVoices] analysis failed:', e.message)
+    if (!cloneError) cloneError = e.message
   } finally {
     for (const p of cleanup) fs.unlink(p).catch(() => {})
   }
 
-  return { profiles, voiceMap, clonedVoiceIds }
+  // Понятный статус для интерфейса
+  let voiceNote = ''
+  if (doClone) {
+    const total = samples.length
+    if (clonedVoiceIds.length === total) voiceNote = 'Cloned original voices ✓'
+    else if (clonedVoiceIds.length > 0) voiceNote = `Cloned ${clonedVoiceIds.length}/${total} voices; the rest use library voices${cloneError ? ` (${cloneError})` : ''}`
+    else voiceNote = `Voice cloning failed — using library voices${cloneError ? `: ${cloneError}` : ''}`
+  }
+
+  return { profiles, voiceMap, clonedVoiceIds, voiceNote }
 }

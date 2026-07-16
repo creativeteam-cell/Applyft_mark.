@@ -988,6 +988,7 @@ export function VideoPage() {
   const [dubFaces, setDubFaces] = useState<{ image: string; startMs: number; endMs: number }[] | null>(null)
   const [dubFaceMap, setDubFaceMap] = useState<Record<string, number>>({}) // speaker → индекс лица
   const [dubClonedIds, setDubClonedIds] = useState<string[]>([]) // клоны на удаление после дубляжа
+  const [dubVoiceNote, setDubVoiceNote] = useState('') // статус клонирования для показа
 
   async function cleanupClonedVoices() {
     if (!dubClonedIds.length) return
@@ -1063,6 +1064,7 @@ export function VideoPage() {
       setDubPrepared(d)
       setDubEditedText(d.translatedText)
       setDubClonedIds(d.clonedVoiceIds || [])
+      setDubVoiceNote(d.voiceNote || '')
       // Стартовая раскладка голосов (и для одного говорящего, и для диалога):
       // автоподбор по голосам из видео, чего не хватило — по кругу.
       // Закадровых (narrator/voice-over) помечаем off-screen.
@@ -2159,6 +2161,17 @@ export function VideoPage() {
                     <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Original ({dubPrepared.sourceLang})</div>
                     <p className="text-xs px-2 py-1.5 rounded-lg max-h-20 overflow-y-auto" style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--text-muted)' }}>{dubPrepared.sourceText}</p>
                   </div>
+
+                  {/* Статус клонирования голосов */}
+                  {dubVoiceNote && (
+                    <p className="text-[11px] mb-2 px-2 py-1.5 rounded-lg"
+                      style={{
+                        background: dubVoiceNote.includes('✓') ? 'rgba(52,168,83,0.1)' : 'rgba(251,188,5,0.1)',
+                        color: dubVoiceNote.includes('✓') ? '#34a853' : '#fbbc05',
+                      }}>
+                      {dubVoiceNote.includes('✓') ? '🎙 ' : '⚠ '}{dubVoiceNote}
+                    </p>
+                  )}
 
                   {dubPrepared.speakers > 1 && dubPrepared.segments ? (
                     /* Диалог: реплики + раздача голосов по говорящим */
