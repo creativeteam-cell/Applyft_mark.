@@ -162,15 +162,17 @@ export async function deleteVoice(voiceId: string): Promise<void> {
 // 1) сначала наши временные клоны dub_* (безопасно),
 // 2) если их нет — самый СТАРЫЙ клонированный голос (category='cloned').
 // Premade/professional голоса не трогает никогда. Возвращает имя удалённого.
-export async function freeVoiceSlot(): Promise<string | null> {
+// protectIds — клоны, созданные в текущем прогоне: их удалять НЕЛЬЗЯ,
+// иначе снесём голос говорящего, которого только что склонировали.
+export async function freeVoiceSlot(protectIds: Set<string> = new Set()): Promise<string | null> {
   try {
     const res = await fetch(`${EL_BASE}/v1/voices`, { headers: elHeaders() })
     if (!res.ok) return null
     const data = await res.json()
-    const cloned = (data.voices || []).filter((v: any) => v.category === 'cloned')
+    const cloned = (data.voices || []).filter((v: any) => v.category === 'cloned' && !protectIds.has(v.voice_id))
     if (!cloned.length) return null
 
-    // приоритет — свои dub_*, затем самый старый по дате создания
+    // приоритет — старые dub_* прошлых прогонов, затем самый старый клон
     const dub = cloned.filter((v: any) => typeof v.name === 'string' && v.name.startsWith('dub_'))
     const pickFrom = dub.length ? dub : cloned
     pickFrom.sort((a: any, b: any) =>
@@ -181,17 +183,18 @@ export async function freeVoiceSlot(): Promise<string | null> {
   } catch { return null }
 }
 
-// Клон с автоочисткой: при ошибке лимита освобождаем слот и пробуем снова (до 3 раз)
-export async function cloneVoiceWithRetry(name: string, sampleMp3: Buffer): Promise<string> {
+// Клон с автоочисткой: при лимите освобождаем слот (не трогая клоны текущего
+// прогона из protectIds) и пробуем снова
+export async function cloneVoiceWithRetry(name: string, sampleMp3: Buffer, protectIds: Set<string> = new Set()): Promise<string> {
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
       return await cloneVoice(name, sampleMp3)
     } catch (e: any) {
       const isLimit = /limit|maximum|quota|too many|no.*slot/i.test(e.message || '')
       if (!isLimit || attempt === 3) throw e
-      const freed = await freeVoiceSlot()
+      const freed = await freeVoiceSlot(protectIds)
       console.warn(`[elevenlabs] voice limit — freed slot "${freed ?? 'none'}", retry ${attempt + 1}`)
-      if (!freed) throw e // освобождать нечего — дальше бессмысленно
+      if (!freed) throw e
     }
   }
   throw new Error('clone failed after freeing slots')

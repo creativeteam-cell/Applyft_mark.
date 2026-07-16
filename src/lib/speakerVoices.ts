@@ -121,7 +121,8 @@ export async function matchSpeakerVoices(
 
         if (doClone) {
           try {
-            const vid = await cloneVoiceWithRetry(`dub_${s.speaker}_${ts}`, mp3)
+            // защищаем клоны, уже созданные в этом прогоне, от авто-очистки слотов
+            const vid = await cloneVoiceWithRetry(`dub_${s.speaker}_${ts}`, mp3, new Set(clonedVoiceIds))
             voiceMap[s.speaker] = vid
             clonedVoiceIds.push(vid)
           } catch (ce: any) {
@@ -136,20 +137,20 @@ export async function matchSpeakerVoices(
       }
     }
 
-    // Тем, кого не удалось клонировать — подбираем похожий из библиотеки (без повторов)
+    // Тем, кого не удалось клонировать — библиотечный голос (без повторов).
+    // Если есть профиль (пол/возраст) — подбираем по нему, иначе просто берём
+    // любой свободный, чтобы у КАЖДОГО говорящего гарантированно был голос.
     const used = new Set<string>(Object.values(voiceMap))
     for (const s of samples) {
       if (voiceMap[s.speaker]) continue
       const p = profiles[s.speaker]
-      if (!p) continue
-      const ranked = voices
-        .filter(v => !used.has(v.voice_id))
-        .map(v => ({ v, score: scoreVoice(v, p) }))
-        .sort((a, b) => b.score - a.score)
-      if (ranked[0]) {
-        voiceMap[s.speaker] = ranked[0].v.voice_id
-        used.add(ranked[0].v.voice_id)
-      }
+      const pool = voices.filter(v => !used.has(v.voice_id))
+      if (!pool.length) continue
+      const ranked = p
+        ? pool.map(v => ({ v, score: scoreVoice(v, p) })).sort((a, b) => b.score - a.score)
+        : pool.map(v => ({ v, score: 0 }))
+      voiceMap[s.speaker] = ranked[0].v.voice_id
+      used.add(ranked[0].v.voice_id)
     }
   } catch (e: any) {
     console.warn('[speakerVoices] analysis failed:', e.message)
