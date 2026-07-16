@@ -78,11 +78,15 @@ export async function POST(req: NextRequest) {
       const delay = Math.round(lf.dstStartMs + LEAD_MS)
       const outDurSec = slotMs / 1000
       const fadeOutSt = Math.max(0, outDurSec - FADE)
-      filters.push(
-        `[${i}:a]${atempoChain(ratio)},` +
-        `afade=t=in:st=0:d=${FADE},afade=t=out:st=${fadeOutSt.toFixed(3)}:d=${FADE},` +
-        `adelay=${delay}|${delay}[a${i}]`
-      )
+      // Собираем цепочку фильтров массивом + join(',') — так запятые между
+      // фильтрами гарантированно на месте (иначе ffmpeg склеит имена опций)
+      const chain = [
+        atempoChain(ratio),
+        `afade=t=in:st=0:d=${FADE}`,
+        `afade=t=out:st=${fadeOutSt.toFixed(3)}:d=${FADE}`,
+        `adelay=${delay}|${delay}`,
+      ].join(',')
+      filters.push(`[${i}:a]${chain}[a${i}]`)
     })
     const mix = `${lineFiles.map((_, i) => `[a${i}]`).join('')}amix=inputs=${lineFiles.length}:normalize=0,` +
       `apad=whole_dur=${((totalMs + LEAD_MS) / 1000).toFixed(3)}[aout]`

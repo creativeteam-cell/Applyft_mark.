@@ -72,12 +72,15 @@ export async function POST(req: NextRequest) {
       const delay = Math.round(s.dstStartMs + LEAD_MS)
       const outDurSec = dstDur / 1000
       const fadeOutSt = Math.max(0, outDurSec - FADE)
-      filters.push(
-        `[0:a]atrim=start=${(s.srcStartMs / 1000).toFixed(3)}:end=${(s.srcEndMs / 1000).toFixed(3)},` +
-        `asetpts=PTS-STARTPTS,${atempoChain(ratio)},` +
-        `afade=t=in:st=0:d=${FADE},afade=t=out:st=${fadeOutSt.toFixed(3)}:d=${FADE},` +
-        `adelay=${delay}|${delay}[a${i}]`
-      )
+      const chain = [
+        `atrim=start=${(s.srcStartMs / 1000).toFixed(3)}:end=${(s.srcEndMs / 1000).toFixed(3)}`,
+        'asetpts=PTS-STARTPTS',
+        atempoChain(ratio),
+        `afade=t=in:st=0:d=${FADE}`,
+        `afade=t=out:st=${fadeOutSt.toFixed(3)}:d=${FADE}`,
+        `adelay=${delay}|${delay}`,
+      ].join(',')
+      filters.push(`[0:a]${chain}[a${i}]`)
     })
     const mix = `${segments.map((_, i) => `[a${i}]`).join('')}amix=inputs=${segments.length}:normalize=0,` +
       `apad=whole_dur=${((totalMs + LEAD_MS) / 1000).toFixed(3)}[aout]`
