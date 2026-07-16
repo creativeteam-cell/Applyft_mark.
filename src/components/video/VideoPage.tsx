@@ -981,7 +981,7 @@ export function VideoPage() {
   }
   const [dubFileId, setDubFileId] = useState<string | null>(null) // fileId, если видео из истории
   const [dubPreparing, setDubPreparing] = useState(false)
-  const [dubPrepared, setDubPrepared] = useState<{ sourceText: string; sourceLang: string; translatedText: string; audioBase64: string | null; speakers: number; segments?: { speaker: string; text: string }[]; speakerIds?: string[]; speakerInfo?: { id: string; role: string; sample: string; start: number; voiceProfile?: string }[]; timings?: { index: number; start: number; end: number }[]; suggestedVoiceMap?: Record<string, string> } | null>(null)
+  const [dubPrepared, setDubPrepared] = useState<{ sourceText: string; sourceLang: string; translatedText: string; audioBase64: string | null; speakers: number; segments?: { speaker: string; text: string }[]; speakerIds?: string[]; speakerInfo?: { id: string; role: string; sample: string; start: number; voiceProfile?: string }[]; timings?: { index: number; start: number; end: number }[]; suggestedVoiceMap?: Record<string, string>; aligned?: boolean } | null>(null)
   const [dubOnScreen, setDubOnScreen] = useState<Record<string, boolean>>({})
   const [dubProgress, setDubProgress] = useState('')
   const [dubLipsync, setDubLipsync] = useState(true) // выкл = просто заменить дорожку без движения губ
@@ -998,6 +998,21 @@ export function VideoPage() {
     }).catch(() => {})
     setDubClonedIds([])
   }
+
+  // Страховка: если вкладку закроют во время дубляжа, зависшие клоны всё равно
+  // удаляются через sendBeacon (обычный fetch при закрытии не успевает уйти).
+  const dubClonedRef = useRef<string[]>([])
+  dubClonedRef.current = dubClonedIds
+  useEffect(() => {
+    function onLeave() {
+      const ids = dubClonedRef.current
+      if (ids.length && navigator.sendBeacon) {
+        navigator.sendBeacon('/api/dubbing/cleanup', new Blob([JSON.stringify({ voiceIds: ids })], { type: 'application/json' }))
+      }
+    }
+    window.addEventListener('beforeunload', onLeave)
+    return () => window.removeEventListener('beforeunload', onLeave)
+  }, [])
   const [dubVoices, setDubVoices] = useState<{ id: string; label: string; previewUrl?: string | null }[]>(DUB_VOICES)
 
   // Полный список голосов ElevenLabs — один раз при входе в режим дубляжа
@@ -1021,7 +1036,33 @@ export function VideoPage() {
       })
       const d = await res.json()
       if (d.error) throw new Error(d.error)
-      setDubPrepared(prev => prev ? { ...prev, audioBase64: d.audioBase64, timings: d.timings } : prev)
+
+      // Сразу выравниваем озвучку под тайминг видео (atempo + расстановка по
+      // оригинальным позициям реплик) — чтобы в превью уже был финальный тайминг,
+      // а на нарезке/склейке ничего не разъезжалось.
+      let finalAudio = d.audioBase64
+      const segs = dubPrepared.segments || []
+      const alignSegs = segs.map((seg: any, i: number) => {
+        const t = (d.timings || []).find((x: any) => x.index === i)
+        if (!t || seg.origStartMs == null || seg.origEndMs == null) return null
+        return {
+          srcStartMs: Math.round(t.start * 1000), srcEndMs: Math.round(t.end * 1000),
+          dstStartMs: seg.origStartMs, dstEndMs: seg.origEndMs,
+        }
+      }).filter(Boolean)
+      if (alignSegs.length) {
+        try {
+          const totalMs = Math.max(...segs.map((s: any) => s.origEndMs || 0))
+          const ar = await fetch('/api/dubbing/align', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ audioBase64: d.audioBase64, segments: alignSegs, totalMs }),
+          })
+          const ad = await ar.json()
+          if (ad.audioBase64) finalAudio = ad.audioBase64
+        } catch {}
+      }
+      // aligned=true — дорожка уже выровнена, handleDubStart её не трогает
+      setDubPrepared(prev => prev ? { ...prev, audioBase64: finalAudio, timings: d.timings, aligned: true } : prev)
     } catch (e: any) { setDubError(e.message) }
     setDubVoicingDialogue(false)
   }
@@ -1127,40 +1168,8 @@ export function VideoPage() {
 
       const isDialog = (prepared.speakers > 1) && prepared.segments && prepared.timings?.length
 
-      // ── Выравнивание тайминга (для диалога с таймингами реплик) ──
-      // Каждую реплику подгоняем по длительности под оригинал и ставим на её
-      // оригинальную позицию. Дальше всё работает по этой выровненной дорожке:
-      // тайминги реплик = оригинальные, паузы сохранены, рассинхрон минимален.
-      let workAudio = audioB64
-      let workTimings = prepared.timings // после выравнивания реплики стоят на origStart
-      if (isDialog) {
-        const alignSegs = prepared.segments!.map((seg: any, i: number) => {
-          const t = prepared.timings!.find(x => x.index === i)
-          if (!t || seg.origStartMs == null || seg.origEndMs == null) return null
-          return {
-            srcStartMs: Math.round(t.start * 1000), srcEndMs: Math.round(t.end * 1000),
-            dstStartMs: seg.origStartMs, dstEndMs: seg.origEndMs,
-          }
-        }).filter(Boolean) as { srcStartMs: number; srcEndMs: number; dstStartMs: number; dstEndMs: number }[]
-
-        if (alignSegs.length) {
-          setDubProgress('Aligning timing to original...')
-          try {
-            const ar = await fetch('/api/dubbing/align', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ audioBase64: audioB64, segments: alignSegs, totalMs: Math.round(audioDurationMs) }),
-            })
-            const ad = await ar.json()
-            if (ad.audioBase64) {
-              workAudio = ad.audioBase64
-              // align добавляет 0.2с подушку в начало — учитываем в таймингах
-              const LEAD = 0.2
-              workTimings = prepared.segments!.map((seg: any, i: number) =>
-                ({ index: i, start: (seg.origStartMs ?? 0) / 1000 + LEAD, end: (seg.origEndMs ?? 0) / 1000 + LEAD }))
-            }
-          } catch (e: any) { console.warn('[dub] align failed, using raw audio:', e.message) }
-        }
-      }
+      // Аудио уже выровнено на шаге Voice dialogue (prepared.aligned) — не трогаем.
+      const workAudio = audioB64
 
       // Галочка Lip-sync выключена: губы не трогаем, просто кладём озвучку
       // поверх видео (оригинальный звук выключается), с выравниванием по паузам
@@ -1256,8 +1265,10 @@ export function VideoPage() {
         if (p.lipsync) {
           done++
           setDubProgress(`Lip-sync ${done}/${lipCount}...`)
-          // faceRef не нужен: в куске одного говорящего активное лицо одно,
-          // Kling выберет его как самое видимое
+          // Эталон лица говорящего: если в куске окажется несколько лиц
+          // (сплошной план — оба в кадре), GPT-vision выберет нужное по картинке
+          const faceIdx = p.speaker ? dubFaceMap[p.speaker] : undefined
+          const faceImageUrl = (dubFaces && faceIdx !== undefined && dubFaces[faceIdx]) ? dubFaces[faceIdx].image : undefined
           const lipRes = await fetch('/api/dubbing/lipsync', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1265,6 +1276,7 @@ export function VideoPage() {
               audioBase64: workAudio, audioDurationMs,
               window: { soundStartMs: p.startMs + LEAD_MS, soundEndMs: p.endMs + LEAD_MS, insertMs: 0 },
               originalAudioVolume: 0,
+              faceImageUrl,
             }),
           })
           const ld = await lipRes.json()
