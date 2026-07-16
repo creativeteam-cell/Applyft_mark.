@@ -123,6 +123,8 @@ export async function matchSpeakerVoices(
           }
         }
       } catch (e: any) {
+        // сэмпл не вырезался / классификация упала — тоже фиксируем причину для UI
+        if (!cloneError) cloneError = `audio sample: ${e.message}`
         console.warn(`[speakerVoices] ${s.speaker} failed:`, e.message)
       }
     }

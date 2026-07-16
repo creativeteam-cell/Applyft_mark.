@@ -139,7 +139,17 @@ export async function cloneVoice(name: string, sampleMp3: Buffer): Promise<strin
   const res = await fetch(`${EL_BASE}/v1/voices/add`, {
     method: 'POST', headers: elHeaders(), body: form,
   })
-  if (!res.ok) throw new Error(`ElevenLabs clone ${res.status}: ${await res.text()}`)
+  if (!res.ok) {
+    const raw = await res.text()
+    console.warn('[elevenlabs] clone error raw:', res.status, raw)
+    // ElevenLabs отдаёт {"detail":{"status":"...","message":"..."}} или {"detail":"..."}
+    let msg = raw
+    try {
+      const j = JSON.parse(raw)
+      msg = j?.detail?.message || j?.detail?.status || (typeof j?.detail === 'string' ? j.detail : '') || raw
+    } catch {}
+    throw new Error(`${res.status}: ${msg}`.slice(0, 200))
+  }
   const data = await res.json()
   return data.voice_id
 }
