@@ -942,11 +942,41 @@ export function GeneratorPage() {
     if (selectedSizeIdx >= m.sizes.length) setSelectedSizeIdx(0)
   }
 
+  // Соотношение метки размера ("4x5" → 0.8) для автоподбора под референс
+  function labelRatio(label: string): number {
+    const m = label.match(/([\d.]+)\s*x\s*([\d.]+)/i)
+    if (!m) return 1
+    const w = parseFloat(m[1]), h = parseFloat(m[2])
+    return h ? w / h : 1
+  }
+
+  // По загруженному референсу выбираем размер модели с ближайшим соотношением сторон
+  function autoPickSizeByRatio(dataUrl: string) {
+    const img = new Image()
+    img.onload = () => {
+      if (!img.width || !img.height) return
+      const target = img.width / img.height
+      const sizes = currentModel.sizes
+      let bestIdx = 0, bestDiff = Infinity
+      sizes.forEach((s, i) => {
+        const diff = Math.abs(labelRatio(s.label) - target)
+        if (diff < bestDiff) { bestDiff = diff; bestIdx = i }
+      })
+      setSelectedSizeIdx(bestIdx)
+    }
+    img.src = dataUrl
+  }
+
   function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>, setter: (v: string) => void) {
     const file = e.target.files?.[0]
     if (!file) return
     const reader = new FileReader()
-    reader.onload = ev => setter(ev.target?.result as string)
+    reader.onload = ev => {
+      const dataUrl = ev.target?.result as string
+      setter(dataUrl)
+      // Для референса (изображения) автоматически подбираем формат под его пропорции
+      if (setter === setReference) autoPickSizeByRatio(dataUrl)
+    }
     reader.readAsDataURL(file)
     e.target.value = ''
   }

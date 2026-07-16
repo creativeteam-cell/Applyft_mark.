@@ -66,18 +66,20 @@ export async function POST(req: NextRequest) {
     // в лимит на длинных роликах):
     // 1) нормализуем КАЖДЫЙ кусок по отдельности к общему WxH/fps30 (быстро, параллельно)
     // 2) склеиваем одинаковые куски демуксером с -c copy (без перекодирования — мгновенно)
+    // Нормализуем ПОСЛЕДОВАТЕЛЬНО (не параллельно) — параллельные ffmpeg-энкодеры
+    // разом съедали память функции и роняли её (500). По одному — памяти хватает.
     const normPaths: string[] = []
-    await Promise.all(clipPaths.map(async (p, i) => {
+    for (let i = 0; i < clipPaths.length; i++) {
       const np = path.join(tmp, `st_n${i}_${ts}.mp4`)
-      normPaths[i] = np; cleanup.push(np)
+      normPaths.push(np); cleanup.push(np)
       await execFileAsync(ffmpegPath, [
-        '-y', '-i', p,
+        '-y', '-i', clipPaths[i],
         '-vf', `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30`,
         '-vsync', 'cfr', '-r', '30',
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-an',
         '-video_track_timescale', '15360', np,
       ], { timeout: 120000, maxBuffer: 1024 * 1024 * 20 })
-    }))
+    }
     await fs.writeFile(listPath, normPaths.map(p => `file '${p}'`).join('\n'))
     await execFileAsync(ffmpegPath, [
       '-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', concatPath,
