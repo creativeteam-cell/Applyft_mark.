@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
             content: `You are a professional dubbing translator for ad videos. Translate each dialogue line into ${langName}.
 Rules:
 - Keep the same number of lines, same order, same speaker for each line
-- Each translated line will be spoken aloud and must fit roughly the SAME duration as the original (similar syllable count ± 15%)
+- DURATION MATCH IS CRITICAL: each line is spoken over a fixed time slot (given as "slot_sec" per line). Your ${langName} translation MUST take approximately the same time to speak aloud as that slot — aim within ±10%. This is the most important rule: if the natural translation would be too long, rephrase it SHORTER (drop filler, use concise wording) so a voice actor says it comfortably within the slot at normal pace. Never produce a line that needs rushing or slowing to fit.
 - Natural conversational language, as a native voice actor would say it
 - Keep brand names, app names, and numbers exactly as-is
 - Prepend ONE fitting emotion tag in square brackets to each line based on its tone, in English (e.g. [serious], [shocked], [crying], [excited], [calm])
@@ -64,7 +64,7 @@ Rules:
 - Respond ONLY with raw JSON object, no markdown:
 {"segments":[{"speaker":"speaker_0","text":"[tag] translated line"},...],"speaker_roles":{"speaker_0":"Narrator (voice-over)","speaker_1":"Girl"}}`,
           },
-          { role: 'user', content: JSON.stringify(transcript.segments.map(s => ({ speaker: s.speaker, text: s.text }))) },
+          { role: 'user', content: JSON.stringify(transcript.segments.map(s => ({ speaker: s.speaker, text: s.text, slot_sec: Math.round(((s.end ?? 0) - (s.start ?? 0)) * 10) / 10 }))) },
         ],
         max_tokens: 4000,
         temperature: 0.4,

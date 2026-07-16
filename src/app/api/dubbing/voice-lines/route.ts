@@ -16,7 +16,9 @@ export const maxDuration = 210
 const execFileAsync = promisify(execFile)
 const ALLOWED = new Set(['valerii.lemberov@applyft.co'])
 
-const MIN_TEMPO = 0.6, MAX_TEMPO = 1.6
+// Узкий диапазон: правки скорости почти не слышны. Перевод и так делается под
+// нужную длину (см. промпт переводчика), поэтому atempo лишь слегка доводит.
+const MIN_TEMPO = 0.85, MAX_TEMPO = 1.15
 function clampTempo(ratio: number): number {
   return Math.max(MIN_TEMPO, Math.min(MAX_TEMPO, ratio))
 }

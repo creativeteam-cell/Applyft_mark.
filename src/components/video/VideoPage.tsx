@@ -1240,7 +1240,9 @@ export function VideoPage() {
       const videoEndMs = Math.max(...segs.map((s: any) => s.endMs), Math.round(audioDurationMs))
       for (const s of segs) {
         if (s.startMs > cursor + 50) pieces.push({ startMs: cursor, endMs: s.startMs, lipsync: false }) // пауза
-        const longEnough = (s.endMs - s.startMs) >= 2000
+        // ≥2.2с: после укорочения окна звука на 150мс останется ≥2с (минимум Kling),
+        // и звук гарантированно короче куска видео (иначе Kling: "audio end > video")
+        const longEnough = (s.endMs - s.startMs) >= 2200
         pieces.push({ startMs: s.startMs, endMs: s.endMs, lipsync: s.onScreen && longEnough, speaker: s.speaker })
         cursor = s.endMs
       }
@@ -1277,7 +1279,8 @@ export function VideoPage() {
             body: JSON.stringify({
               videoUrl: clipUrl,
               audioBase64: workAudio, audioDurationMs,
-              window: { soundStartMs: p.startMs + LEAD_MS, soundEndMs: p.endMs + LEAD_MS, insertMs: 0 },
+              // окно короче куска на 150мс — чтобы конец звука не вышел за длину видео
+              window: { soundStartMs: p.startMs + LEAD_MS, soundEndMs: p.endMs + LEAD_MS - 150, insertMs: 0 },
               originalAudioVolume: 0,
               faceImageUrl,
             }),
