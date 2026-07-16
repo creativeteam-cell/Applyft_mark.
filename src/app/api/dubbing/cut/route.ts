@@ -11,7 +11,7 @@ import os from 'os'
 // Вырезает кусок [startMs..endMs] исходного видео (перекодируем, чтобы Kling
 // принял и чтобы стыки были чистыми) и заливает временным файлом REF_ в Drive.
 // Возвращает fileId (для удаления после склейки) и подписанный публичный URL.
-export const maxDuration = 120
+export const maxDuration = 300 // Vercel Pro: до 300с
 const execFileAsync = promisify(execFile)
 const ALLOWED = new Set(['valerii.lemberov@applyft.co'])
 const VIDEO_FOLDER_ID = process.env.VIDEO_DRIVE_FOLDER_ID!

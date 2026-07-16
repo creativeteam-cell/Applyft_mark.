@@ -12,7 +12,7 @@ import os from 'os'
 // в Drive. Нужно, потому что проходы липсинка несут только свои куски звука —
 // закадровые реплики в них отсутствуют.
 // Требует пакет ffmpeg-static: npm i ffmpeg-static
-export const maxDuration = 210
+export const maxDuration = 300 // Vercel Pro: до 300с
 
 const execFileAsync = promisify(execFile)
 

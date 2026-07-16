@@ -7,7 +7,7 @@ import { buildPublicVideoUrl } from '@/lib/videoSign'
 
 // Дубляж, шаг 2: поиск лица в видео + запуск advanced-lip-sync с новой дорожкой.
 // Оригинальный звук глушится (original_audio_volume: 0).
-export const maxDuration = 60
+export const maxDuration = 120
 
 // Закрытая бета
 const ALLOWED = new Set(['valerii.lemberov@applyft.co'])

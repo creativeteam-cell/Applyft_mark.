@@ -10,7 +10,7 @@ import { updateQueue } from '@/lib/queue'
 // Дубляж, шаг 1: транскрипция (Scribe) → перевод (GPT-4o) → озвучка (ElevenLabs TTS).
 // Возвращает исходный текст, перевод и mp3 в base64 — пользователь может отредактировать
 // перевод и переозвучить (/api/dubbing/tts) перед запуском липсинка.
-export const maxDuration = 210
+export const maxDuration = 300 // Vercel Pro: до 300с
 
 const LANG_NAMES: Record<string, string> = {
   EN: 'English', SP: 'Spanish', PT: 'Portuguese', DE: 'German', FR: 'French',

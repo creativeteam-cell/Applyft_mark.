@@ -11,7 +11,7 @@ import os from 'os'
 // Склейка кусков дубляжа: конкатенируем видео по порядку (без их звука),
 // затем кладём поверх единую выровненную озвучку. Длительности кусков = оригинал,
 // поэтому синхронизация сохраняется. Итог сохраняем в Drive и чистим временные куски.
-export const maxDuration = 210
+export const maxDuration = 300 // Vercel Pro: до 300с
 const execFileAsync = promisify(execFile)
 const ALLOWED = new Set(['valerii.lemberov@applyft.co'])
 const VIDEO_FOLDER_ID = process.env.VIDEO_DRIVE_FOLDER_ID!

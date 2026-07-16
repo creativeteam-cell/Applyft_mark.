@@ -12,7 +12,7 @@ import os from 'os'
 // границы, короткие реплики не теряются, чужие таймстемпы не нужны. Затем каждый
 // файл подгоняется по длительности под свой слот из Scribe (atempo) и ставится
 // на нужную позицию. Тайминги берём только от Scribe — они и есть эталон.
-export const maxDuration = 210
+export const maxDuration = 300 // Vercel Pro: до 300с
 const execFileAsync = promisify(execFile)
 const ALLOWED = new Set(['valerii.lemberov@applyft.co'])
 
