@@ -1239,7 +1239,7 @@ export function VideoPage() {
       // (в куске одно активное лицо, наложения проходов нет). Закадровая/короткая →
       // кусок без липсинка. Промежутки между репликами — тоже отдельные куски.
       // В конце всё склеивается, звук — выровненный workAudio.
-      const LEAD_MS = 200
+      const LEAD_MS = 80 // должно совпадать с LEAD_MS в /api/dubbing/align
       const segs = prepared.segments!.map((seg: any) => ({
         startMs: seg.origStartMs ?? 0,
         endMs: seg.origEndMs ?? 0,
