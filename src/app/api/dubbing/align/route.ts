@@ -69,16 +69,21 @@ export async function POST(req: NextRequest) {
       return { ...s, srcStart: s.srcStartMs, srcEnd: Math.max(s.srcStartMs + 1, srcEnd) }
     })
 
-    // Для каждой реплики: обрезка из источника → atempo до целевой длины → задержка до dst
+    // Для каждой реплики: обрезка → atempo до целевой длины → короткий фейд по
+    // краям (убирает щелчки на резких стыках) → задержка до dst
+    const FADE = 0.015 // 15мс, на слух незаметно
     const filters: string[] = []
     bounds.forEach((s, i) => {
       const srcDur = Math.max(1, s.srcEnd - s.srcStart)
       const dstDur = Math.max(1, s.dstEndMs - s.dstStartMs)
       const ratio = srcDur / dstDur // >1 = ускорить (реплика длиннее слота)
       const delay = Math.round(s.dstStartMs + LEAD_MS)
+      const outDurSec = dstDur / 1000
+      const fadeOutSt = Math.max(0, outDurSec - FADE)
       filters.push(
         `[0:a]atrim=start=${(s.srcStart / 1000).toFixed(3)}:end=${(s.srcEnd / 1000).toFixed(3)},` +
         `asetpts=PTS-STARTPTS,${atempoChain(ratio)},` +
+        `afade=t=in:st=0:d=${FADE},afade=t=out:st=${fadeOutSt.toFixed(3)}:d=${FADE},` +
         `adelay=${delay}|${delay}[a${i}]`
       )
     })
