@@ -110,7 +110,14 @@ export async function matchSpeakerVoices(
           '-i', vidPath, '-vn', '-acodec', 'libmp3lame', '-b:a', '128k', outPath,
         ], { timeout: 40000 })
         const mp3 = await fs.readFile(outPath)
-        profiles[s.speaker] = await classifySnippet(mp3)
+
+        // Классификация пола/возраста — необязательна: если модель недоступна,
+        // просто пропускаем профиль, клонирование от этого не страдает
+        try {
+          profiles[s.speaker] = await classifySnippet(mp3)
+        } catch (clsErr: any) {
+          console.warn(`[speakerVoices] classify ${s.speaker} skipped:`, clsErr.message)
+        }
 
         if (doClone) {
           try {
@@ -123,7 +130,7 @@ export async function matchSpeakerVoices(
           }
         }
       } catch (e: any) {
-        // сэмпл не вырезался / классификация упала — тоже фиксируем причину для UI
+        // сэмпл не вырезался — фиксируем причину для UI
         if (!cloneError) cloneError = `audio sample: ${e.message}`
         console.warn(`[speakerVoices] ${s.speaker} failed:`, e.message)
       }
