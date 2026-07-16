@@ -18,8 +18,9 @@ export async function GET() {
     return NextResponse.json({
       voices: voices.map(v => ({
         id: v.voice_id,
-        // "Rachel — female, young, calm"
-        label: `${v.name}${Object.keys(v.labels).length ? ' — ' + ['gender', 'age', 'descriptive', 'accent'].map(k => v.labels[k]).filter(Boolean).join(', ') : ''}`,
+        // Короткая подпись, чтобы не вылезала: имя + пол + возраст
+        label: `${v.name}${(v.labels.gender || v.labels.age) ? ' — ' + [v.labels.gender, v.labels.age].filter(Boolean).join(', ') : ''}`,
+        gender: v.labels.gender || '',
         previewUrl: v.preview_url || null,
       })),
     })

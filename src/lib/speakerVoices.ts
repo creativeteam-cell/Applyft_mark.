@@ -8,7 +8,7 @@ import { promisify } from 'util'
 import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
-import { ElevenVoice } from './elevenlabs'
+import { ElevenVoice, cloneVoice } from './elevenlabs'
 import { updateQueue } from './queue'
 
 const execFileAsync = promisify(execFile)
@@ -72,17 +72,21 @@ function scoreVoice(v: ElevenVoice, p: SpeakerProfile): number {
   return score
 }
 
-/** Профили говорящих + подбор голосов. samples: {speaker, startSec} — где в видео их первая реплика. */
+/** Профили говорящих + голоса. По умолчанию КЛОНИРУЕМ голос каждого говорящего
+ *  (родной голос из ролика); при неудаче — подбираем похожий из библиотеки.
+ *  clonedVoiceIds — клоны, которые вызывающий обязан удалить после дубляжа. */
 export async function matchSpeakerVoices(
   videoUrl: string,
   samples: { speaker: string; startSec: number }[],
   voices: ElevenVoice[],
-): Promise<{ profiles: Record<string, SpeakerProfile>; voiceMap: Record<string, string> }> {
+  doClone = true,
+): Promise<{ profiles: Record<string, SpeakerProfile>; voiceMap: Record<string, string>; clonedVoiceIds: string[] }> {
   const profiles: Record<string, SpeakerProfile> = {}
   const voiceMap: Record<string, string> = {}
+  const clonedVoiceIds: string[] = []
 
   const ffmpegPath = await getFfmpegPath()
-  if (!ffmpegPath) return { profiles, voiceMap } // нет ffmpeg — тихо пропускаем автоподбор
+  if (!ffmpegPath) return { profiles, voiceMap, clonedVoiceIds } // нет ffmpeg — пропускаем
 
   const tmp = os.tmpdir()
   const ts = Date.now()
@@ -96,22 +100,35 @@ export async function matchSpeakerVoices(
 
     for (const s of samples) {
       try {
+        // Для клона нужен более длинный сэмпл (до ~40с речи этого говорящего),
+        // для классификации хватит начала. Берём один кусок с его первой реплики.
         const outPath = path.join(tmp, `spk_${ts}_${s.speaker}.mp3`)
         cleanup.push(outPath)
         await execFileAsync(ffmpegPath, [
-          '-y', '-ss', String(Math.max(0, s.startSec)), '-t', '4',
-          '-i', vidPath, '-vn', '-acodec', 'libmp3lame', '-b:a', '96k', outPath,
-        ], { timeout: 30000 })
+          '-y', '-ss', String(Math.max(0, s.startSec)), '-t', doClone ? '40' : '4',
+          '-i', vidPath, '-vn', '-acodec', 'libmp3lame', '-b:a', '128k', outPath,
+        ], { timeout: 40000 })
         const mp3 = await fs.readFile(outPath)
         profiles[s.speaker] = await classifySnippet(mp3)
+
+        if (doClone) {
+          try {
+            const vid = await cloneVoice(`dub_${s.speaker}_${ts}`, mp3)
+            voiceMap[s.speaker] = vid
+            clonedVoiceIds.push(vid)
+          } catch (ce: any) {
+            console.warn(`[speakerVoices] clone ${s.speaker} failed, will fall back:`, ce.message)
+          }
+        }
       } catch (e: any) {
         console.warn(`[speakerVoices] ${s.speaker} failed:`, e.message)
       }
     }
 
-    // Подбор без повторов: каждому говорящему — лучший из ещё не занятых голосов
-    const used = new Set<string>()
+    // Тем, кого не удалось клонировать — подбираем похожий из библиотеки (без повторов)
+    const used = new Set<string>(Object.values(voiceMap))
     for (const s of samples) {
+      if (voiceMap[s.speaker]) continue
       const p = profiles[s.speaker]
       if (!p) continue
       const ranked = voices
@@ -129,5 +146,5 @@ export async function matchSpeakerVoices(
     for (const p of cleanup) fs.unlink(p).catch(() => {})
   }
 
-  return { profiles, voiceMap }
+  return { profiles, voiceMap, clonedVoiceIds }
 }

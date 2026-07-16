@@ -54,20 +54,28 @@ export async function POST(req: NextRequest) {
   try {
     await fs.writeFile(inPath, Buffer.from(String(audioBase64).replace(/^data:audio\/\w+;base64,/, ''), 'base64'))
 
+    // Общая подушка в начало (полсекунды): без неё Kling/плеер срезают атаку
+    // первого слова. Сдвигает всю дорожку — липсинк-тайминги учитывают это же.
+    const LEAD_MS = 500
+    // Небольшой запас на атаку слова: берём из источника чуть раньше начала реплики
+    const ONSET_PAD_MS = 120
+
     // Для каждой реплики: обрезка из источника → atempo до целевой длины → задержка до dst
     const filters: string[] = []
     segments.forEach((s, i) => {
-      const srcDur = Math.max(1, s.srcEndMs - s.srcStartMs)
+      const srcStart = Math.max(0, s.srcStartMs - ONSET_PAD_MS)
+      const srcDur = Math.max(1, s.srcEndMs - srcStart)
       const dstDur = Math.max(1, s.dstEndMs - s.dstStartMs)
       const ratio = srcDur / dstDur // >1 = ускорить (реплика длиннее слота)
+      const delay = Math.round(s.dstStartMs + LEAD_MS)
       filters.push(
-        `[0:a]atrim=start=${(s.srcStartMs / 1000).toFixed(3)}:end=${(s.srcEndMs / 1000).toFixed(3)},` +
+        `[0:a]atrim=start=${(srcStart / 1000).toFixed(3)}:end=${(s.srcEndMs / 1000).toFixed(3)},` +
         `asetpts=PTS-STARTPTS,${atempoChain(ratio)},` +
-        `adelay=${Math.round(s.dstStartMs)}|${Math.round(s.dstStartMs)}[a${i}]`
+        `adelay=${delay}|${delay}[a${i}]`
       )
     })
     const mix = `${segments.map((_, i) => `[a${i}]`).join('')}amix=inputs=${segments.length}:normalize=0,` +
-      `apad=whole_dur=${(totalMs / 1000).toFixed(3)}[aout]`
+      `apad=whole_dur=${((totalMs + LEAD_MS) / 1000).toFixed(3)}[aout]`
     const filterComplex = `${filters.join(';')};${mix}`
 
     await execFileAsync(ffmpegPath, [

@@ -105,14 +105,17 @@ Rules:
     // Автоподбор голосов: GPT слушает сэмпл каждого говорящего, матчим по тегам EL.
     // Ошибки не блокируют дубляж — просто не будет предложенной раскладки.
     let suggestedVoiceMap: Record<string, string> = {}
+    let clonedVoiceIds: string[] = []
     try {
       const voices = await listElevenVoices()
-      const { profiles, voiceMap } = await matchSpeakerVoices(
+      const { profiles, voiceMap, clonedVoiceIds: cloned } = await matchSpeakerVoices(
         url,
         speakerInfo.map(s => ({ speaker: s.id, startSec: s.start })),
         voices,
+        true, // клонируем родные голоса по умолчанию
       )
       suggestedVoiceMap = voiceMap
+      clonedVoiceIds = cloned
       for (const info of speakerInfo) {
         const p = profiles[info.id]
         if (p) info.voiceProfile = [p.gender, p.age, p.tone].filter(x => x && x !== 'unknown').join(', ')
@@ -134,6 +137,7 @@ Rules:
       speakerInfo,
       speakers: speakerIds.length,
       suggestedVoiceMap,
+      clonedVoiceIds, // клиент вернёт их в /api/dubbing/cleanup после дубляжа
       audioBase64,
     })
   } catch (e: any) {

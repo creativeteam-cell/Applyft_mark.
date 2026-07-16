@@ -128,6 +128,26 @@ export async function elevenDialogueTimed(inputs: { text: string; voice_id: stri
   return { audio: Buffer.from(data.audio_base64, 'base64'), timings }
 }
 
+// Instant Voice Clone из аудио-сэмпла: возвращает voice_id клона.
+// Создание бесплатное (не тратит символы), но занимает слот в аккаунте —
+// после дубляжа клон надо удалить (deleteVoice).
+export async function cloneVoice(name: string, sampleMp3: Buffer): Promise<string> {
+  const form = new FormData()
+  form.append('name', name)
+  form.append('remove_background_noise', 'true')
+  form.append('files', new Blob([new Uint8Array(sampleMp3)], { type: 'audio/mpeg' }), `${name}.mp3`)
+  const res = await fetch(`${EL_BASE}/v1/voices/add`, {
+    method: 'POST', headers: elHeaders(), body: form,
+  })
+  if (!res.ok) throw new Error(`ElevenLabs clone ${res.status}: ${await res.text()}`)
+  const data = await res.json()
+  return data.voice_id
+}
+
+export async function deleteVoice(voiceId: string): Promise<void> {
+  await fetch(`${EL_BASE}/v1/voices/${voiceId}`, { method: 'DELETE', headers: elHeaders() }).catch(() => {})
+}
+
 // Мультиязычный TTS; один и тот же голос говорит на любом языке
 export async function elevenTTS(text: string, voiceId: string): Promise<Buffer> {
   const res = await fetch(`${EL_BASE}/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {

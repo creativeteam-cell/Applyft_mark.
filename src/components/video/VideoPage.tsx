@@ -987,6 +987,16 @@ export function VideoPage() {
   const [dubLipsync, setDubLipsync] = useState(true) // выкл = просто заменить дорожку без движения губ
   const [dubFaces, setDubFaces] = useState<{ image: string; startMs: number; endMs: number }[] | null>(null)
   const [dubFaceMap, setDubFaceMap] = useState<Record<string, number>>({}) // speaker → индекс лица
+  const [dubClonedIds, setDubClonedIds] = useState<string[]>([]) // клоны на удаление после дубляжа
+
+  async function cleanupClonedVoices() {
+    if (!dubClonedIds.length) return
+    fetch('/api/dubbing/cleanup', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voiceIds: dubClonedIds }),
+    }).catch(() => {})
+    setDubClonedIds([])
+  }
   const [dubVoices, setDubVoices] = useState<{ id: string; label: string; previewUrl?: string | null }[]>(DUB_VOICES)
 
   // Полный список голосов ElevenLabs — один раз при входе в режим дубляжа
@@ -1052,6 +1062,7 @@ export function VideoPage() {
       if (d.error) throw new Error(d.error)
       setDubPrepared(d)
       setDubEditedText(d.translatedText)
+      setDubClonedIds(d.clonedVoiceIds || [])
       // Стартовая раскладка голосов (и для одного говорящего, и для диалога):
       // автоподбор по голосам из видео, чего не хватило — по кругу.
       // Закадровых (narrator/voice-over) помечаем off-screen.
@@ -1140,9 +1151,11 @@ export function VideoPage() {
             const ad = await ar.json()
             if (ad.audioBase64) {
               workAudio = ad.audioBase64
-              // после выравнивания тайминг реплики = её оригинальный тайминг
+              // align добавляет 500мс подушку в начало — учитываем в таймингах,
+              // иначе окна липсинка разъедутся с аудио на полсекунды
+              const LEAD = 0.5
               workTimings = prepared.segments!.map((seg: any, i: number) =>
-                ({ index: i, start: (seg.origStartMs ?? 0) / 1000, end: (seg.origEndMs ?? 0) / 1000 }))
+                ({ index: i, start: (seg.origStartMs ?? 0) / 1000 + LEAD, end: (seg.origEndMs ?? 0) / 1000 + LEAD }))
             }
           } catch (e: any) { console.warn('[dub] align failed, using raw audio:', e.message) }
         }
@@ -1164,7 +1177,7 @@ export function VideoPage() {
         })
         const fin = await finRes.json()
         if (fin.error) throw new Error(fin.error)
-        setDubStatus('done'); setDubProcessing(false); setDubProgress(''); fetchHistory()
+        setDubStatus('done'); setDubProcessing(false); setDubProgress(''); fetchHistory(); cleanupClonedVoices()
         return
       }
 
@@ -1190,7 +1203,7 @@ export function VideoPage() {
             aspectRatio: '', sound: 'on', inputType: 'dubbing',
           }),
         })
-        setDubStatus('done'); setDubProcessing(false); setDubProgress(''); fetchHistory()
+        setDubStatus('done'); setDubProcessing(false); setDubProgress(''); fetchHistory(); cleanupClonedVoices()
         return
       }
 
@@ -1218,20 +1231,25 @@ export function VideoPage() {
         }
       })
 
-      // Минимум Kling — 2 секунды. Сначала тянем вперёд в паузу, затем — назад,
-      // и только если и так < 2с (аудио короче 2с вообще) реплика пропускается.
+      // Минимум Kling — 2 секунды. Тянем вперёд/назад ТОЛЬКО в паузы, никогда
+      // не заходя в соседнее окно — иначе проход одного говорящего перезапишет
+      // губы другого (та самая "дочка повторяет фразу отца").
       for (let i = 0; i < wins.length; i++) {
         const w = wins[i]
+        const nextStart = wins[i + 1]?.soundStartMs ?? audioDurationMs
+        const prevEnd = wins[i - 1]?.soundEndMs ?? 0
         if (w.soundEndMs - w.soundStartMs < 2000) {
-          const nextStart = wins[i + 1]?.soundStartMs ?? audioDurationMs
-          w.soundEndMs = Math.min(w.soundStartMs + 2000, nextStart)
+          w.soundEndMs = Math.min(w.soundStartMs + 2000, nextStart) // не наезжаем на следующее
         }
         if (w.soundEndMs - w.soundStartMs < 2000) {
-          // не хватило вперёд — забираем недостающее слева (в предыдущую паузу)
-          const prevEnd = wins[i - 1]?.soundEndMs ?? 0
-          w.soundStartMs = Math.max(prevEnd, w.soundEndMs - 2000)
-          // insert двигаем синхронно, чтобы губы не разъехались с видео
-          w.insertMs = Math.max(0, w.insertMs - (2000 - (w.soundEndMs - w.soundStartMs)))
+          w.soundStartMs = Math.max(prevEnd, w.soundEndMs - 2000) // не наезжаем на предыдущее
+          w.insertMs = w.soundStartMs
+        }
+      }
+      // Финальная страховка: режем любые остаточные пересечения
+      for (let i = 1; i < wins.length; i++) {
+        if (wins[i].soundStartMs < wins[i - 1].soundEndMs) {
+          wins[i - 1].soundEndMs = wins[i].soundStartMs
         }
       }
       const runnable = wins.filter(w => w.soundEndMs - w.soundStartMs >= 2000)
@@ -1278,8 +1296,8 @@ export function VideoPage() {
       const fin = await finRes.json()
       if (fin.error) throw new Error(fin.error)
 
-      setDubStatus('done'); setDubProcessing(false); setDubProgress(''); fetchHistory()
-    } catch (e: any) { setDubError(e.message); setDubStatus('error'); setDubProcessing(false); setDubProgress('') }
+      setDubStatus('done'); setDubProcessing(false); setDubProgress(''); fetchHistory(); cleanupClonedVoices()
+    } catch (e: any) { setDubError(e.message); setDubStatus('error'); setDubProcessing(false); setDubProgress(''); cleanupClonedVoices() }
   }
 
   // ── Generation state ──
@@ -2197,8 +2215,8 @@ export function VideoPage() {
                               <div className="flex items-center gap-1.5">
                                 <select value={dubVoiceMap[sp] || dubVoices[0].id}
                                   onChange={e => setDubVoiceMap(prev => ({ ...prev, [sp]: e.target.value }))}
-                                  className="flex-1 rounded-lg px-2 py-1 text-xs outline-none"
-                                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                                  className="flex-1 min-w-0 rounded-lg px-2 py-1 text-xs outline-none"
+                                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', textOverflow: 'ellipsis' }}>
                                   {dubVoices.map(v => <option key={v.id} value={v.id} style={{ background: '#1a1a2e' }}>{v.label}</option>)}
                                 </select>
                                 <button onClick={() => playVoicePreview(dubVoiceMap[sp] || dubVoices[0].id)} title="Listen to a sample of this voice"
@@ -2242,8 +2260,8 @@ export function VideoPage() {
                             <div className="flex items-center gap-2">
                               <select value={dubVoiceMap[sp] || dubVoices[0].id}
                                 onChange={e => { setDubVoiceMap(prev => ({ ...prev, [sp]: e.target.value })); setDubPrepared(prev => prev ? { ...prev, audioBase64: null } : prev) }}
-                                className="flex-1 rounded-lg px-2 py-1.5 text-xs outline-none"
-                                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                                className="flex-1 min-w-0 rounded-lg px-2 py-1.5 text-xs outline-none"
+                                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', textOverflow: 'ellipsis' }}>
                                 {dubVoices.map(v => <option key={v.id} value={v.id} style={{ background: '#1a1a2e' }}>{v.label}</option>)}
                               </select>
                               <button onClick={() => playVoicePreview(dubVoiceMap[sp] || dubVoices[0].id)} title="Listen to a sample of this voice"
