@@ -55,21 +55,28 @@ export async function POST(req: NextRequest) {
     await fs.writeFile(inPath, Buffer.from(String(audioBase64).replace(/^data:audio\/\w+;base64,/, ''), 'base64'))
 
     // Общая подушка в начало (0.2с): без неё срезается атака первого слова.
-    // Сдвигает всю дорожку — липсинк-тайминги учитывают это же.
     const LEAD_MS = 200
-    // Небольшой запас на атаку слова: берём из источника чуть раньше начала реплики
-    const ONSET_PAD_MS = 120
+
+    // Границы реплик в источнике неточные (ElevenLabs), поэтому куски могут
+    // пересекаться — тогда слышно хвост соседней фразы дважды. Считаем чистые
+    // границы: конец текущей реплики не заходит за начало следующей.
+    const sorted = [...segments].sort((a, b) => a.srcStartMs - b.srcStartMs)
+    const bounds = sorted.map((s, i) => {
+      const next = sorted[i + 1]
+      // конец = min(свой конец, начало следующей) — без нахлёста
+      const srcEnd = next ? Math.min(s.srcEndMs, next.srcStartMs) : s.srcEndMs
+      return { ...s, srcStart: s.srcStartMs, srcEnd: Math.max(s.srcStartMs + 1, srcEnd) }
+    })
 
     // Для каждой реплики: обрезка из источника → atempo до целевой длины → задержка до dst
     const filters: string[] = []
-    segments.forEach((s, i) => {
-      const srcStart = Math.max(0, s.srcStartMs - ONSET_PAD_MS)
-      const srcDur = Math.max(1, s.srcEndMs - srcStart)
+    bounds.forEach((s, i) => {
+      const srcDur = Math.max(1, s.srcEnd - s.srcStart)
       const dstDur = Math.max(1, s.dstEndMs - s.dstStartMs)
       const ratio = srcDur / dstDur // >1 = ускорить (реплика длиннее слота)
       const delay = Math.round(s.dstStartMs + LEAD_MS)
       filters.push(
-        `[0:a]atrim=start=${(srcStart / 1000).toFixed(3)}:end=${(s.srcEndMs / 1000).toFixed(3)},` +
+        `[0:a]atrim=start=${(s.srcStart / 1000).toFixed(3)}:end=${(s.srcEnd / 1000).toFixed(3)},` +
         `asetpts=PTS-STARTPTS,${atempoChain(ratio)},` +
         `adelay=${delay}|${delay}[a${i}]`
       )
