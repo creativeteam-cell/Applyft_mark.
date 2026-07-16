@@ -16,9 +16,9 @@ export const maxDuration = 210
 const execFileAsync = promisify(execFile)
 const ALLOWED = new Set(['valerii.lemberov@applyft.co'])
 
-function atempoChain(ratio: number): string {
-  const r = Math.max(0.6, Math.min(1.6, ratio))
-  return `atempo=${r.toFixed(4)}`
+const MIN_TEMPO = 0.6, MAX_TEMPO = 1.6
+function clampTempo(ratio: number): number {
+  return Math.max(MIN_TEMPO, Math.min(MAX_TEMPO, ratio))
 }
 
 // Длительность mp3 (мс) через ffmpeg -i (парсим stderr "Duration: HH:MM:SS.ms")
@@ -74,14 +74,15 @@ export async function POST(req: NextRequest) {
     lineFiles.forEach((lf, i) => {
       inputs.push('-i', lf.file)
       const slotMs = Math.max(1, lf.dstEndMs - lf.dstStartMs)
-      const ratio = lf.durMs / slotMs // >1 = реплика длиннее слота → ускоряем
+      const ratio = clampTempo(lf.durMs / slotMs) // ограничен 0.6–1.6, чтоб голос не искажался
       const delay = Math.round(lf.dstStartMs + LEAD_MS)
-      const outDurSec = slotMs / 1000
-      const fadeOutSt = Math.max(0, outDurSec - FADE)
-      // Собираем цепочку фильтров массивом + join(',') — так запятые между
-      // фильтрами гарантированно на месте (иначе ffmpeg склеит имена опций)
+      // Fade по ФАКТИЧЕСКОЙ длине после ускорения (durMs/ratio), а не по слоту —
+      // иначе при сильном ускорении слово обрезается на границе слота.
+      // Если реплика не влезла в слот — пусть чуть зайдёт в паузу, слово целое важнее.
+      const resultDurSec = (lf.durMs / ratio) / 1000
+      const fadeOutSt = Math.max(FADE, resultDurSec - FADE)
       const chain = [
-        atempoChain(ratio),
+        `atempo=${ratio.toFixed(4)}`,
         `afade=t=in:st=0:d=${FADE}`,
         `afade=t=out:st=${fadeOutSt.toFixed(3)}:d=${FADE}`,
         `adelay=${delay}|${delay}`,
