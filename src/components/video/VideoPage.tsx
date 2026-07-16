@@ -987,6 +987,7 @@ export function VideoPage() {
   const [dubLipsync, setDubLipsync] = useState(true) // выкл = просто заменить дорожку без движения губ
   const [dubFaces, setDubFaces] = useState<{ image: string; startMs: number; endMs: number }[] | null>(null)
   const [dubFaceMap, setDubFaceMap] = useState<Record<string, number>>({}) // speaker → индекс лица
+  const [dubFacesLoading, setDubFacesLoading] = useState(false)
   const [dubClonedIds, setDubClonedIds] = useState<string[]>([]) // клоны на удаление после дубляжа
   const [dubVoiceNote, setDubVoiceNote] = useState('') // статус клонирования для показа
 
@@ -1052,7 +1053,19 @@ export function VideoPage() {
       }).filter(Boolean)
       if (alignSegs.length) {
         try {
-          const totalMs = Math.max(...segs.map((s: any) => s.origEndMs || 0))
+          // Длина дорожки = длина ВИДЕО (не конец последней реплики), иначе
+          // хвост видео после последней фразы обрежется
+          let totalMs = Math.max(...segs.map((s: any) => s.origEndMs || 0))
+          try {
+            const vDur = await new Promise<number>((resolve, reject) => {
+              const v = document.createElement('video')
+              v.preload = 'metadata'
+              v.onloadedmetadata = () => resolve(Math.round(v.duration * 1000))
+              v.onerror = () => reject(new Error('no video duration'))
+              v.src = dubFileId ? `/api/video/file/${dubFileId}` : motionVideoUrl
+            })
+            if (vDur > totalMs) totalMs = vDur
+          } catch {}
           const ar = await fetch('/api/dubbing/align', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ audioBase64: d.audioBase64, segments: alignSegs, totalMs }),
@@ -1092,6 +1105,16 @@ export function VideoPage() {
   async function handleDubPrepare() {
     if (!motionVideoUrl) return
     setDubPreparing(true); setDubError(''); setDubPrepared(null)
+    setDubFaces(null); setDubFaceMap({}); setDubFacesLoading(true)
+
+    // Лица грузим ПАРАЛЛЕЛЬНО с prepare (транскрипция+перевод+клон — долго),
+    // чтобы к моменту показа карточек миниатюры уже были готовы
+    const src = dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }
+    const facesPromise = fetch('/api/dubbing/faces', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(src),
+    }).then(r => r.json()).catch(() => ({ faces: [] }))
+
     try {
       const res = await fetch('/api/dubbing/prepare', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1120,19 +1143,13 @@ export function VideoPage() {
         setDubVoiceMap(map)
         setDubOnScreen(onScreen)
       }
-      // Лица из видео — для привязки говорящих к лицам (важно, когда в кадре двое)
+      // Забираем результат уже стартовавшего параллельно запроса лиц
       if (d.speakerIds?.length > 1) {
-        setDubFaces(null); setDubFaceMap({})
-        fetch('/api/dubbing/faces', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }),
-        })
-          .then(r => r.json())
-          .then(f => { if (f.faces?.length) setDubFaces(f.faces) })
-          .catch(() => {})
+        const f = await facesPromise
+        if (f.faces?.length) setDubFaces(f.faces)
       }
     } catch (e: any) { setDubError(e.message) }
-    setDubPreparing(false)
+    setDubPreparing(false); setDubFacesLoading(false)
   }
 
   async function handleDubRevoice() {
@@ -2208,6 +2225,12 @@ export function VideoPage() {
                                   🎙 voice in source: {info.voiceProfile}{dubPrepared.suggestedVoiceMap?.[sp] === dubVoiceMap[sp] ? ' · auto-matched' : ''}
                                 </div>
                               )}
+                              {/* Индикатор загрузки лиц — чтобы не выглядело пусто, пока грузятся */}
+                              {dubOnScreen[sp] !== false && dubFacesLoading && !dubFaces && (
+                                <div className="flex items-center gap-1.5 mb-1.5 text-[9px]" style={{ color: 'var(--text-muted)' }}>
+                                  <span className="animate-spin">⟳</span> detecting faces…
+                                </div>
+                              )}
                               {/* Привязка к лицу: критично, когда в кадре несколько человек */}
                               {dubOnScreen[sp] !== false && dubFaces && dubFaces.length > 1 && (
                                 <div className="flex items-center gap-1.5 mb-1.5">
@@ -2258,10 +2281,10 @@ export function VideoPage() {
                           </p>
                         ))}
                       </div>
-                      <button onClick={handleDubDialogueVoice} disabled={dubVoicingDialogue}
+                      <button onClick={handleDubDialogueVoice} disabled={dubVoicingDialogue || dubFacesLoading}
                         className="w-full py-2 rounded-lg text-xs font-medium transition-all mb-1"
-                        style={{ background: 'rgba(79,110,247,0.12)', color: 'var(--accent)', border: '1px solid var(--border)' }}>
-                        {dubVoicingDialogue ? 'Voicing dialogue...' : dubPrepared.audioBase64 ? '↻ Re-voice dialogue' : '🎭 Voice dialogue'}
+                        style={{ background: 'rgba(79,110,247,0.12)', color: 'var(--accent)', border: '1px solid var(--border)', opacity: dubFacesLoading ? 0.5 : 1 }}>
+                        {dubVoicingDialogue ? 'Voicing dialogue...' : dubFacesLoading ? 'Detecting faces…' : dubPrepared.audioBase64 ? '↻ Re-voice dialogue' : '🎭 Voice dialogue'}
                       </button>
                     </div>
                   ) : (
