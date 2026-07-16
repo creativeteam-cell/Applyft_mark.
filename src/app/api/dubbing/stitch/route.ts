@@ -53,13 +53,29 @@ export async function POST(req: NextRequest) {
     }
     await fs.writeFile(audPath, Buffer.from(String(audioBase64).replace(/^data:audio\/\w+;base64,/, ''), 'base64'))
 
-    // Конкат видео (без звука). Перекодируем для надёжного склеивания разных кусков.
-    await fs.writeFile(listPath, clipPaths.map(p => `file '${p}'`).join('\n'))
+    // Определяем целевое разрешение по первому куску (нарезанному из оригинала)
+    let W = 1080, H = 1920
+    try {
+      await execFileAsync(ffmpegPath, ['-i', clipPaths[0]], { timeout: 20000 })
+    } catch (e: any) {
+      const m = String(e.stderr || e.message || '').match(/,\s*(\d{2,5})x(\d{2,5})/)
+      if (m) { W = +m[1]; H = +m[2] }
+    }
+
+    // Склейка через concat-ФИЛЬТР (не демуксер): куски от Kling и нарезанные имеют
+    // разные разрешение/кодек/fps — демуксер такие молча выкидывает (оставались
+    // только первый и последний). Фильтр приводит каждый вход к общему WxH/fps.
+    const inputs: string[] = []
+    const norm: string[] = []
+    clipPaths.forEach((p, i) => {
+      inputs.push('-i', p)
+      norm.push(`[${i}:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,settb=AVTB,setpts=PTS-STARTPTS[v${i}]`)
+    })
+    const concatFilter = `${norm.join(';')};${clipPaths.map((_, i) => `[v${i}]`).join('')}concat=n=${clipPaths.length}:v=1:a=0[outv]`
     await execFileAsync(ffmpegPath, [
-      '-y', '-f', 'concat', '-safe', '0', '-i', listPath,
-      '-vf', 'fps=30,setpts=PTS-STARTPTS', '-vsync', 'cfr', '-r', '30',
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-an', concatPath,
-    ], { timeout: 150000, maxBuffer: 1024 * 1024 * 40 })
+      '-y', ...inputs, '-filter_complex', concatFilter,
+      '-map', '[outv]', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-an', concatPath,
+    ], { timeout: 180000, maxBuffer: 1024 * 1024 * 60 })
 
     // Накладываем озвучку
     await execFileAsync(ffmpegPath, [
