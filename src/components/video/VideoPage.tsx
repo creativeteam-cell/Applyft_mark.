@@ -1054,12 +1054,7 @@ export function VideoPage() {
         if (vDur > totalMs) totalMs = vDur
       } catch {}
 
-      const res = await fetch('/api/dubbing/voice-lines', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lines, totalMs }),
-      })
-      const d = await res.json()
-      if (d.error) throw new Error(d.error)
+      const d = await dubPost('voice', '/api/dubbing/voice-lines', { lines, totalMs })
       // aligned=true — дорожка уже собрана по таймингам Scribe
       setDubPrepared(prev => prev ? { ...prev, audioBase64: d.audioBase64, aligned: true } : prev)
     } catch (e: any) { setDubError(e.message) }
@@ -1067,6 +1062,19 @@ export function VideoPage() {
   }
 
   // Ожидание задачи Kling (для последовательных проходов липсинка)
+  // Безопасный POST: если сервер вернул не-JSON (HTML 504/500 при таймауте/падении),
+  // даём внятную ошибку со шагом и кодом вместо "Unexpected token '<'"
+  async function dubPost(step: string, url: string, body: any): Promise<any> {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    const ct = res.headers.get('content-type') || ''
+    if (!ct.includes('application/json')) {
+      throw new Error(`${step}: server returned ${res.status} (${res.statusText || 'error'}) — likely timeout on a long video`)
+    }
+    const d = await res.json()
+    if (d.error) throw new Error(`${step}: ${d.error}`)
+    return d
+  }
+
   async function waitKlingTask(taskId: string, type: string): Promise<{ url: string; id: string; duration?: string }> {
     for (let i = 0; i < 120; i++) {
       await new Promise(r => setTimeout(r, 5000))
@@ -1256,12 +1264,7 @@ export function VideoPage() {
       for (const p of pieces) {
         // 1. Вырезаем кусок оригинала
         setDubProgress(`Preparing clips (${clipUrls.length + 1}/${pieces.length})...`)
-        const cutRes = await fetch('/api/dubbing/cut', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...(dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }), startMs: p.startMs, endMs: p.endMs }),
-        })
-        const cut = await cutRes.json()
-        if (cut.error) throw new Error(`cut: ${cut.error}`)
+        const cut = await dubPost('cut', '/api/dubbing/cut', { ...(dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }), startMs: p.startMs, endMs: p.endMs })
         tempFileIds.push(cut.fileId)
         let clipUrl: string = cut.url
 
@@ -1274,19 +1277,14 @@ export function VideoPage() {
           // (сплошной план — оба в кадре), GPT-vision выберет нужное по картинке
           const faceIdx = p.speaker ? dubFaceMap[p.speaker] : undefined
           const faceImageUrl = (dubFaces && faceIdx !== undefined && dubFaces[faceIdx]) ? dubFaces[faceIdx].image : undefined
-          const lipRes = await fetch('/api/dubbing/lipsync', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              videoUrl: clipUrl,
-              audioBase64: workAudio, audioDurationMs,
-              // окно короче куска на 150мс — чтобы конец звука не вышел за длину видео
-              window: { soundStartMs: p.startMs + LEAD_MS, soundEndMs: p.endMs + LEAD_MS - 150, insertMs: 0 },
-              originalAudioVolume: 0,
-              faceImageUrl,
-            }),
+          const ld = await dubPost('lip-sync', '/api/dubbing/lipsync', {
+            videoUrl: clipUrl,
+            audioBase64: workAudio, audioDurationMs,
+            // окно короче куска на 150мс — чтобы конец звука не вышел за длину видео
+            window: { soundStartMs: p.startMs + LEAD_MS, soundEndMs: p.endMs + LEAD_MS - 150, insertMs: 0 },
+            originalAudioVolume: 0,
+            faceImageUrl,
           })
-          const ld = await lipRes.json()
-          if (ld.error) throw new Error(`lip-sync: ${ld.error}`)
           const result = await waitKlingTask(ld.task_id, 'advanced-lip-sync')
           clipUrl = result.url
         }
@@ -1295,16 +1293,11 @@ export function VideoPage() {
 
       // 3. Склейка кусков + выровненная озвучка поверх
       setDubProgress('Stitching final video...')
-      const stRes = await fetch('/api/dubbing/stitch', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clipUrls, audioBase64: workAudio, tempFileIds,
-          prompt: `[dubbed → ${dubLang}] ${prepared.sourceText.slice(0, 120)}`,
-          targetLang: dubLang, duration: String(Math.round(audioDurationMs / 1000)),
-        }),
+      await dubPost('stitch', '/api/dubbing/stitch', {
+        clipUrls, audioBase64: workAudio, tempFileIds,
+        prompt: `[dubbed → ${dubLang}] ${prepared.sourceText.slice(0, 120)}`,
+        targetLang: dubLang, duration: String(Math.round(audioDurationMs / 1000)),
       })
-      const st = await stRes.json()
-      if (st.error) throw new Error(`stitch: ${st.error}`)
 
       setDubStatus('done'); setDubProcessing(false); setDubProgress(''); fetchHistory(); cleanupClonedVoices()
     } catch (e: any) { setDubError(e.message); setDubStatus('error'); setDubProcessing(false); setDubProgress(''); cleanupClonedVoices() }

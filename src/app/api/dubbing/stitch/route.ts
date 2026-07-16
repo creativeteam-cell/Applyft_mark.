@@ -62,20 +62,26 @@ export async function POST(req: NextRequest) {
       if (m) { W = +m[1]; H = +m[2] }
     }
 
-    // Склейка через concat-ФИЛЬТР (не демуксер): куски от Kling и нарезанные имеют
-    // разные разрешение/кодек/fps — демуксер такие молча выкидывает (оставались
-    // только первый и последний). Фильтр приводит каждый вход к общему WxH/fps.
-    const inputs: string[] = []
-    const norm: string[] = []
-    clipPaths.forEach((p, i) => {
-      inputs.push('-i', p)
-      norm.push(`[${i}:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,settb=AVTB,setpts=PTS-STARTPTS[v${i}]`)
-    })
-    const concatFilter = `${norm.join(';')};${clipPaths.map((_, i) => `[v${i}]`).join('')}concat=n=${clipPaths.length}:v=1:a=0[outv]`
+    // Два лёгких этапа вместо одного тяжёлого concat-фильтра (он не укладывался
+    // в лимит на длинных роликах):
+    // 1) нормализуем КАЖДЫЙ кусок по отдельности к общему WxH/fps30 (быстро, параллельно)
+    // 2) склеиваем одинаковые куски демуксером с -c copy (без перекодирования — мгновенно)
+    const normPaths: string[] = []
+    await Promise.all(clipPaths.map(async (p, i) => {
+      const np = path.join(tmp, `st_n${i}_${ts}.mp4`)
+      normPaths[i] = np; cleanup.push(np)
+      await execFileAsync(ffmpegPath, [
+        '-y', '-i', p,
+        '-vf', `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30`,
+        '-vsync', 'cfr', '-r', '30',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-an',
+        '-video_track_timescale', '15360', np,
+      ], { timeout: 120000, maxBuffer: 1024 * 1024 * 20 })
+    }))
+    await fs.writeFile(listPath, normPaths.map(p => `file '${p}'`).join('\n'))
     await execFileAsync(ffmpegPath, [
-      '-y', ...inputs, '-filter_complex', concatFilter,
-      '-map', '[outv]', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-an', concatPath,
-    ], { timeout: 180000, maxBuffer: 1024 * 1024 * 60 })
+      '-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', concatPath,
+    ], { timeout: 60000, maxBuffer: 1024 * 1024 * 20 })
 
     // Накладываем озвучку
     await execFileAsync(ffmpegPath, [
