@@ -92,7 +92,7 @@ async function generateWithGptImage(prompt: string, size: string, referenceBase6
 
 async function saveToDrive(
   imageBase64: string,
-  metadata: { prompt: string; engine: string; size: string; userName: string; userEmail: string; userImage: string },
+  metadata: { prompt: string; engine: string; size: string; userName: string; userEmail: string; userImage: string; styleName?: string; refThumb?: string },
   userToken: string,
 ): Promise<{ fileId: string; webViewLink: string }> {
   const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '')
@@ -165,7 +165,7 @@ export async function POST(req: NextRequest) {
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { prompt, engine, modelId, size, referenceBase64: referenceBase64Body, referenceFileId, aiPrompt, recomposeFileId, recomposeBase64, targetSize, fixNote, enhanceFixNote } = body
+  const { prompt, engine, modelId, size, referenceBase64: referenceBase64Body, referenceFileId, aiPrompt, recomposeFileId, recomposeBase64, targetSize, fixNote, enhanceFixNote, styleName } = body
 
   // Check generation limit (applies to all generation modes)
   if (session.user?.email) {
@@ -311,6 +311,15 @@ Rules:
     if (userToken) {
       const queueModel = engine === 'dalle' ? 'openai' : 'gemini'
       await updateQueue(queueModel, 1)
+      // Мини-превью референса (128px) для отображения в карточке
+      let refThumb: string | undefined
+      if (referenceBase64) {
+        try {
+          const b = Buffer.from(referenceBase64.replace(/^data:image\/\w+;base64,/, ''), 'base64')
+          const t = await sharp(b).resize(128, 128, { fit: 'inside' }).jpeg({ quality: 55 }).toBuffer()
+          refThumb = `data:image/jpeg;base64,${t.toString('base64')}`
+        } catch {}
+      }
       const saved = await saveToDrive(imageBase64, {
         prompt: finalPrompt,
         engine: engine === 'dalle' ? 'GPT' : 'Banana',
@@ -318,6 +327,8 @@ Rules:
         userName: session.user.name || '',
         userEmail: session.user.email || '',
         userImage: session.user.image || '',
+        styleName: styleName || undefined,
+        refThumb,
       }, userToken)
       fileId = saved.fileId
       webViewLink = saved.webViewLink

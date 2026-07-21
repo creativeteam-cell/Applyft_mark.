@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
   const userToken = (session as any).accessToken
   if (!userToken) return NextResponse.json({ error: 'No access token' }, { status: 401 })
 
-  const { videoUrl, klingVideoId, prompt, model, duration, aspectRatio, sound, inputType, units } = await req.json()
+  const { videoUrl, klingVideoId, prompt, model, duration, aspectRatio, sound, inputType, units, refThumb } = await req.json()
   if (!videoUrl) return NextResponse.json({ error: 'videoUrl required' }, { status: 400 })
 
   try {
@@ -33,6 +33,7 @@ export async function POST(req: NextRequest) {
       sound: sound || 'off',
       inputType: inputType || 'text',
       klingVideoId: klingVideoId || '',
+      refThumb: refThumb || '', // мини-превью первого кадра (если было)
       userName: session.user.name || '',
       userEmail: session.user.email || '',
       userImage: session.user.image || '',

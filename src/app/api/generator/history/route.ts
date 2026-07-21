@@ -36,6 +36,8 @@ export async function GET(req: NextRequest) {
         prompt: meta.prompt || '',
         engine: meta.engine || 'Banana',
         size: meta.size || '',
+        styleName: meta.styleName || '',
+        refThumb: meta.refThumb || null,
         userName: meta.userName || '',
         userEmail: meta.userEmail || '',
         userImage: meta.userImage || '',

@@ -26,6 +26,7 @@ interface VideoItem {
   aspectRatio: string; sound: string; inputType: string
   klingVideoId: string; userName: string; userEmail: string; userImage: string
   thumbnailLink: string | null; webViewLink: string | null; createdTime: string
+  refThumb?: string | null
 }
 interface GenItem {
   id: string; prompt: string; thumbnailLink: string | null
@@ -638,6 +639,13 @@ function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose
               <JsonPromptDisplay prompt={item.prompt} />
             </div>
           )}
+          {item.refThumb && (
+            <div className="mb-4">
+              <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>References</div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={item.refThumb} alt="first frame" className="rounded-lg object-cover" style={{ width: 44, height: 44, border: '1px solid var(--border)' }} />
+            </div>
+          )}
           {canExtend && (<>
           <div className="mb-4" style={{ height: 1, background: 'var(--border)' }} />
           <div className="mb-4">
@@ -900,6 +908,13 @@ export function VideoPage() {
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
   }, [videoMode])
+
+  // Мини-превью первого кадра (128px) для карточки — храним в ref для замыкания pollStatus
+  const firstFrameThumbRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!firstFrame) { firstFrameThumbRef.current = null; return }
+    shrinkForVideo(`data:image/jpeg;base64,${firstFrame}`, 128).then(u => { firstFrameThumbRef.current = u }).catch(() => {})
+  }, [firstFrame])
 
   // Автоопределение соотношения по первому кадру: при image-to-video Kling берёт
   // пропорции картинки, поэтому выставляем ближайший доступный формат модели.
@@ -1510,7 +1525,7 @@ export function VideoPage() {
             setSavingToDrive(true)
             fetch('/api/video/save', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ videoUrl: url, klingVideoId: vid, ...savePayload }),
+              body: JSON.stringify({ videoUrl: url, klingVideoId: vid, refThumb: firstFrameThumbRef.current || undefined, ...savePayload }),
             }).then(r => r.json()).then(d => {
               setSavingToDrive(false)
               if (d.error) setError('Video generated but failed to save: ' + d.error)

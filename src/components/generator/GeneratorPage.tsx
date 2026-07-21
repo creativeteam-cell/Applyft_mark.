@@ -169,6 +169,8 @@ interface HistoryItem {
   prompt: string
   engine: string
   size: string
+  styleName?: string
+  refThumb?: string | null
   userName: string
   userEmail: string
   userImage: string
@@ -830,6 +832,24 @@ function ImageCardModal({ item, onClose, onGenerated }: {
             </p>
           </div>
 
+          {/* References: превью референса + стиль */}
+          {(item.refThumb || item.styleName) && (
+            <div className="mb-4">
+              <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>References</div>
+              <div className="flex items-center gap-2">
+                {item.refThumb && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={item.refThumb} alt="reference" className="rounded-lg object-cover" style={{ width: 44, height: 44, border: '1px solid var(--border)' }} />
+                )}
+                {item.styleName && (
+                  <span className="text-xs px-2 py-1 rounded-lg" style={{ background: 'rgba(79,110,247,0.12)', color: 'var(--accent)' }}>
+                    ✦ {item.styleName}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="mb-4" style={{ height: 1, background: 'var(--border)' }} />
 
           {/* Model picker */}
@@ -1238,6 +1258,9 @@ export function GeneratorPage() {
             size: currentSize.label,
             referenceBase64: currentModel.supportsReference ? refSmall : undefined,
             aiPrompt,
+            styleName: selectedStyle
+              ? (ALL_STYLES.find(s => s.id === selectedStyle)?.label ?? customStyles.find(s => s.id === selectedStyle)?.name)
+              : undefined,
           }),
         })
       }
