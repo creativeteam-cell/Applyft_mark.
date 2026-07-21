@@ -773,8 +773,9 @@ function ImageUploadBox({ label, preview, onUpload, onClear, onPickFromLibrary, 
   compact?: boolean
 }) {
   const ref = useRef<HTMLInputElement>(null)
-  function handle(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]; if (!file) return
+  const [dragOver, setDragOver] = useState(false)
+  async function processFile(file: File) {
+    if (!file.type.startsWith('image/')) return
     const reader = new FileReader()
     reader.onload = async ev => {
       const url = ev.target?.result as string
@@ -782,6 +783,9 @@ function ImageUploadBox({ label, preview, onUpload, onClear, onPickFromLibrary, 
       onUpload(compressed.split(',')[1])
     }
     reader.readAsDataURL(file)
+  }
+  function handle(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]; if (file) processFile(file)
   }
   return (
     <div className="mb-3">
@@ -799,8 +803,11 @@ function ImageUploadBox({ label, preview, onUpload, onClear, onPickFromLibrary, 
         )}
       </div>
       <div onClick={() => ref.current?.click()}
+        onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) processFile(f) }}
         className="rounded-xl border-2 border-dashed cursor-pointer flex items-center justify-center transition-all hover:border-[var(--accent)] overflow-hidden"
-        style={{ borderColor: preview ? 'transparent' : 'var(--border)', minHeight: compact ? 70 : 80 }}>
+        style={{ borderColor: dragOver ? 'var(--accent)' : preview ? 'transparent' : 'var(--border)', background: dragOver ? 'rgba(79,110,247,0.08)' : 'transparent', minHeight: compact ? 70 : 80 }}>
         {preview ? (
           <div className="relative w-full">
             <img src={`data:image/jpeg;base64,${preview}`} alt={label} className="w-full object-cover rounded-xl" style={{ maxHeight: compact ? 70 : 130 }} />
@@ -814,7 +821,7 @@ function ImageUploadBox({ label, preview, onUpload, onClear, onPickFromLibrary, 
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto mb-1" style={{ color: 'var(--text-muted)' }}>
               <rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
             </svg>
-            <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Upload</div>
+            <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{dragOver ? 'Drop image' : 'Upload or drop'}</div>
           </div>
         )}
       </div>
@@ -867,6 +874,25 @@ export function VideoPage() {
   useEffect(() => { saveLS('gen_vid_sound', sound) }, [sound])
   const [atPopup, setAtPopup] = useState(false)
   const [atQuery, setAtQuery] = useState('')
+
+  // Автоопределение соотношения по первому кадру: при image-to-video Kling берёт
+  // пропорции картинки, поэтому выставляем ближайший доступный формат модели.
+  const [detectedAspect, setDetectedAspect] = useState<string | null>(null)
+  useEffect(() => {
+    if (!firstFrame) { setDetectedAspect(null); return }
+    const img = new Image()
+    img.onload = () => {
+      if (!img.width || !img.height) return
+      const target = img.width / img.height
+      const opts = currentModel.aspectRatios.length ? currentModel.aspectRatios : (['16:9', '9:16', '1:1'] as AspectRatio[])
+      const ratio = (l: string) => { const [w, h] = l.split(':').map(Number); return h ? w / h : 1 }
+      let best = opts[0], bestDiff = Infinity
+      opts.forEach(o => { const d = Math.abs(ratio(o) - target); if (d < bestDiff) { bestDiff = d; best = o } })
+      setDetectedAspect(best)
+      setAspectRatio(best)
+    }
+    img.src = `data:image/jpeg;base64,${firstFrame}`
+  }, [firstFrame]) // eslint-disable-line
 
   // ── Multishot state ──
   const [shots, setShots] = useState<ShotItem[]>(() => loadLS<ShotItem[]>('gen_vid_shots', [{ id: '1', prompt: '', duration: 3 }]))
@@ -2408,18 +2434,26 @@ export function VideoPage() {
             </div>
           )}
 
-          {/* Aspect ratio — only for text2video standard mode, not when first frame is set */}
-          {videoMode === 'standard' && !firstFrame && (
+          {/* Aspect ratio — для text2video выбираем; при загруженном кадре Kling берёт
+              пропорции картинки, поэтому селектор не скрываем, а блокируем и показываем
+              автоопределённый формат */}
+          {videoMode === 'standard' && currentModel.aspectRatios.length > 0 && (
             <div className="mb-3">
-              <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Aspect ratio</div>
-              <div className="flex flex-wrap gap-1.5">
-                {currentModel.aspectRatios.map(r => (
-                  <button key={r} onClick={() => setAspectRatio(r)}
-                    className="px-2.5 py-1 rounded-lg text-xs font-medium transition-all"
-                    style={{ background: aspectRatio === r ? 'rgba(79,110,247,0.15)' : 'rgba(255,255,255,0.04)', color: aspectRatio === r ? 'var(--accent)' : 'var(--text-muted)', border: `1px solid ${aspectRatio === r ? 'var(--accent)' : 'var(--border)'}` }}>
-                    {r}
-                  </button>
-                ))}
+              <div className="flex items-center gap-2 mb-1.5">
+                <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Aspect ratio</div>
+                {firstFrame && <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>· auto from image</span>}
+              </div>
+              <div className="flex flex-wrap gap-1.5" style={{ opacity: firstFrame ? 0.6 : 1, pointerEvents: firstFrame ? 'none' : 'auto' }}>
+                {currentModel.aspectRatios.map(r => {
+                  const active = firstFrame ? detectedAspect === r : aspectRatio === r
+                  return (
+                    <button key={r} onClick={() => setAspectRatio(r)} disabled={!!firstFrame}
+                      className="px-2.5 py-1 rounded-lg text-xs font-medium transition-all"
+                      style={{ background: active ? 'rgba(79,110,247,0.15)' : 'rgba(255,255,255,0.04)', color: active ? 'var(--accent)' : 'var(--text-muted)', border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}` }}>
+                      {r}
+                    </button>
+                  )
+                })}
               </div>
             </div>
           )}
