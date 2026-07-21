@@ -1503,7 +1503,9 @@ export function VideoPage() {
   const pollStatus = useCallback((taskId: string, type: string, savePayload: any) => {
     stopPolling()
     const startedAt = Date.now()
-    const TIMEOUT_MS = 10 * 60 * 1000 // 10 minutes
+    // 25 минут: аватар с длинной аудиодорожкой Kling рендерит дольше 10 мин.
+    // Это лишь ожидание в браузере (не серверный лимит), можно держать долго.
+    const TIMEOUT_MS = 25 * 60 * 1000
     pollRef.current = setInterval(async () => {
       if (Date.now() - startedAt > TIMEOUT_MS) {
         stopPolling()
