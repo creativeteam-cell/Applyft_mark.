@@ -993,6 +993,25 @@ export function GeneratorPage() {
     reader.readAsDataURL(file)
   }
 
+  // Вставка картинки из буфера (Ctrl+V) на вкладке Image → референс.
+  // Реагируем только если в буфере есть изображение (вставку текста не трогаем).
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      if (tab !== 'image' || !currentModel.supportsReference) return
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (const it of Array.from(items)) {
+        if (it.type.startsWith('image/')) {
+          const f = it.getAsFile()
+          if (f) { e.preventDefault(); setReferenceFromFile(f) }
+          break
+        }
+      }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [tab, currentModel]) // eslint-disable-line
+
   // Референс из библиотеки (сгенерированное изображение) — качаем как base64
   const [refPickerOpen, setRefPickerOpen] = useState(false)
   const [refDragOver, setRefDragOver] = useState(false)

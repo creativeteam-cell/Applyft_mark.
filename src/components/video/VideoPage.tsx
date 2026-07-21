@@ -875,6 +875,32 @@ export function VideoPage() {
   const [atPopup, setAtPopup] = useState(false)
   const [atQuery, setAtQuery] = useState('')
 
+  // Вставка картинки из буфера (Ctrl+V) → первый кадр (для режимов с кадром).
+  // Реагируем только на изображение в буфере, вставку текста не трогаем.
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      if (videoMode !== 'standard' && videoMode !== 'multishot') return
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (const it of Array.from(items)) {
+        if (it.type.startsWith('image/')) {
+          const f = it.getAsFile()
+          if (!f) break
+          e.preventDefault()
+          const reader = new FileReader()
+          reader.onload = async ev => {
+            const compressed = await shrinkForVideo(ev.target?.result as string)
+            setFirstFrame(compressed.split(',')[1])
+          }
+          reader.readAsDataURL(f)
+          break
+        }
+      }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [videoMode])
+
   // Автоопределение соотношения по первому кадру: при image-to-video Kling берёт
   // пропорции картинки, поэтому выставляем ближайший доступный формат модели.
   const [detectedAspect, setDetectedAspect] = useState<string | null>(null)
