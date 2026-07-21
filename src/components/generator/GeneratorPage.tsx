@@ -981,6 +981,37 @@ export function GeneratorPage() {
     e.target.value = ''
   }
 
+  // Референс из файла (drag&drop) — читаем File и ставим как референс
+  function setReferenceFromFile(file: File) {
+    if (!file.type.startsWith('image/')) return
+    const reader = new FileReader()
+    reader.onload = ev => {
+      const dataUrl = ev.target?.result as string
+      setReference(dataUrl)
+      autoPickSizeByRatio(dataUrl)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  // Референс из библиотеки (сгенерированное изображение) — качаем как base64
+  const [refPickerOpen, setRefPickerOpen] = useState(false)
+  const [refDragOver, setRefDragOver] = useState(false)
+  async function pickReferenceFromLibrary(item: HistoryItem) {
+    setRefPickerOpen(false)
+    try {
+      const res = await fetch(`/api/generator/image/${item.id}`)
+      const blob = await res.blob()
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader()
+        r.onload = () => resolve(r.result as string)
+        r.onerror = () => reject(new Error('read failed'))
+        r.readAsDataURL(blob)
+      })
+      setReference(dataUrl)
+      autoPickSizeByRatio(dataUrl)
+    } catch {}
+  }
+
   const styleSuffix = selectedStyle ? (ALL_STYLES.find(s => s.id === selectedStyle)?.suffix ?? '') : ''
   const hasPrompt = prompt.trim().length > 0
   const hasStyle = !!selectedStyle
@@ -1064,6 +1095,35 @@ export function GeneratorPage() {
           onClose={() => setSelectedItem(null)}
           onGenerated={() => { fetchHistory(); setSelectedItem(null) }}
         />
+      )}
+
+      {/* Выбор референса из библиотеки сгенерированных картинок */}
+      {refPickerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6"
+          style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
+          onClick={e => { if (e.target === e.currentTarget) setRefPickerOpen(false) }}>
+          <div className="rounded-2xl p-5 w-full max-w-3xl max-h-[80vh] overflow-y-auto"
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-sm font-semibold">Pick a reference from library</span>
+              <button onClick={() => setRefPickerOpen(false)} className="opacity-50 hover:opacity-100">×</button>
+            </div>
+            {history.length === 0 ? (
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>No images yet</p>
+            ) : (
+              <div className="grid grid-cols-4 gap-3">
+                {history.map(item => (
+                  <button key={item.id} onClick={() => pickReferenceFromLibrary(item)}
+                    className="rounded-xl overflow-hidden transition-all hover:ring-2"
+                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', aspectRatio: '1/1' }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={`/api/generator/image/${item.id}`} alt="" className="w-full h-full object-cover" loading="lazy" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       <div className="flex items-center gap-1 px-4 pt-3 pb-0 flex-shrink-0"
@@ -1157,15 +1217,32 @@ export function GeneratorPage() {
                       </button>
                     </div>
                   ) : (
-                    <button onClick={() => referenceRef.current?.click()}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm transition-all hover:bg-white/5"
-                      style={{ border: '1px dashed var(--border)', color: 'var(--text-muted)' }}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                        <rect x="3" y="3" width="18" height="18" rx="3"/>
-                        <circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
-                      </svg>
-                      Upload reference
-                    </button>
+                    <div
+                      onDragOver={e => { e.preventDefault(); setRefDragOver(true) }}
+                      onDragLeave={() => setRefDragOver(false)}
+                      onDrop={e => { e.preventDefault(); setRefDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) setReferenceFromFile(f) }}
+                      className="rounded-lg transition-all"
+                      style={{ border: `1px dashed ${refDragOver ? 'var(--accent)' : 'var(--border)'}`, background: refDragOver ? 'rgba(79,110,247,0.08)' : 'transparent' }}>
+                      <div className="flex gap-2 p-1.5">
+                        <button onClick={() => referenceRef.current?.click()}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-xs transition-all hover:bg-white/5"
+                          style={{ color: 'var(--text-muted)' }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+                          </svg>
+                          Upload
+                        </button>
+                        <button onClick={() => setRefPickerOpen(true)}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-xs transition-all hover:bg-white/5"
+                          style={{ color: 'var(--text-muted)' }}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+                          </svg>
+                          Library
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-center pb-1.5" style={{ color: 'rgba(255,255,255,0.25)' }}>or drag &amp; drop an image here</p>
+                    </div>
                   )}
                 </div>
               )}
