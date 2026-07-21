@@ -335,6 +335,9 @@ function AdminPanel({ currentEmail }: { currentEmail: string }) {
   const [newAdmin, setNewAdmin] = useState('')
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState('')
+  const [defImg, setDefImg] = useState(50)
+  const [defVid, setDefVid] = useState(50)
+  const [savingDef, setSavingDef] = useState<'image' | 'video' | null>(null)
 
   const fetchStats = useCallback(async () => {
     setLoading(true)
@@ -344,10 +347,26 @@ function AdminPanel({ currentEmail }: { currentEmail: string }) {
       setStats(data.users || [])
       setAdminEmails(data.adminEmails || [])
     } catch {}
+    try {
+      const dr = await fetch('/api/admin/limits')
+      const dd = await dr.json()
+      if (dd.defaults) { setDefImg(dd.defaults.image); setDefVid(dd.defaults.video) }
+    } catch {}
     setLoading(false)
   }, [])
 
   useEffect(() => { fetchStats() }, [fetchStats])
+
+  async function saveDefault(kind: 'image' | 'video', value: number) {
+    setSavingDef(kind)
+    try {
+      await fetch('/api/admin/limits', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope: 'default', type: kind, limit: value }),
+      })
+    } catch {}
+    setSavingDef(null)
+  }
 
   async function handleAddAdmin() {
     if (!newAdmin.trim()) return
@@ -380,6 +399,34 @@ function AdminPanel({ currentEmail }: { currentEmail: string }) {
 
   return (
     <div className="flex flex-col gap-6">
+
+      {/* Дефолтные лимиты для новых пользователей (общие) */}
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>
+          Default limits for new users
+        </div>
+        <div className="flex gap-3">
+          {([['image', defImg, setDefImg, 'Images'], ['video', defVid, setDefVid, 'Video units']] as const).map(([kind, val, setter, label]) => (
+            <div key={kind} className="flex-1 px-3 py-2.5 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
+              <div className="text-xs mb-1.5" style={{ color: 'var(--text-muted)' }}>{label}</div>
+              <div className="flex items-center gap-2">
+                <input type="number" min={0} value={val}
+                  onChange={e => setter(Math.max(0, Number(e.target.value) || 0))}
+                  className="flex-1 min-w-0 rounded-lg px-2 py-1.5 text-sm outline-none"
+                  style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+                <button onClick={() => saveDefault(kind, val)} disabled={savingDef === kind}
+                  className="text-xs px-3 py-1.5 rounded-lg font-medium"
+                  style={{ background: 'var(--accent)', color: '#fff' }}>
+                  {savingDef === kind ? '…' : 'Save'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="text-[10px] mt-1.5" style={{ color: 'rgba(255,255,255,0.25)' }}>
+          Applies to users without a personal limit. 0 = unlimited.
+        </p>
+      </div>
 
       {/* Kling account balance (глобальный, с датой сгорания) */}
       <KlingBalanceCard />

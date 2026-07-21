@@ -1168,6 +1168,12 @@ export function VideoPage() {
     if (!dubPrepared?.audioBase64 || !motionVideoUrl) return
     const audioB64 = dubPrepared.audioBase64
     const prepared = dubPrepared
+    // Временные куски (REF_cut_*) — удаляем при ЛЮБОМ исходе, чтобы не засоряли Drive
+    const tempFileIds: string[] = []
+    const purgeTempClips = () => {
+      tempFileIds.forEach(id => fetch(`/api/video/file/${id}`, { method: 'DELETE' }).catch(() => {}))
+      tempFileIds.length = 0
+    }
     setDubProcessing(true); setDubStatus('processing'); setDubError(''); setDubProgress('')
     try {
       // Длительность mp3 берём из аудио-элемента
@@ -1258,7 +1264,6 @@ export function VideoPage() {
 
       const lipCount = pieces.filter(p => p.lipsync).length
       const clipUrls: string[] = []
-      const tempFileIds: string[] = []
       let done = 0
 
       for (const p of pieces) {
@@ -1299,8 +1304,8 @@ export function VideoPage() {
         targetLang: dubLang, duration: String(Math.round(audioDurationMs / 1000)),
       })
 
-      setDubStatus('done'); setDubProcessing(false); setDubProgress(''); fetchHistory(); cleanupClonedVoices()
-    } catch (e: any) { setDubError(e.message); setDubStatus('error'); setDubProcessing(false); setDubProgress(''); cleanupClonedVoices() }
+      setDubStatus('done'); setDubProcessing(false); setDubProgress(''); fetchHistory(); cleanupClonedVoices(); purgeTempClips()
+    } catch (e: any) { setDubError(e.message); setDubStatus('error'); setDubProcessing(false); setDubProgress(''); cleanupClonedVoices(); purgeTempClips() }
   }
 
   // ── Generation state ──
@@ -1317,7 +1322,7 @@ export function VideoPage() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [nextPageToken, setNextPageToken] = useState<string | null>(null)
   const [selectedItem, setSelectedItem] = useState<VideoItem | null>(null)
-  const [filterEmail, setFilterEmail] = useState<string | null>(null)
+  const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set())
   const sentinelRef = useRef<HTMLDivElement>(null)
 
   // ── Derived ──
@@ -1351,7 +1356,14 @@ export function VideoPage() {
     new Map(history.filter(v => v.userEmail).map(v => [v.userEmail, v])).values()
   ).map(v => ({ email: v.userEmail, name: v.userName, image: v.userImage }))
 
-  const filteredHistory = filterEmail ? history.filter(v => v.userEmail === filterEmail) : history
+  const filteredHistory = selectedEmails.size ? history.filter(v => selectedEmails.has(v.userEmail)) : history
+  function toggleEmail(email: string) {
+    setSelectedEmails(prev => {
+      const next = new Set(prev)
+      next.has(email) ? next.delete(email) : next.add(email)
+      return next
+    })
+  }
 
   // ── Reset videoMode when model changes and mode not supported ──
   useEffect(() => {
@@ -2545,14 +2557,14 @@ export function VideoPage() {
           {historyUsers.length > 0 && (
             <div className="flex items-center gap-2 mb-4">
               {historyUsers.map(u => (
-                <button key={u.email} onClick={() => setFilterEmail(filterEmail === u.email ? null : u.email)}
+                <button key={u.email} onClick={() => toggleEmail(u.email)}
                   title={u.name} className="transition-all"
-                  style={{ borderRadius: '50%', outline: filterEmail === u.email ? '2px solid var(--accent)' : '2px solid transparent', outlineOffset: 2, opacity: filterEmail && filterEmail !== u.email ? 0.4 : 1 }}>
+                  style={{ borderRadius: '50%', outline: selectedEmails.has(u.email) ? '2px solid var(--accent)' : '2px solid transparent', outlineOffset: 2, opacity: selectedEmails.size && !selectedEmails.has(u.email) ? 0.4 : 1 }}>
                   <UserAvatar name={u.name} email={u.email} image={u.image} size={32} />
                 </button>
               ))}
-              {filterEmail && (
-                <button onClick={() => setFilterEmail(null)} className="text-[10px] px-2 py-1 rounded-lg ml-1"
+              {selectedEmails.size > 0 && (
+                <button onClick={() => setSelectedEmails(new Set())} className="text-[10px] px-2 py-1 rounded-lg ml-1"
                   style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>
                   Clear
                 </button>
@@ -2573,7 +2585,7 @@ export function VideoPage() {
                   <polygon points="5 3 19 12 5 21 5 3"/>
                 </svg>
                 <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                  {filterEmail ? 'No videos from this user' : 'Generate a video to get started'}
+                  {selectedEmails.size ? 'No videos from selected users' : 'Generate a video to get started'}
                 </p>
               </div>
             </div>

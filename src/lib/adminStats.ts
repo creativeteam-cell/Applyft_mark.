@@ -64,6 +64,21 @@ export async function getAllUserStats(knownEmails: string[]): Promise<UserStat[]
   }))
 }
 
+// -- Configurable default limits (for NEW users, changeable by admin) ---------
+
+const DEFAULT_IMAGE_LIMIT_KEY = 'gen:default-limit:image'
+const DEFAULT_VIDEO_LIMIT_KEY = 'gen:default-limit:video'
+const FALLBACK_DEFAULT = 50 // если админ ничего не задал
+
+export async function getDefaultLimits(): Promise<{ image: number; video: number }> {
+  const [img, vid] = await redis.mget<number[]>(DEFAULT_IMAGE_LIMIT_KEY, DEFAULT_VIDEO_LIMIT_KEY)
+  return { image: img ?? FALLBACK_DEFAULT, video: vid ?? FALLBACK_DEFAULT }
+}
+
+export async function setDefaultLimit(kind: 'image' | 'video', limit: number): Promise<void> {
+  await redis.set(kind === 'image' ? DEFAULT_IMAGE_LIMIT_KEY : DEFAULT_VIDEO_LIMIT_KEY, limit)
+}
+
 // -- Image limits -------------------------------------------------------------
 
 function limitKey(email: string) {
@@ -72,7 +87,8 @@ function limitKey(email: string) {
 
 export async function getUserLimit(email: string): Promise<number> {
   const val = await redis.get<number>(limitKey(email))
-  return val ?? 0
+  if (val != null) return val
+  return (await getDefaultLimits()).image // личный не задан → общий дефолт
 }
 
 export async function setUserLimit(email: string, limit: number): Promise<void> {
@@ -88,10 +104,11 @@ export async function checkLimitExceeded(email: string): Promise<boolean> {
 
 export async function getAllLimits(emails: string[]): Promise<Record<string, number>> {
   if (emails.length === 0) return {}
+  const def = (await getDefaultLimits()).image
   const keys = emails.map(limitKey)
   const vals = await redis.mget<number[]>(...keys)
   const result: Record<string, number> = {}
-  emails.forEach((email, i) => { result[email] = vals[i] ?? 0 })
+  emails.forEach((email, i) => { result[email] = vals[i] ?? def })
   return result
 }
 
@@ -129,16 +146,18 @@ export async function getAllVideoStats(emails: string[]): Promise<VideoUserStat[
 
 export async function getAllVideoLimits(emails: string[]): Promise<Record<string, number>> {
   if (emails.length === 0) return {}
+  const def = (await getDefaultLimits()).video
   const keys = emails.map(videoLimitKey)
   const vals = await redis.mget<number[]>(...keys)
   const result: Record<string, number> = {}
-  emails.forEach((email, i) => { result[email] = (vals[i] as number) ?? 50 })
+  emails.forEach((email, i) => { result[email] = (vals[i] as number) ?? def })
   return result
 }
 
 export async function getUserVideoLimit(email: string): Promise<number> {
   const val = await redis.get<number>(videoLimitKey(email))
-  return val ?? 50
+  if (val != null) return val
+  return (await getDefaultLimits()).video
 }
 
 export async function setVideoLimit(email: string, limit: number): Promise<void> {
