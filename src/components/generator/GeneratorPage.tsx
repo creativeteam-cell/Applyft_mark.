@@ -177,6 +177,17 @@ interface HistoryItem {
   createdTime: string
 }
 
+interface CustomStyle {
+  id: string
+  name: string
+  suffix: string
+  image: string | null
+  uses: number
+  createdBy: string
+  createdByName: string
+  createdAt: string
+}
+
 function UserAvatar({ name, email, image, size = 28, selected, onClick }: {
   name: string; email: string; image?: string; size?: number; selected?: boolean; onClick?: () => void
 }) {
@@ -316,7 +327,94 @@ function PeopleFilter({ items, selectedEmails, onToggle, onClear }: {
   )
 }
 
-function StylePicker({ selected, onSelect }: { selected: string | null; onSelect: (id: string | null) => void }) {
+// Модалка создания/редактирования кастомного стиля
+function StyleModal({ mode, style, onClose, onSaved }: {
+  mode: 'new' | 'edit'; style?: CustomStyle; onClose: () => void; onSaved: () => void
+}) {
+  const [name, setName] = useState(style?.name || '')
+  const [suffix, setSuffix] = useState(style?.suffix || '')
+  const [image, setImage] = useState<string | null>(style?.image || null)
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  function pickImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]; if (!f) return
+    const r = new FileReader()
+    r.onload = () => setImage(r.result as string)
+    r.readAsDataURL(f)
+  }
+
+  async function save() {
+    if (!name.trim() || !suffix.trim()) { setErr('Fill name and style text'); return }
+    setSaving(true); setErr('')
+    try {
+      if (mode === 'new') {
+        const res = await fetch('/api/styles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, suffix, image }) })
+        const d = await res.json(); if (d.error) throw new Error(d.error)
+      } else {
+        const res = await fetch('/api/styles', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: style!.id, name, suffix, image }) })
+        const d = await res.json(); if (d.error) throw new Error(d.error)
+      }
+      onSaved()
+    } catch (e: any) { setErr(e.message); setSaving(false) }
+  }
+
+  async function remove() {
+    if (!style || !confirm(`Delete style "${style.name}"?`)) return
+    setSaving(true)
+    try {
+      const res = await fetch('/api/styles', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: style.id }) })
+      const d = await res.json(); if (d.error) throw new Error(d.error)
+      onSaved()
+    } catch (e: any) { setErr(e.message); setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="rounded-2xl p-5 w-full max-w-md" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-sm font-semibold">{mode === 'new' ? 'New custom style' : 'Edit style'}</span>
+          <button onClick={onClose} className="opacity-50 hover:opacity-100">×</button>
+        </div>
+        <div className="flex gap-3 mb-3">
+          <button onClick={() => fileRef.current?.click()}
+            className="rounded-lg overflow-hidden flex items-center justify-center flex-shrink-0"
+            style={{ width: 64, height: 84, border: '1px dashed var(--border)', background: image ? undefined : 'linear-gradient(135deg,#4f6ef7,#9c27b0)' }}>
+            {image ? <img src={image} alt="" className="w-full h-full object-cover" /> : <span style={{ color: '#fff', fontSize: 22 }}>✦</span>}
+          </button>
+          <div className="flex-1 flex flex-col gap-1 justify-center">
+            <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Preview image (optional)</p>
+            <button onClick={() => fileRef.current?.click()} className="text-xs px-2 py-1 rounded-lg self-start" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text)' }}>Upload</button>
+            {image && <button onClick={() => setImage(null)} className="text-[10px] self-start" style={{ color: '#f87171' }}>remove</button>}
+          </div>
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pickImage} />
+        </div>
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Style name (e.g. Neon Noir)" maxLength={40}
+          className="w-full rounded-lg px-3 py-2 text-sm outline-none mb-2" style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+        <textarea value={suffix} onChange={e => setSuffix(e.target.value)} rows={3} maxLength={600}
+          placeholder="Style text added to the prompt, e.g. 'in cinematic film noir style, moody lighting, deep shadows'"
+          className="w-full rounded-lg px-3 py-2 text-sm outline-none resize-none mb-2" style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+        {err && <p className="text-xs mb-2" style={{ color: '#f87171' }}>{err}</p>}
+        <div className="flex gap-2">
+          <button onClick={save} disabled={saving} className="flex-1 py-2 rounded-lg text-sm font-semibold" style={{ background: 'var(--accent)', color: '#fff' }}>
+            {saving ? '…' : mode === 'new' ? 'Create' : 'Save'}
+          </button>
+          {mode === 'edit' && (
+            <button onClick={remove} disabled={saving} className="px-3 py-2 rounded-lg text-sm" style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171' }}>Delete</button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StylePicker({ selected, onSelect, customStyles, myEmail, onAdd, onEdit }: {
+  selected: string | null; onSelect: (id: string | null) => void
+  customStyles: CustomStyle[]; myEmail: string
+  onAdd: () => void; onEdit: (s: CustomStyle) => void
+}) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [atStart, setAtStart] = useState(true)
   const [atEnd, setAtEnd] = useState(false)
@@ -370,6 +468,43 @@ function StylePicker({ selected, onSelect }: { selected: string | null; onSelect
               </span>
             </button>
           ))}
+
+          {/* Кастомные стили (сортированы по использованиям на сервере) */}
+          {customStyles.map(cs => (
+            <div key={cs.id} className="flex-shrink-0 flex flex-col items-center gap-1 relative group">
+              <button onClick={() => onSelect(selected === cs.id ? null : cs.id)} title={`${cs.name} · by ${cs.createdByName} · used ${cs.uses}×`}
+                className="transition-all">
+                <div className="rounded-lg overflow-hidden transition-all flex items-center justify-center"
+                  style={{ width: 52, height: 68,
+                    outline: selected === cs.id ? '2px solid var(--accent)' : '2px solid transparent', outlineOffset: 2,
+                    opacity: selected && selected !== cs.id ? 0.45 : 1,
+                    background: cs.image ? undefined : 'linear-gradient(135deg,#4f6ef7,#9c27b0)' }}>
+                  {cs.image
+                    ? <img src={cs.image} alt={cs.name} className="w-full h-full object-cover" />
+                    : <span style={{ fontSize: 20, color: '#fff' }}>✦</span>}
+                </div>
+              </button>
+              <span className="text-center leading-tight" style={{ fontSize: 9, color: selected === cs.id ? 'var(--accent)' : 'var(--text-muted)', fontWeight: selected === cs.id ? 600 : 400, maxWidth: 52, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {cs.name}
+              </span>
+              {/* Автор может редактировать — карандаш в углу при наведении */}
+              {cs.createdBy === myEmail && (
+                <button onClick={() => onEdit(cs)} title="Edit style"
+                  className="absolute top-0 right-0 w-4 h-4 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
+                  style={{ background: 'rgba(0,0,0,0.7)', color: '#fff', fontSize: 8 }}>✎</button>
+              )}
+            </div>
+          ))}
+
+          {/* Кнопка добавления своего стиля */}
+          <button onClick={onAdd} title="Create custom style"
+            className="flex-shrink-0 flex flex-col items-center gap-1 transition-all">
+            <div className="rounded-lg flex items-center justify-center transition-all hover:border-[var(--accent)]"
+              style={{ width: 52, height: 68, border: '2px dashed var(--border)', color: 'var(--text-muted)' }}>
+              <span style={{ fontSize: 24, lineHeight: 1 }}>+</span>
+            </div>
+            <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>New</span>
+          </button>
         </div>
         {/* Left arrow */}
         {!atStart && (
@@ -918,6 +1053,15 @@ export function GeneratorPage() {
   const [prompt, setPrompt] = useState<string>(() => loadLS<string>('gen_img_prompt', ''))
   const [aiPrompt, setAiPrompt] = useState<boolean>(() => loadLS<boolean>('gen_img_aiprompt', false))
   const [selectedStyle, setSelectedStyle] = useState<string | null>(() => loadLS<string | null>('gen_img_style', null))
+  const { data: sessionData } = useSession()
+  const myEmail = sessionData?.user?.email || ''
+  // Кастомные стили (общие, из Drive)
+  const [customStyles, setCustomStyles] = useState<CustomStyle[]>([])
+  const [styleModal, setStyleModal] = useState<{ mode: 'new' } | { mode: 'edit'; style: CustomStyle } | null>(null)
+  const loadStyles = useCallback(() => {
+    fetch('/api/styles').then(r => r.json()).then(d => { if (d.styles) setCustomStyles(d.styles) }).catch(() => {})
+  }, [])
+  useEffect(() => { loadStyles() }, [loadStyles])
   const [reference, setReference] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
   const [describing, setDescribing] = useState(false)
@@ -1031,7 +1175,10 @@ export function GeneratorPage() {
     } catch {}
   }
 
-  const styleSuffix = selectedStyle ? (ALL_STYLES.find(s => s.id === selectedStyle)?.suffix ?? '') : ''
+  const styleSuffix = selectedStyle
+    ? (ALL_STYLES.find(s => s.id === selectedStyle)?.suffix
+       ?? (() => { const c = customStyles.find(s => s.id === selectedStyle); return c ? ` ${c.suffix}` : '' })())
+    : ''
   const hasPrompt = prompt.trim().length > 0
   const hasStyle = !!selectedStyle
   const isRestyle = !hasPrompt && hasStyle && !!reference
@@ -1097,6 +1244,12 @@ export function GeneratorPage() {
       const contentType = res.headers.get('content-type') || ''
       const data = contentType.includes('application/json') ? await res.json() : { error: await res.text() }
       if (!res.ok) throw new Error(data.error || 'Generation failed')
+      // Счётчик использований кастомного стиля (для сортировки «чаще — левее»)
+      if (selectedStyle && customStyles.some(s => s.id === selectedStyle)) {
+        fetch('/api/styles', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: selectedStyle, incrementUse: true }) })
+          .then(() => setCustomStyles(prev => prev.map(s => s.id === selectedStyle ? { ...s, uses: s.uses + 1 } : s)))
+          .catch(() => {})
+      }
       fetchHistory()
     } catch (e: any) {
       setError(e.message)
@@ -1113,6 +1266,16 @@ export function GeneratorPage() {
           item={selectedItem}
           onClose={() => setSelectedItem(null)}
           onGenerated={() => { fetchHistory(); setSelectedItem(null) }}
+        />
+      )}
+
+      {/* Модалка кастомного стиля */}
+      {styleModal && (
+        <StyleModal
+          mode={styleModal.mode}
+          style={styleModal.mode === 'edit' ? styleModal.style : undefined}
+          onClose={() => setStyleModal(null)}
+          onSaved={() => { setStyleModal(null); loadStyles() }}
         />
       )}
 
@@ -1268,7 +1431,10 @@ export function GeneratorPage() {
 
               {/* Style */}
               <div className="mb-5">
-                <StylePicker selected={selectedStyle} onSelect={setSelectedStyle} />
+                <StylePicker selected={selectedStyle} onSelect={setSelectedStyle}
+                  customStyles={customStyles} myEmail={myEmail}
+                  onAdd={() => setStyleModal({ mode: 'new' })}
+                  onEdit={(s) => setStyleModal({ mode: 'edit', style: s })} />
               </div>
 
               {/* Prompt */}
