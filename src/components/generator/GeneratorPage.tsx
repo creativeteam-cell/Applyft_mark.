@@ -412,29 +412,59 @@ function StyleModal({ mode, style, onClose, onSaved }: {
   )
 }
 
-function StylePicker({ selected, onSelect, customStyles, myEmail, onAdd, onEdit }: {
-  selected: string | null; onSelect: (id: string | null) => void
-  customStyles: CustomStyle[]; myEmail: string
-  onAdd: () => void; onEdit: (s: CustomStyle) => void
-}) {
+// Горизонтальный ряд со стрелками пролистывания (у каждой секции — свой)
+function ScrollRow({ children }: { children: React.ReactNode }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [atStart, setAtStart] = useState(true)
   const [atEnd, setAtEnd] = useState(false)
 
-  function handleScroll() {
+  function update() {
     const el = scrollRef.current
     if (!el) return
     setAtStart(el.scrollLeft <= 8)
     setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 8)
   }
 
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    setAtStart(el.scrollLeft <= 8)
-    setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 8)
-  }, [])
+  useEffect(() => { update() }, [children])
 
+  return (
+    <div className="relative">
+      <div ref={scrollRef} onScroll={update} className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' } as any}>
+        {children}
+      </div>
+      {!atStart && (
+        <div className="absolute top-0 left-0 h-full flex items-center justify-start"
+          style={{ width: 40, background: 'linear-gradient(to left, transparent, var(--surface) 70%)' }}>
+          <button onClick={() => scrollRef.current?.scrollBy({ left: -120, behavior: 'smooth' })}
+            className="flex items-center justify-center w-6 h-6 rounded-full transition-all hover:bg-white/10"
+            style={{ marginLeft: 2, color: 'var(--text-muted)' }}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M8 2L4 6l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        </div>
+      )}
+      {!atEnd && (
+        <div className="absolute top-0 right-0 h-full flex items-center justify-end"
+          style={{ width: 40, background: 'linear-gradient(to right, transparent, var(--surface) 70%)' }}>
+          <button onClick={() => scrollRef.current?.scrollBy({ left: 120, behavior: 'smooth' })}
+            className="flex items-center justify-center w-6 h-6 rounded-full transition-all hover:bg-white/10"
+            style={{ marginRight: 2, color: 'var(--text-muted)' }}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StylePicker({ selected, onSelect, customStyles, myEmail, onAdd, onEdit }: {
+  selected: string | null; onSelect: (id: string | null) => void
+  customStyles: CustomStyle[]; myEmail: string
+  onAdd: () => void; onEdit: (s: CustomStyle) => void
+}) {
   // Оба блока по умолчанию свёрнуты; разворачиваются кликом по заголовку
   const [presetsOpen, setPresetsOpen] = useState(false)
   const [customOpen, setCustomOpen] = useState(false)
@@ -476,11 +506,11 @@ function StylePicker({ selected, onSelect, customStyles, myEmail, onAdd, onEdit 
       <div>
         <SectionHeader title="Style" open={presetsOpen} onToggle={() => setPresetsOpen(o => !o)} />
         {presetsOpen && (
-          <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' } as any}>
+          <ScrollRow>
             {ALL_STYLES.map(style => (
               <StyleTile key={style.id} id={style.id} label={style.label} imgSrc={`/styles/${style.image}`} />
             ))}
-          </div>
+          </ScrollRow>
         )}
       </div>
 
@@ -488,7 +518,7 @@ function StylePicker({ selected, onSelect, customStyles, myEmail, onAdd, onEdit 
       <div>
         <SectionHeader title="Custom styles" open={customOpen} onToggle={() => setCustomOpen(o => !o)} />
         {customOpen && (
-          <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' } as any}>
+          <ScrollRow>
             {customStyles.map(cs => (
               <StyleTile key={cs.id} id={cs.id} label={cs.name} imgSrc={cs.image || undefined} gradient={!cs.image}
                 editable={cs.createdBy === myEmail ? cs : undefined} />
@@ -500,7 +530,7 @@ function StylePicker({ selected, onSelect, customStyles, myEmail, onAdd, onEdit 
               </div>
               <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>New</span>
             </button>
-          </div>
+          </ScrollRow>
         )}
       </div>
     </div>
