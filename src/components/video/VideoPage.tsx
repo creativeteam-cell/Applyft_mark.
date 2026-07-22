@@ -4,6 +4,7 @@ import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useSession } from 'next-auth/react'
 import { setQueueActive } from '@/lib/queueClient'
 import { UsageBadge } from '@/components/ui/UsageBadge'
+import { PromptTemplatesModal, usePromptTemplates, findTemplateInPrompt, stripCommand, MixButton, TemplatesButton } from '@/components/generator/PromptTemplates'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -642,8 +643,19 @@ function VideoCardModal({ item, onClose, onRefresh }: { item: VideoItem; onClose
           {item.refThumb && (
             <div className="mb-4">
               <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>References</div>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={item.refThumb} alt="first frame" className="rounded-lg object-cover" style={{ width: 44, height: 44, border: '1px solid var(--border)' }} />
+              <div className="relative inline-block group">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={item.refThumb} alt="first frame" className="rounded-lg object-cover" style={{ width: 44, height: 44, border: '1px solid var(--border)' }} />
+                {/* Мини-кнопка скачивания референса */}
+                <button title="Download reference"
+                  onClick={() => { const a = document.createElement('a'); a.href = item.refThumb!; a.download = `reference-${item.id}.jpg`; a.click() }}
+                  className="absolute -bottom-1 -right-1 rounded-full flex items-center justify-center transition-all hover:scale-110"
+                  style={{ width: 18, height: 18, background: 'var(--accent)' }}>
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                  </svg>
+                </button>
+              </div>
             </div>
           )}
           {canExtend && (<>
@@ -868,6 +880,10 @@ export function VideoPage() {
   const [lastFrame, setLastFrame] = useState<string | null>(null)
   const [assets, setAssets] = useState<{ id: string; name: string; base64: string }[]>([])
   const [enhancing, setEnhancing] = useState(false)
+  // Заготовки промптов (общие, как на вкладке Image): /command → Mix
+  const { templates: promptTemplates, setTemplates: setPromptTemplates, reload: loadTemplates } = usePromptTemplates()
+  const [templatesOpen, setTemplatesOpen] = useState(false)
+  const [mixing, setMixing] = useState(false)
   const [pickerTarget, setPickerTarget] = useState<'first' | 'last' | 'motion' | 'avatar' | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const assetInputRef = useRef<HTMLInputElement>(null)
@@ -1425,9 +1441,17 @@ export function VideoPage() {
     return false
   }, [status, videoMode, prompt, shots, shotDescription, motionImage, motionVideoUrl, avatarImage, avatarAudioBase64])
 
+  // Полный список пользователей (как в админке) + авторы из подгруженной истории
+  const [allUsers, setAllUsers] = useState<{ email: string; name: string; image: string }[]>([])
+  useEffect(() => {
+    fetch('/api/users').then(r => r.json()).then(d => { if (d.users) setAllUsers(d.users) }).catch(() => {})
+  }, [])
   const historyUsers = Array.from(
-    new Map(history.filter(v => v.userEmail).map(v => [v.userEmail, v])).values()
-  ).map(v => ({ email: v.userEmail, name: v.userName, image: v.userImage }))
+    new Map([
+      ...allUsers.map(u => [u.email, u] as const),
+      ...history.filter(v => v.userEmail).map(v => [v.userEmail, { email: v.userEmail, name: v.userName, image: v.userImage }] as const),
+    ]).values()
+  )
 
   const filteredHistory = selectedEmails.size ? history.filter(v => selectedEmails.has(v.userEmail)) : history
   function toggleEmail(email: string) {
@@ -1631,6 +1655,32 @@ export function VideoPage() {
     else if (pickerTarget === 'motion') setMotionImage(b64)
     else if (pickerTarget === 'avatar') setAvatarImage(b64)
     setPickerTarget(null)
+  }
+
+  // ── Prompt templates: /command → Mix ──
+  const matchedTemplate = findTemplateInPrompt(prompt, promptTemplates)
+
+  async function handleMix() {
+    if (!matchedTemplate || mixing) return
+    setMixing(true)
+    setQueueActive('openai', true)
+    try {
+      const cleanUser = stripCommand(prompt, matchedTemplate.command)
+      const res = await fetch('/api/generator/mix', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userPrompt: cleanUser, templateBody: matchedTemplate.body }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Mix failed')
+      setPrompt(data.mixed)
+      fetch('/api/prompt-templates', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: matchedTemplate.id, incrementUse: true }) })
+        .then(() => setPromptTemplates(prev => prev.map(t => t.id === matchedTemplate.id ? { ...t, uses: t.uses + 1 } : t)))
+        .catch(() => {})
+    } catch (e: any) {
+      setError(e.message)
+    }
+    setQueueActive('openai', false)
+    setMixing(false)
   }
 
   // ── Enhance prompt ──
@@ -1916,13 +1966,10 @@ export function VideoPage() {
                   <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
                     {firstFrame ? 'Motion prompt' : 'Prompt'}
                   </div>
-                  <button onClick={handleEnhancePrompt} disabled={enhancing}
-                    className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition-all font-medium"
-                    style={{ background: 'rgba(79,110,247,0.12)', color: 'var(--accent)', border: '1px solid var(--border)' }}>
-                    {enhancing ? (
-                      <svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>
-                    ) : '✦'} Enhance
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <TemplatesButton onClick={() => setTemplatesOpen(true)} />
+                    {matchedTemplate && <MixButton mixing={mixing} command={matchedTemplate.command} onClick={handleMix} />}
+                  </div>
                 </div>
                 <div className="relative">
                   <textarea ref={textareaRef} value={prompt} onChange={e => setPrompt(e.target.value)}
@@ -2693,6 +2740,14 @@ export function VideoPage() {
 
       {selectedItem && <VideoCardModal item={selectedItem} onClose={() => setSelectedItem(null)} onRefresh={fetchHistory} />}
       {pickerTarget && <ImagePickerModal onSelect={handlePickerSelect} onClose={() => setPickerTarget(null)} />}
+      {templatesOpen && (
+        <PromptTemplatesModal
+          templates={promptTemplates}
+          myEmail={session?.user?.email || ''}
+          onClose={() => setTemplatesOpen(false)}
+          onChanged={loadTemplates}
+        />
+      )}
       {motionVideoPicker && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-6"
           style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
