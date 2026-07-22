@@ -42,6 +42,8 @@ export async function GET(req: NextRequest) {
         inputType: meta.inputType || 'text',
         klingVideoId: meta.klingVideoId || '',
         refThumb: meta.refThumb || null,
+        refId: meta.refId || null,
+        sourceVideoId: meta.sourceVideoId || null,
         userName: meta.userName || '',
         userEmail: meta.userEmail || '',
         userImage: meta.userImage || '',

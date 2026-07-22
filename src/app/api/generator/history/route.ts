@@ -24,7 +24,8 @@ export async function GET(req: NextRequest) {
       pageToken,
     } as any) as any
 
-    const files = (res.data.files || []) as any[]
+    // REF_ файлы — сохранённые оригиналы референсов, в истории их не показываем
+    const files = ((res.data.files || []) as any[]).filter((f: any) => !String(f.name || '').startsWith('REF_'))
     const nextPageToken = res.data.nextPageToken || null
 
     const items = files.map((f: any) => {
@@ -38,6 +39,7 @@ export async function GET(req: NextRequest) {
         size: meta.size || '',
         styleName: meta.styleName || '',
         refThumb: meta.refThumb || null,
+        refId: meta.refId || null,
         userName: meta.userName || '',
         userEmail: meta.userEmail || '',
         userImage: meta.userImage || '',

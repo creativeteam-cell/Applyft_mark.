@@ -90,9 +90,39 @@ async function generateWithGptImage(prompt: string, size: string, referenceBase6
   return `data:image/jpeg;base64,${jpeg.toString('base64')}`
 }
 
+// Сохраняем ОРИГИНАЛ референса отдельным файлом (REF_...) — чтобы можно было
+// скачать его из карточки для перегенерации. В историю такие файлы не попадают.
+async function uploadRefOriginal(referenceBase64: string, userToken: string): Promise<string | null> {
+  try {
+    const base64Data = referenceBase64.replace(/^data:image\/\w+;base64,/, '')
+    const mimeType = referenceBase64.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg'
+    const ext = mimeType.includes('png') ? 'png' : 'jpg'
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const fileName = `REF_${ts}.${ext}`
+    const buf = Buffer.from(base64Data, 'base64')
+    const uploadRes = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id',
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${userToken}`, 'Content-Type': 'multipart/related; boundary=boundary123' },
+        body: Buffer.concat([
+          Buffer.from(`--boundary123\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name: fileName, parents: [FOLDER_ID], description: JSON.stringify({ kind: 'reference' }) })}\r\n--boundary123\r\nContent-Type: ${mimeType}\r\n\r\n`),
+          buf,
+          Buffer.from(`\r\n--boundary123--`),
+        ]),
+      }
+    )
+    if (!uploadRes.ok) return null
+    const data = await uploadRes.json()
+    return data.id || null
+  } catch {
+    return null
+  }
+}
+
 async function saveToDrive(
   imageBase64: string,
-  metadata: { prompt: string; engine: string; size: string; userName: string; userEmail: string; userImage: string; styleName?: string; refThumb?: string },
+  metadata: { prompt: string; engine: string; size: string; userName: string; userEmail: string; userImage: string; styleName?: string; refThumb?: string; refId?: string },
   userToken: string,
 ): Promise<{ fileId: string; webViewLink: string }> {
   const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '')
@@ -320,6 +350,10 @@ Rules:
           refThumb = `data:image/jpeg;base64,${t.toString('base64')}`
         } catch {}
       }
+      // ID оригинала референса: из библиотеки — сам файл; извне — сохраняем REF_-копию
+      let refId: string | undefined
+      if (referenceFileId) refId = referenceFileId as string
+      else if (referenceBase64) refId = (await uploadRefOriginal(referenceBase64, userToken)) || undefined
       const saved = await saveToDrive(imageBase64, {
         prompt: finalPrompt,
         engine: engine === 'dalle' ? 'GPT' : 'Banana',
@@ -329,6 +363,7 @@ Rules:
         userImage: session.user.image || '',
         styleName: styleName || undefined,
         refThumb,
+        refId,
       }, userToken)
       fileId = saved.fileId
       webViewLink = saved.webViewLink

@@ -13,10 +13,33 @@ export async function POST(req: NextRequest) {
   const userToken = (session as any).accessToken
   if (!userToken) return NextResponse.json({ error: 'No access token' }, { status: 401 })
 
-  const { videoUrl, klingVideoId, prompt, model, duration, aspectRatio, sound, inputType, units, refThumb } = await req.json()
+  const { videoUrl, klingVideoId, prompt, model, duration, aspectRatio, sound, inputType, units, refThumb, refFull, sourceVideoId } = await req.json()
   if (!videoUrl) return NextResponse.json({ error: 'videoUrl required' }, { status: 400 })
 
   try {
+    // Сохраняем ОРИГИНАЛ референс-кадра отдельным файлом (для скачивания из карточки).
+    // В историю не попадает — она фильтрует только video/mp4.
+    let refId = ''
+    if (refFull && typeof refFull === 'string' && refFull.startsWith('data:image/')) {
+      try {
+        const b64 = refFull.replace(/^data:image\/\w+;base64,/, '')
+        const mime = refFull.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg'
+        const ext = mime.includes('png') ? 'png' : 'jpg'
+        const refTs = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+        const refBoundary = 'refboundary123'
+        const refBody = Buffer.concat([
+          Buffer.from(`--${refBoundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name: `REF_IMG_${refTs}.${ext}`, parents: [VIDEO_FOLDER_ID], description: JSON.stringify({ kind: 'reference' }) })}\r\n--${refBoundary}\r\nContent-Type: ${mime}\r\n\r\n`),
+          Buffer.from(b64, 'base64'),
+          Buffer.from(`\r\n--${refBoundary}--`),
+        ])
+        const refRes = await fetch(
+          'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id',
+          { method: 'POST', headers: { Authorization: `Bearer ${userToken}`, 'Content-Type': `multipart/related; boundary=${refBoundary}` }, body: refBody }
+        )
+        if (refRes.ok) refId = (await refRes.json()).id || ''
+      } catch {}
+    }
+
     const videoRes = await fetch(videoUrl)
     if (!videoRes.ok) throw new Error(`Failed to fetch video: ${videoRes.status}`)
     const videoBuffer = Buffer.from(await videoRes.arrayBuffer())
@@ -34,6 +57,8 @@ export async function POST(req: NextRequest) {
       inputType: inputType || 'text',
       klingVideoId: klingVideoId || '',
       refThumb: refThumb || '', // мини-превью первого кадра (если было)
+      refId, // ID оригинала референса в Drive (для скачивания)
+      sourceVideoId: sourceVideoId || '', // ID видео, которое это продолжает
       userName: session.user.name || '',
       userEmail: session.user.email || '',
       userImage: session.user.image || '',

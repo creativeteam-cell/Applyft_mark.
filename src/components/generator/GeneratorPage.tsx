@@ -172,6 +172,7 @@ interface HistoryItem {
   size: string
   styleName?: string
   refThumb?: string | null
+  refId?: string | null
   userName: string
   userEmail: string
   userImage: string
@@ -852,9 +853,9 @@ function ImageCardModal({ item, onClose, onGenerated }: {
                   <div className="relative group">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={item.refThumb} alt="reference" className="rounded-lg object-cover" style={{ width: 44, height: 44, border: '1px solid var(--border)' }} />
-                    {/* Мини-кнопка скачивания референса */}
+                    {/* Мини-кнопка скачивания референса (оригинал по refId, старые карточки — превью) */}
                     <button title="Download reference"
-                      onClick={() => { const a = document.createElement('a'); a.href = item.refThumb!; a.download = `reference-${item.id}.jpg`; a.click() }}
+                      onClick={() => { const a = document.createElement('a'); a.href = item.refId ? `/api/generator/image/${item.refId}?download=1` : item.refThumb!; if (!item.refId) a.download = `reference-${item.id}.jpg`; a.click() }}
                       className="absolute -bottom-1 -right-1 rounded-full flex items-center justify-center transition-all hover:scale-110"
                       style={{ width: 18, height: 18, background: 'var(--accent)' }}>
                       <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5">
@@ -1165,7 +1166,7 @@ export function GeneratorPage() {
       const dataUrl = ev.target?.result as string
       setter(dataUrl)
       // Для референса (изображения) автоматически подбираем формат под его пропорции
-      if (setter === setReference) autoPickSizeByRatio(dataUrl)
+      if (setter === setReference) { autoPickSizeByRatio(dataUrl); setReferenceSourceId(null) }
     }
     reader.readAsDataURL(file)
     e.target.value = ''
@@ -1180,6 +1181,7 @@ export function GeneratorPage() {
     reader.onload = ev => {
       const dataUrl = ev.target?.result as string
       setReference(dataUrl)
+      setReferenceSourceId(null) // внешний файл — ID из библиотеки не актуален
       autoPickSizeByRatio(dataUrl)
     }
     reader.readAsDataURL(file)
@@ -1211,8 +1213,11 @@ export function GeneratorPage() {
   // Референс из библиотеки (сгенерированное изображение) — качаем как base64
   const [refPickerOpen, setRefPickerOpen] = useState(false)
   const [refDragOver, setRefDragOver] = useState(false)
+  // Если референс из библиотеки — помним его Drive ID (чтобы не заливать копию)
+  const [referenceSourceId, setReferenceSourceId] = useState<string | null>(null)
   async function pickReferenceFromLibrary(item: HistoryItem) {
     setRefPickerOpen(false)
+    setReferenceSourceId(item.id)
     try {
       const res = await fetch(`/api/generator/image/${item.id}`)
       const blob = await res.blob()
@@ -1319,6 +1324,7 @@ export function GeneratorPage() {
             modelId: selectedModelId,
             size: currentSize.label,
             referenceBase64: currentModel.supportsReference ? refSmall : undefined,
+            referenceFileId: currentModel.supportsReference && refSmall && referenceSourceId ? referenceSourceId : undefined,
             aiPrompt,
             styleName: selectedStyle
               ? (ALL_STYLES.find(s => s.id === selectedStyle)?.label ?? customStyles.find(s => s.id === selectedStyle)?.name)
@@ -1470,7 +1476,7 @@ export function GeneratorPage() {
                     <div className="flex flex-col gap-1.5">
                       <div className="relative rounded-lg overflow-hidden" style={{ height: 80 }}>
                         <img src={reference} alt="reference" className="w-full h-full object-cover" />
-                        <button onClick={() => setReference(null)}
+                        <button onClick={() => { setReference(null); setReferenceSourceId(null) }}
                           className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full flex items-center justify-center"
                           style={{ background: 'rgba(0,0,0,0.6)' }}>
                           <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
