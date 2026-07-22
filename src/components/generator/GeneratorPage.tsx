@@ -190,6 +190,17 @@ interface CustomStyle {
   createdAt: string
 }
 
+interface PromptTemplate {
+  id: string
+  name: string
+  command: string        // тег без слэша, вызов через /command
+  body: string
+  uses: number
+  createdBy: string
+  createdByName: string
+  createdAt: string
+}
+
 function UserAvatar({ name, email, image, size = 28, selected, onClick }: {
   name: string; email: string; image?: string; size?: number; selected?: boolean; onClick?: () => void
 }) {
@@ -407,6 +418,112 @@ function StyleModal({ mode, style, onClose, onSaved }: {
             <button onClick={remove} disabled={saving} className="px-3 py-2 rounded-lg text-sm" style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171' }}>Delete</button>
           )}
         </div>
+      </div>
+    </div>
+  )
+}
+
+// Модалка управления заготовками промптов ("скилами"), общими для всех.
+function PromptTemplatesModal({ templates, myEmail, onClose, onChanged }: {
+  templates: PromptTemplate[]; myEmail: string; onClose: () => void; onChanged: () => void
+}) {
+  const [editing, setEditing] = useState<{ mode: 'new' } | { mode: 'edit'; tpl: PromptTemplate } | null>(null)
+  const [name, setName] = useState('')
+  const [command, setCommand] = useState('')
+  const [body, setBody] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+
+  function openNew() { setEditing({ mode: 'new' }); setName(''); setCommand(''); setBody(''); setErr('') }
+  function openEdit(t: PromptTemplate) { setEditing({ mode: 'edit', tpl: t }); setName(t.name); setCommand(t.command); setBody(t.body); setErr('') }
+  function cleanCmd(v: string) { return v.replace(/^\/+/, '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 32) }
+
+  async function save() {
+    if (!name.trim() || !cleanCmd(command) || !body.trim()) { setErr('Fill name, command and pre-prompt'); return }
+    setSaving(true); setErr('')
+    try {
+      if (editing?.mode === 'new') {
+        const res = await fetch('/api/prompt-templates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, command, body }) })
+        const d = await res.json(); if (d.error) throw new Error(d.error)
+      } else if (editing?.mode === 'edit') {
+        const res = await fetch('/api/prompt-templates', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: editing.tpl.id, name, command, body }) })
+        const d = await res.json(); if (d.error) throw new Error(d.error)
+      }
+      setSaving(false); setEditing(null); onChanged()
+    } catch (e: any) { setErr(e.message); setSaving(false) }
+  }
+
+  async function remove(t: PromptTemplate) {
+    if (!confirm(`Delete template "${t.name}"?`)) return
+    try {
+      const res = await fetch('/api/prompt-templates', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: t.id }) })
+      const d = await res.json(); if (d.error) throw new Error(d.error)
+      onChanged()
+    } catch (e: any) { alert(e.message) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="rounded-2xl p-5 w-full max-w-lg max-h-[85vh] flex flex-col" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-sm font-semibold">Prompt templates</span>
+          <button onClick={onClose} className="opacity-50 hover:opacity-100">×</button>
+        </div>
+        <p className="text-[11px] mb-3" style={{ color: 'var(--text-muted)' }}>
+          Big reusable pre-prompts. Type your short prompt then <code>/command</code> — the AI button turns into <b>Mix</b> and merges them.
+        </p>
+
+        {!editing && (
+          <>
+            <div className="flex-1 overflow-y-auto flex flex-col gap-2 mb-3">
+              {templates.length === 0 && <p className="text-xs py-6 text-center" style={{ color: 'var(--text-muted)' }}>No templates yet.</p>}
+              {templates.map(t => (
+                <div key={t.id} className="rounded-lg p-3" style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold truncate">{t.name}</span>
+                        <code className="text-[11px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)' }}>/{t.command}</code>
+                      </div>
+                      <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>by {t.createdByName} · used {t.uses}×</p>
+                    </div>
+                    {t.createdBy === myEmail && (
+                      <div className="flex gap-1 flex-shrink-0">
+                        <button onClick={() => openEdit(t)} className="text-xs px-2 py-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text)' }}>Edit</button>
+                        <button onClick={() => remove(t)} className="text-xs px-2 py-1 rounded-lg" style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171' }}>Delete</button>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-[11px] mt-1.5 line-clamp-2" style={{ color: 'var(--text-muted)' }}>{t.body}</p>
+                </div>
+              ))}
+            </div>
+            <button onClick={openNew} className="py-2 rounded-lg text-sm font-semibold" style={{ background: 'var(--accent)', color: '#fff' }}>+ New template</button>
+          </>
+        )}
+
+        {editing && (
+          <div className="flex-1 overflow-y-auto flex flex-col">
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="Template name (e.g. Product hero shot)" maxLength={60}
+              className="w-full rounded-lg px-3 py-2 text-sm outline-none mb-2" style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+            <div className="flex items-center gap-1 mb-2 rounded-lg px-3 py-2" style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
+              <span style={{ color: 'var(--text-muted)' }}>/</span>
+              <input value={command} onChange={e => setCommand(cleanCmd(e.target.value))} placeholder="command (e.g. mipromt)" maxLength={32}
+                className="flex-1 text-sm outline-none bg-transparent" style={{ color: 'var(--text)' }} />
+            </div>
+            <textarea value={body} onChange={e => setBody(e.target.value)} rows={10} maxLength={8000}
+              placeholder="The big detailed pre-prompt with all the important details, structure and quality guidance…"
+              className="w-full rounded-lg px-3 py-2 text-sm outline-none resize-none mb-2 flex-1" style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+            {err && <p className="text-xs mb-2" style={{ color: '#f87171' }}>{err}</p>}
+            <div className="flex gap-2">
+              <button onClick={save} disabled={saving} className="flex-1 py-2 rounded-lg text-sm font-semibold" style={{ background: 'var(--accent)', color: '#fff' }}>
+                {saving ? '…' : editing.mode === 'new' ? 'Create' : 'Save'}
+              </button>
+              <button onClick={() => setEditing(null)} disabled={saving} className="px-3 py-2 rounded-lg text-sm" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text)' }}>Cancel</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1078,6 +1195,14 @@ export function GeneratorPage() {
     fetch('/api/styles').then(r => r.json()).then(d => { if (d.styles) setCustomStyles(d.styles) }).catch(() => {})
   }, [])
   useEffect(() => { loadStyles() }, [loadStyles])
+  // Заготовки промптов ("скилы", общие из Drive)
+  const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>([])
+  const [templatesOpen, setTemplatesOpen] = useState(false)
+  const [mixing, setMixing] = useState(false)
+  const loadTemplates = useCallback(() => {
+    fetch('/api/prompt-templates').then(r => r.json()).then(d => { if (d.templates) setPromptTemplates(d.templates) }).catch(() => {})
+  }, [])
+  useEffect(() => { loadTemplates() }, [loadTemplates])
   const [reference, setReference] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
   const [describing, setDescribing] = useState(false)
@@ -1224,6 +1349,45 @@ export function GeneratorPage() {
     setDescribing(false)
   }
 
+  // Ищем в промпте тег /command, совпадающий с одной из заготовок
+  const matchedTemplate = (() => {
+    const tokens = prompt.match(/\/([a-zA-Z0-9_-]+)/g)
+    if (!tokens) return null
+    for (const tok of tokens) {
+      const cmd = tok.slice(1).toLowerCase()
+      const t = promptTemplates.find(pt => pt.command === cmd)
+      if (t) return t
+    }
+    return null
+  })()
+
+  // Смешиваем короткий промпт пользователя с большой заготовкой через GPT
+  async function handleMix() {
+    if (!matchedTemplate || mixing) return
+    setMixing(true)
+    setQueueActive('openai', true)
+    setError(null)
+    try {
+      // Убираем сам тег /command из пользовательского текста
+      const cleanUser = prompt.replace(new RegExp(`\\/${matchedTemplate.command}\\b`, 'gi'), '').replace(/\s{2,}/g, ' ').trim()
+      const res = await fetch('/api/generator/mix', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userPrompt: cleanUser, templateBody: matchedTemplate.body }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Mix failed')
+      setPrompt(data.mixed)
+      // Счётчик использований заготовки
+      fetch('/api/prompt-templates', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: matchedTemplate.id, incrementUse: true }) })
+        .then(() => setPromptTemplates(prev => prev.map(t => t.id === matchedTemplate.id ? { ...t, uses: t.uses + 1 } : t)))
+        .catch(() => {})
+    } catch (e: any) {
+      setError(e.message)
+    }
+    setQueueActive('openai', false)
+    setMixing(false)
+  }
+
   async function handleGenerate() {
     if (!canGenerate) return
     setGenerating(true)
@@ -1295,6 +1459,16 @@ export function GeneratorPage() {
           style={styleModal.mode === 'edit' ? styleModal.style : undefined}
           onClose={() => setStyleModal(null)}
           onSaved={() => { setStyleModal(null); loadStyles() }}
+        />
+      )}
+
+      {/* Модалка заготовок промптов */}
+      {templatesOpen && (
+        <PromptTemplatesModal
+          templates={promptTemplates}
+          myEmail={myEmail}
+          onClose={() => setTemplatesOpen(false)}
+          onChanged={loadTemplates}
         />
       )}
 
@@ -1460,16 +1634,45 @@ export function GeneratorPage() {
               <div className="mb-4 flex-1 flex flex-col">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Prompt</span>
-                  <button onClick={() => setAiPrompt(o => !o)}
-                    className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-lg transition-all"
-                    style={{ background: aiPrompt ? 'rgba(79,110,247,0.15)' : 'rgba(255,255,255,0.05)',
-                      color: aiPrompt ? 'var(--accent)' : 'var(--text-muted)',
-                      border: `1px solid ${aiPrompt ? 'var(--accent)' : 'transparent'}` }}>
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-                    </svg>
-                    AI
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    {/* Доступ к заготовкам промптов */}
+                    <button onClick={() => setTemplatesOpen(true)} title="Prompt templates"
+                      className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-lg transition-all"
+                      style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', border: '1px solid transparent' }}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                      </svg>
+                      Templates
+                    </button>
+                    {matchedTemplate ? (
+                      // Найден тег заготовки → кнопка Mix (смешивает через GPT)
+                      <button onClick={handleMix} disabled={mixing} title={`Mix with /${matchedTemplate.command}`}
+                        className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-lg transition-all"
+                        style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)', border: '1px solid var(--accent)' }}>
+                        {mixing ? (
+                          <svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/>
+                          </svg>
+                        ) : (
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M21 3l-7.5 7.5"/><path d="M3 3l7.5 7.5"/><path d="M12 12v9"/>
+                          </svg>
+                        )}
+                        {mixing ? 'Mixing…' : 'Mix'}
+                      </button>
+                    ) : (
+                      <button onClick={() => setAiPrompt(o => !o)}
+                        className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-lg transition-all"
+                        style={{ background: aiPrompt ? 'rgba(79,110,247,0.15)' : 'rgba(255,255,255,0.05)',
+                          color: aiPrompt ? 'var(--accent)' : 'var(--text-muted)',
+                          border: `1px solid ${aiPrompt ? 'var(--accent)' : 'transparent'}` }}>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                        </svg>
+                        AI
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
                   placeholder={isRestyle ? 'Restyle reference with selected style...' : 'Describe the image...'}
