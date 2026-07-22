@@ -1266,9 +1266,11 @@ export function GeneratorPage() {
     e.target.value = ''
   }
 
-  // Референс из файла (drag&drop) — читаем File и ставим как референс
+  // Референс из файла (drag&drop / буфер) — читаем File и ставим как референс.
+  // Тип проверяем мягко: отбрасываем только если он ЯВНО не картинка;
+  // при перетягивании из папки / вставке type часто приходит пустым.
   function setReferenceFromFile(file: File) {
-    if (!file.type.startsWith('image/')) return
+    if (file.type && !file.type.startsWith('image/')) return
     const reader = new FileReader()
     reader.onload = ev => {
       const dataUrl = ev.target?.result as string
@@ -1283,15 +1285,19 @@ export function GeneratorPage() {
   useEffect(() => {
     function onPaste(e: ClipboardEvent) {
       if (tab !== 'image' || !currentModel.supportsReference) return
+      // Берём любой файл из буфера (не только с MIME image/*, т.к. он часто пуст)
       const items = e.clipboardData?.items
-      if (!items) return
-      for (const it of Array.from(items)) {
-        if (it.type.startsWith('image/')) {
-          const f = it.getAsFile()
-          if (f) { e.preventDefault(); setReferenceFromFile(f) }
-          break
+      if (items) {
+        for (const it of Array.from(items)) {
+          if (it.kind === 'file') {
+            const f = it.getAsFile()
+            if (f && (!f.type || f.type.startsWith('image/'))) { e.preventDefault(); setReferenceFromFile(f); return }
+          }
         }
       }
+      // Фолбэк: некоторые браузеры кладут файл только в clipboardData.files
+      const file = e.clipboardData?.files?.[0]
+      if (file && (!file.type || file.type.startsWith('image/'))) { e.preventDefault(); setReferenceFromFile(file) }
     }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)

@@ -783,7 +783,8 @@ function ImageUploadBox({ label, preview, onUpload, onClear, onPickFromLibrary, 
   const ref = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
   async function processFile(file: File) {
-    if (!file.type.startsWith('image/')) return
+    // Мягкая проверка: отбрасываем только явно не-картинки; при drag/paste type часто пуст
+    if (file.type && !file.type.startsWith('image/')) return
     const reader = new FileReader()
     reader.onload = async ev => {
       const url = ev.target?.result as string
@@ -888,22 +889,27 @@ export function VideoPage() {
   useEffect(() => {
     function onPaste(e: ClipboardEvent) {
       if (videoMode !== 'standard' && videoMode !== 'multishot') return
+      // Берём любой файл из буфера (MIME image/* часто пуст при вставке)
+      const setFrame = (f: File) => {
+        e.preventDefault()
+        const reader = new FileReader()
+        reader.onload = async ev => {
+          const compressed = await shrinkForVideo(ev.target?.result as string)
+          setFirstFrame(compressed.split(',')[1])
+        }
+        reader.readAsDataURL(f)
+      }
       const items = e.clipboardData?.items
-      if (!items) return
-      for (const it of Array.from(items)) {
-        if (it.type.startsWith('image/')) {
-          const f = it.getAsFile()
-          if (!f) break
-          e.preventDefault()
-          const reader = new FileReader()
-          reader.onload = async ev => {
-            const compressed = await shrinkForVideo(ev.target?.result as string)
-            setFirstFrame(compressed.split(',')[1])
+      if (items) {
+        for (const it of Array.from(items)) {
+          if (it.kind === 'file') {
+            const f = it.getAsFile()
+            if (f && (!f.type || f.type.startsWith('image/'))) { setFrame(f); return }
           }
-          reader.readAsDataURL(f)
-          break
         }
       }
+      const file = e.clipboardData?.files?.[0]
+      if (file && (!file.type || file.type.startsWith('image/'))) setFrame(file)
     }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
