@@ -435,104 +435,70 @@ function StylePicker({ selected, onSelect, customStyles, myEmail, onAdd, onEdit 
     setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 8)
   }, [])
 
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Style</span>
-        {selected && (
-          <button onClick={() => onSelect(null)} className="text-xs px-2 py-0.5 rounded transition-all"
-            style={{ color: 'var(--text-muted)', background: 'rgba(255,255,255,0.05)' }}>
-            Clear
-          </button>
-        )}
-      </div>
-      <div className="relative">
-        <div ref={scrollRef} onScroll={handleScroll}
-          className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' } as any}>
-          {ALL_STYLES.map(style => (
-            <button key={style.id}
-              onClick={() => onSelect(selected === style.id ? null : style.id)}
-              className="flex-shrink-0 flex flex-col items-center gap-1 transition-all"
-              title={style.label}>
-              <div className="rounded-lg overflow-hidden transition-all"
-                style={{ width: 52, height: 68,
-                  outline: selected === style.id ? '2px solid var(--accent)' : '2px solid transparent',
-                  outlineOffset: 2,
-                  opacity: selected && selected !== style.id ? 0.45 : 1 }}>
-                <img src={`/styles/${style.image}`} alt={style.label} className="w-full h-full object-cover" />
-              </div>
-              <span className="text-center leading-tight"
-                style={{ fontSize: 9,
-                  color: selected === style.id ? 'var(--accent)' : 'var(--text-muted)',
-                  fontWeight: selected === style.id ? 600 : 400,
-                  maxWidth: 52, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {style.label}
-              </span>
-            </button>
-          ))}
+  // Оба блока по умолчанию свёрнуты; разворачиваются кликом по заголовку
+  const [presetsOpen, setPresetsOpen] = useState(false)
+  const [customOpen, setCustomOpen] = useState(false)
 
-          {/* Кастомные стили (сортированы по использованиям на сервере) */}
-          {customStyles.map(cs => (
-            <div key={cs.id} className="flex-shrink-0 flex flex-col items-center gap-1 relative group">
-              <button onClick={() => onSelect(selected === cs.id ? null : cs.id)} title={`${cs.name} · by ${cs.createdByName} · used ${cs.uses}×`}
-                className="transition-all">
-                <div className="rounded-lg overflow-hidden transition-all flex items-center justify-center"
-                  style={{ width: 52, height: 68,
-                    outline: selected === cs.id ? '2px solid var(--accent)' : '2px solid transparent', outlineOffset: 2,
-                    opacity: selected && selected !== cs.id ? 0.45 : 1,
-                    background: cs.image ? undefined : 'linear-gradient(135deg,#4f6ef7,#9c27b0)' }}>
-                  {cs.image
-                    ? <img src={cs.image} alt={cs.name} className="w-full h-full object-cover" />
-                    : <span style={{ fontSize: 20, color: '#fff' }}>✦</span>}
-                </div>
-              </button>
-              <span className="text-center leading-tight" style={{ fontSize: 9, color: selected === cs.id ? 'var(--accent)' : 'var(--text-muted)', fontWeight: selected === cs.id ? 600 : 400, maxWidth: 52, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {cs.name}
-              </span>
-              {/* Автор может редактировать — карандаш в углу при наведении */}
-              {cs.createdBy === myEmail && (
-                <button onClick={() => onEdit(cs)} title="Edit style"
-                  className="absolute top-0 right-0 w-4 h-4 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
-                  style={{ background: 'rgba(0,0,0,0.7)', color: '#fff', fontSize: 8 }}>✎</button>
-              )}
-            </div>
-          ))}
-
-          {/* Кнопка добавления своего стиля */}
-          <button onClick={onAdd} title="Create custom style"
-            className="flex-shrink-0 flex flex-col items-center gap-1 transition-all">
-            <div className="rounded-lg flex items-center justify-center transition-all hover:border-[var(--accent)]"
-              style={{ width: 52, height: 68, border: '2px dashed var(--border)', color: 'var(--text-muted)' }}>
-              <span style={{ fontSize: 24, lineHeight: 1 }}>+</span>
-            </div>
-            <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>New</span>
-          </button>
+  const StyleTile = ({ id, label, imgSrc, gradient, editable }: { id: string; label: string; imgSrc?: string; gradient?: boolean; editable?: CustomStyle }) => (
+    <div className="flex-shrink-0 flex flex-col items-center gap-1 relative group">
+      <button onClick={() => onSelect(selected === id ? null : id)} title={label} className="transition-all">
+        <div className="rounded-lg overflow-hidden transition-all flex items-center justify-center"
+          style={{ width: 52, height: 68,
+            outline: selected === id ? '2px solid var(--accent)' : '2px solid transparent', outlineOffset: 2,
+            opacity: selected && selected !== id ? 0.45 : 1,
+            background: gradient ? 'linear-gradient(135deg,#4f6ef7,#9c27b0)' : undefined }}>
+          {imgSrc ? <img src={imgSrc} alt={label} className="w-full h-full object-cover" /> : <span style={{ fontSize: 20, color: '#fff' }}>✦</span>}
         </div>
-        {/* Left arrow */}
-        {!atStart && (
-          <div className="absolute top-0 left-0 h-full flex items-center justify-start"
-            style={{ width: 40, background: 'linear-gradient(to left, transparent, var(--surface) 70%)' }}>
-            <button
-              onClick={() => scrollRef.current?.scrollBy({ left: -120, behavior: 'smooth' })}
-              className="flex items-center justify-center w-6 h-6 rounded-full transition-all hover:bg-white/10"
-              style={{ marginLeft: 2, color: 'var(--text-muted)' }}>
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path d="M8 2L4 6l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </button>
+      </button>
+      <span className="text-center leading-tight" style={{ fontSize: 9, color: selected === id ? 'var(--accent)' : 'var(--text-muted)', fontWeight: selected === id ? 600 : 400, maxWidth: 52, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {label}
+      </span>
+      {editable && (
+        <button onClick={() => onEdit(editable)} title="Edit style"
+          className="absolute top-0 right-0 w-4 h-4 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
+          style={{ background: 'rgba(0,0,0,0.7)', color: '#fff', fontSize: 8 }}>✎</button>
+      )}
+    </div>
+  )
+
+  const SectionHeader = ({ title, open, onToggle }: { title: string; open: boolean; onToggle: () => void }) => (
+    <button onClick={onToggle} className="w-full flex items-center justify-between mb-2">
+      <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{title}</span>
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="transition-transform" style={{ transform: open ? 'rotate(180deg)' : 'none', color: 'var(--text-muted)' }}>
+        <path d="M3 4.5L6 7.5l3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    </button>
+  )
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Пресетные стили (неизменные) */}
+      <div>
+        <SectionHeader title="Style" open={presetsOpen} onToggle={() => setPresetsOpen(o => !o)} />
+        {presetsOpen && (
+          <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' } as any}>
+            {ALL_STYLES.map(style => (
+              <StyleTile key={style.id} id={style.id} label={style.label} imgSrc={`/styles/${style.image}`} />
+            ))}
           </div>
         )}
-        {/* Right arrow */}
-        {!atEnd && (
-          <div className="absolute top-0 right-0 h-full flex items-center justify-end"
-            style={{ width: 40, background: 'linear-gradient(to right, transparent, var(--surface) 70%)' }}>
-            <button
-              onClick={() => scrollRef.current?.scrollBy({ left: 120, behavior: 'smooth' })}
-              className="flex items-center justify-center w-6 h-6 rounded-full transition-all hover:bg-white/10"
-              style={{ marginRight: 2, color: 'var(--text-muted)' }}>
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
+      </div>
+
+      {/* Кастомные стили */}
+      <div>
+        <SectionHeader title="Custom styles" open={customOpen} onToggle={() => setCustomOpen(o => !o)} />
+        {customOpen && (
+          <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' } as any}>
+            {customStyles.map(cs => (
+              <StyleTile key={cs.id} id={cs.id} label={cs.name} imgSrc={cs.image || undefined} gradient={!cs.image}
+                editable={cs.createdBy === myEmail ? cs : undefined} />
+            ))}
+            <button onClick={onAdd} title="Create custom style" className="flex-shrink-0 flex flex-col items-center gap-1 transition-all">
+              <div className="rounded-lg flex items-center justify-center transition-all hover:border-[var(--accent)]"
+                style={{ width: 52, height: 68, border: '2px dashed var(--border)', color: 'var(--text-muted)' }}>
+                <span style={{ fontSize: 24, lineHeight: 1 }}>+</span>
+              </div>
+              <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>New</span>
             </button>
           </div>
         )}
