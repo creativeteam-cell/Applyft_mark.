@@ -45,6 +45,7 @@ export async function GET(req: NextRequest) {
         refId: meta.refId || null,
         sourceVideoId: meta.sourceVideoId || null,
         quality: meta.quality || null,
+        targetLang: meta.targetLang || null,
         userName: meta.userName || '',
         userEmail: meta.userEmail || '',
         userImage: meta.userImage || '',

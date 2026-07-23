@@ -14,6 +14,7 @@ const nextConfig = {
     // ffmpeg-static бинарник не отслеживается автоматически — включаем явно
     outputFileTracingIncludes: {
       '/api/video/last-frame/[id]': ['./node_modules/ffmpeg-static/**'],
+      '/api/video/translate': ['./node_modules/ffmpeg-static/**'],
     },
   },
 }

@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
   const userToken = (session as any).accessToken
   if (!userToken) return NextResponse.json({ error: 'No access token' }, { status: 401 })
 
-  const { videoUrl, klingVideoId, prompt, model, duration, aspectRatio, sound, inputType, units, refThumb, refFull, sourceVideoId, quality } = await req.json()
+  const { videoUrl, klingVideoId, prompt, model, duration, aspectRatio, sound, inputType, units, refThumb, refFull, sourceVideoId, quality, targetLang } = await req.json()
   if (!videoUrl) return NextResponse.json({ error: 'videoUrl required' }, { status: 400 })
 
   try {
@@ -60,6 +60,7 @@ export async function POST(req: NextRequest) {
       refId, // ID оригинала референса в Drive (для скачивания)
       sourceVideoId: sourceVideoId || '', // ID видео, которое это продолжает
       quality: quality || '', // качество: std | pro | 4k
+      targetLang: targetLang || '', // код языка, если это перевод
       userName: session.user.name || '',
       userEmail: session.user.email || '',
       userImage: session.user.image || '',

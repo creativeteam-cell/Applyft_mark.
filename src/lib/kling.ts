@@ -207,6 +207,7 @@ export async function createOmniVideoTask(params: {
   model_name: 'kling-video-o1' | 'kling-v3-omni'
   prompt?: string
   first_frame?: string    // raw base64 (no data: prefix) or URL
+  last_frame?: string     // опциональный последний кадр (для целостности перевода)
   duration?: string       // '3'..'15' (o1: max 10, omni: max 15)
   mode?: 'std' | 'pro' | '4k'
   aspect_ratio?: '16:9' | '9:16' | '1:1'
@@ -246,6 +247,8 @@ export async function createOmniVideoTask(params: {
     if (params.video_refer_type !== 'base' && params.aspect_ratio) body.aspect_ratio = params.aspect_ratio
   } else if (params.first_frame) {
     body.image_list = [{ image_url: params.first_frame, type: 'first_frame' }]
+    // Последний кадр — для стыковки/целостности (напр. перевод видео)
+    if (params.last_frame) body.image_list.push({ image_url: params.last_frame, type: 'last_frame' })
   } else {
     // aspect_ratio is only valid without first-frame reference / video editing
     body.aspect_ratio = params.aspect_ratio ?? '16:9'
