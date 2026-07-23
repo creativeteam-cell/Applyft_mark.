@@ -45,32 +45,33 @@ export async function POST(req: NextRequest) {
   const lastPath = join(tmpdir(), `tr_${safeId}_${stamp}_l.jpg`)
 
   try {
-    // 1. Переводим реплики через GPT (только произносимый текст, остальное 1:1).
-    //    Делаем это ПЕРВЫМ — если речи нет, не тратим генерацию Kling.
-    const sys = `You localize AI video-generation prompts. The prompt describes a video and includes spoken DIALOGUE / VOICE lines (usually in quotes after labels like DIALOGUE or VOICE).
-Translate ONLY the words a character actually SPEAKS (dialogue, voice-over, lyrics) into ${langName}.
-Keep EVERYTHING else byte-for-byte identical and in the original language: scene description, camera, character appearance, sound-effect descriptions, timing, and labels themselves (e.g. "DIALOGUE (0:00-0:03):").
-Return STRICT JSON: {"translated": string, "hasDialogue": boolean}. Set hasDialogue=false only if there are truly no spoken lines to translate.`
+    // 1. Проверяем, есть ли вообще речь (реплики) — по маркерам в промте.
+    //    Если нет, не тратим генерацию Kling.
+    const srcPrompt = prompt || ''
+    const hasDialogue = /\bDIALOGUE\b|\bVOICE\b|["“”«][^"”»]{2,}["“”»]/i.test(srcPrompt)
+    if (!hasDialogue) {
+      return NextResponse.json({ error: 'No spoken dialogue found in this video to translate.' }, { status: 422 })
+    }
 
-    let translated = prompt || ''
-    let hasDialogue = true
+    // 2. Переводим реплики через GPT (обычный текст, без JSON — кириллица тяжёлая по токенам).
+    //    При ошибке НЕ откатываемся к оригиналу (иначе видео выйдет без перевода) — возвращаем ошибку.
+    const sys = `You localize AI video-generation prompts. The prompt describes a video and includes spoken DIALOGUE / VOICE lines (usually in quotes after labels like DIALOGUE or VOICE).
+Rewrite the prompt translating ONLY the words a character actually SPEAKS (dialogue, voice-over, lyrics) into ${langName}.
+Keep EVERYTHING else byte-for-byte identical and in the original language: scene description, camera, character appearance, sound-effect descriptions, timing, and the labels themselves (e.g. "DIALOGUE (0:00-0:03):").
+Return ONLY the full rewritten prompt as plain text — no preamble, no quotes around the whole thing, no explanations.`
+
+    let translated: string
     try {
       const gpt = await openai.chat.completions.create({
         model: 'gpt-4o',
-        messages: [{ role: 'system', content: sys }, { role: 'user', content: prompt || '' }],
-        response_format: { type: 'json_object' },
+        messages: [{ role: 'system', content: sys }, { role: 'user', content: srcPrompt }],
         temperature: 0.2,
-        max_tokens: 1500,
-      }, { timeout: 45000 })
-      const parsed = JSON.parse(gpt.choices[0]?.message?.content || '{}')
-      if (typeof parsed.translated === 'string' && parsed.translated.trim()) translated = parsed.translated
-      hasDialogue = parsed.hasDialogue !== false
-    } catch (e) {
-      console.warn('[translate] GPT parse failed, using original prompt', e)
-    }
-
-    if (!hasDialogue) {
-      return NextResponse.json({ error: 'No spoken dialogue found in this video to translate.' }, { status: 422 })
+        max_tokens: 4000,
+      }, { timeout: 50000 })
+      translated = gpt.choices[0]?.message?.content?.trim() || ''
+      if (!translated) throw new Error('empty translation')
+    } catch (e: any) {
+      return NextResponse.json({ error: 'Translation failed: ' + (e.message || 'GPT error') }, { status: 502 })
     }
 
     // 2. Скачиваем видео и достаём первый кадр для целостности.

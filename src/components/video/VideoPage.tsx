@@ -42,6 +42,19 @@ function qualityLabel(q?: string | null): string | null {
   return null
 }
 
+// Ближайший «красивый» формат по реальным размерам видео
+function aspectFromDims(w: number, h: number): string | null {
+  if (!w || !h) return null
+  const target = w / h
+  const opts: [string, number][] = [
+    ['16:9', 16 / 9], ['9:16', 9 / 16], ['1:1', 1], ['4:3', 4 / 3],
+    ['3:4', 3 / 4], ['3:2', 3 / 2], ['2:3', 2 / 3], ['21:9', 21 / 9],
+  ]
+  let best = opts[0][0], bestDiff = Infinity
+  for (const [label, r] of opts) { const d = Math.abs(r - target); if (d < bestDiff) { bestDiff = d; best = label } }
+  return best
+}
+
 // Языки для перевода видео (код → название для GPT)
 const TRANSLATE_LANGUAGES: [string, string][] = [
   ['EN', 'English'], ['PT', 'Portuguese'], ['SP', 'Spanish'], ['FR', 'French'],
@@ -613,6 +626,7 @@ function VideoCardModal({ item, onClose, onRefresh, onSelectItem, onContinue, pr
   const [err, setErr] = useState('')
   const [enhancingExt, setEnhancingExt] = useState(false)
   const [lastFrameLoading, setLastFrameLoading] = useState(false)
+  const [realAspect, setRealAspect] = useState<string | null>(null) // формат по реальным размерам видео
   const pollRef = useRef<ReturnType<typeof setInterval>|null>(null)
 
   // Скачать последний кадр видео (ffmpeg на сервере)
@@ -706,13 +720,14 @@ function VideoCardModal({ item, onClose, onRefresh, onSelectItem, onContinue, pr
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1l10 10M11 1L1 11" stroke="white" strokeWidth="1.5" strokeLinecap="round"/></svg>
         </button>
         <div className="flex-shrink-0 flex items-center justify-center" style={{ width: 360, background: 'rgba(0,0,0,0.5)' }}>
-          <video src={`/api/video/file/${item.id}`} controls autoPlay loop className="w-full max-h-[90vh] object-contain" />
+          <video src={`/api/video/file/${item.id}`} controls autoPlay loop className="w-full max-h-[90vh] object-contain"
+            onLoadedMetadata={e => setRealAspect(aspectFromDims(e.currentTarget.videoWidth, e.currentTarget.videoHeight))} />
         </div>
         <div className="flex flex-col flex-1 min-w-0 overflow-y-auto p-5">
           <div className="flex items-center gap-2 mb-4 flex-wrap">
             <span className="rounded px-2 py-1 text-xs font-mono font-medium" style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)' }}>{item.model.replace('kling-','')}</span>
             <span className="rounded px-2 py-1 text-xs font-mono" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>{item.duration}s</span>
-            {item.aspectRatio && <span className="rounded px-2 py-1 text-xs font-mono" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>{item.aspectRatio}</span>}
+            {(realAspect || item.aspectRatio) && <span className="rounded px-2 py-1 text-xs font-mono" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>{realAspect || item.aspectRatio}</span>}
             {qualityLabel(item.quality) && <span className="rounded px-2 py-1 text-xs font-mono" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>{qualityLabel(item.quality)}</span>}
             {item.targetLang && <span className="rounded px-2 py-1 text-xs font-mono font-medium" style={{ background: 'rgba(52,168,83,0.15)', color: '#34a853' }}>🌐 {item.targetLang}</span>}
             {item.createdTime && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{new Date(item.createdTime).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}</span>}
