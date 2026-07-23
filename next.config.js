@@ -11,6 +11,10 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: '20mb',
     },
+    // ffmpeg-static бинарник не отслеживается автоматически — включаем явно
+    outputFileTracingIncludes: {
+      '/api/video/last-frame/[id]': ['./node_modules/ffmpeg-static/**'],
+    },
   },
 }
 

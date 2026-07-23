@@ -585,7 +585,23 @@ function VideoCardModal({ item, onClose, onRefresh, onSelectItem, onContinue, pr
   const [deleting, setDeleting] = useState(false)
   const [err, setErr] = useState('')
   const [enhancingExt, setEnhancingExt] = useState(false)
+  const [lastFrameLoading, setLastFrameLoading] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval>|null>(null)
+
+  // Скачать последний кадр видео (ffmpeg на сервере)
+  async function handleLastFrame() {
+    if (lastFrameLoading) return
+    setLastFrameLoading(true); setErr('')
+    try {
+      const res = await fetch(`/api/video/last-frame/${item.id}`)
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Failed to extract last frame')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url; a.download = `last-frame-${item.id}.jpg`; a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: any) { setErr(e.message) }
+    setLastFrameLoading(false)
+  }
 
   function stopPoll() { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null } }
 
@@ -820,6 +836,16 @@ function VideoCardModal({ item, onClose, onRefresh, onSelectItem, onContinue, pr
             <a href={`/api/video/file/${item.id}?download=1`} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium" style={{ background: 'var(--accent)', color: '#fff' }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download
             </a>
+            <button onClick={handleLastFrame} disabled={lastFrameLoading} title="Download the last frame as an image"
+              className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-all"
+              style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text)' }}>
+              {lastFrameLoading ? (
+                <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15l5-5 4 4 3-3 6 6"/></svg>
+              )}
+              Last frame
+            </button>
             <button onClick={handleDelete} disabled={deleting}
               className="flex items-center justify-center px-3 py-2.5 rounded-lg text-sm transition-all"
               style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171' }}>
