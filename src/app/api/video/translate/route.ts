@@ -73,7 +73,8 @@ Return STRICT JSON: {"translated": string, "hasDialogue": boolean}. Set hasDialo
       return NextResponse.json({ error: 'No spoken dialogue found in this video to translate.' }, { status: 422 })
     }
 
-    // 2. Скачиваем видео и достаём первый + последний кадр для целостности
+    // 2. Скачиваем видео и достаём первый кадр для целостности.
+    //    (last_frame endpoint omni-video отклоняет — оставляем замок по первому кадру.)
     const drive = getDriveClient()
     const dl = await (drive.files.get as any)(
       { fileId, alt: 'media', supportsAllDrives: true },
@@ -81,17 +82,14 @@ Return STRICT JSON: {"translated": string, "hasDialogue": boolean}. Set hasDialo
     ) as any
     await writeFile(inPath, Buffer.from(dl.data))
     await extractFrame(inPath, firstPath, 'first')
-    await extractFrame(inPath, lastPath, 'last')
     const firstB64 = (await readFile(firstPath)).toString('base64')
-    const lastB64 = (await readFile(lastPath)).toString('base64')
 
-    // 3. Регенерация на Omni с переведёнными репликами, звук вкл, first+last кадр
+    // 3. Регенерация на Omni с переведёнными репликами, звук вкл, первый кадр
     const dur = String(Math.min(Number(duration) || 5, 15))
     const { task_id } = await createOmniVideoTask({
       model_name: 'kling-v3-omni',
       prompt: translated,
       first_frame: firstB64,
-      last_frame: lastB64,
       duration: dur,
       mode: 'pro',
       sound: 'on',

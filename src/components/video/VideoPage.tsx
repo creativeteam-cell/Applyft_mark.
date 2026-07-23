@@ -84,7 +84,7 @@ const MODELS: ModelDef[] = [
   },
   {
     id: 'kling-v3-omni', label: 'Kling 3.0 Omni', description: 'Multi-asset, motion control, 4K output', tags: ['Pro', 'HOT'],
-    supportsSound: true, supports4K: true, supportsLastFrame: true, supportsMultishot: true, supportsMotionControl: true, isAvatar: false, supportsImageList: true,
+    supportsSound: true, supports4K: true, supportsLastFrame: false, supportsMultishot: true, supportsMotionControl: true, isAvatar: false, supportsImageList: true,
     modes: ['standard', 'multishot', 'motionControl'], aspectRatios: ['16:9', '9:16', '1:1'],
   },
   {
