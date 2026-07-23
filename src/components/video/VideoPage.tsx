@@ -4,7 +4,7 @@ import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useSession } from 'next-auth/react'
 import { setQueueActive } from '@/lib/queueClient'
 import { UsageBadge } from '@/components/ui/UsageBadge'
-import { PromptTemplatesModal, usePromptTemplates, findTemplateInPrompt, stripCommand, MixButton, TemplatesButton } from '@/components/generator/PromptTemplates'
+import { PromptTemplate, PromptTemplatesModal, usePromptTemplates, findTemplateInPrompt, stripCommand, MixButton, TemplatesButton } from '@/components/generator/PromptTemplates'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
