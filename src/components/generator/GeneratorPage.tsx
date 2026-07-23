@@ -18,7 +18,7 @@ function saveLS(key: string, value: unknown) {
 
 
 // Shrink image to max px on longest side (JPEG) to stay under Vercel's 4.5MB payload limit
-function shrinkImage(dataUrl: string, maxPx = 1536): Promise<string> {
+function shrinkImage(dataUrl: string, maxPx = 1536, quality = 0.85): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image()
     img.onload = () => {
@@ -28,7 +28,7 @@ function shrinkImage(dataUrl: string, maxPx = 1536): Promise<string> {
       const canvas = document.createElement('canvas')
       canvas.width = w; canvas.height = h
       canvas.getContext('2d')!.drawImage(img, 0, 0, w, h)
-      resolve(canvas.toDataURL('image/jpeg', 0.85))
+      resolve(canvas.toDataURL('image/jpeg', quality))
     }
     img.onerror = () => resolve(dataUrl)
     img.src = dataUrl
@@ -1301,8 +1301,9 @@ export function GeneratorPage() {
     setQueueActive('gemini', true)
     setError(null)
     try {
-      // Shrink reference before sending — 2K image = ~3-5MB base64, Vercel limit is 4.5MB
-      const refSmall = reference ? await shrinkImage(reference) : null
+      // Референс: 2048px/0.9 — качество для генерации И для сохранения оригинала
+      // (его потом можно скачать из карточки). Остаётся под лимитом Vercel 4.5MB.
+      const refSmall = reference ? await shrinkImage(reference, 2048, 0.9) : null
 
       let res: Response
       if (isResize) {

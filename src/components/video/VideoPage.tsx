@@ -433,6 +433,16 @@ function ProcessingVideoCard({ pv, onDismiss }: { pv: ProcessingVideo; onDismiss
   const timeStr = `${mm}:${ss.toString().padStart(2, '0')}`
   const isError = pv.status === 'error'
 
+  // Оценка времени по модели/длине — намеренно с запасом (лучше больше, чем по факту)
+  const etaLabel = (() => {
+    const m = pv.model.toLowerCase()
+    if (m.includes('avatar')) return 'usually 5–20 min'
+    if (m.includes('o1') || m.includes('omni')) return pv.duration >= 10 ? 'usually 10–20 min' : 'usually 5–12 min'
+    if (m.includes('turbo')) return 'usually 2–6 min'
+    if (m.includes('dubbing')) return 'usually 5–15 min'
+    return pv.duration >= 10 ? 'usually 5–12 min' : 'usually 3–8 min'
+  })()
+
   return (
     <div className="rounded-xl overflow-hidden relative flex flex-col"
       style={{ aspectRatio: '1/1', background: 'rgba(255,255,255,0.04)', border: `1px solid ${isError ? 'rgba(248,113,113,0.4)' : 'var(--accent)'}` }}>
@@ -451,7 +461,7 @@ function ProcessingVideoCard({ pv, onDismiss }: { pv: ProcessingVideo; onDismiss
             <div className="w-9 h-9 rounded-full border-[3px] border-[var(--accent)] border-t-transparent animate-spin mb-3" />
             <p className="text-xs font-medium" style={{ color: 'var(--text)' }}>Generating…</p>
             <p className="text-[11px] mt-1 font-mono" style={{ color: 'var(--accent)' }}>{timeStr}</p>
-            <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>usually 1–3 min</p>
+            <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{etaLabel}</p>
           </>
         )}
       </div>
@@ -531,7 +541,7 @@ const EXTENDABLE_MODELS = new Set(['kling-v1', 'kling-v1-5', 'kling-v1-6'])
 function VideoCardModal({ item, onClose, onRefresh, onSelectItem, onContinue, promptTemplates, setPromptTemplates, onOpenTemplates, onOpenSource }: {
   item: VideoItem; onClose: () => void; onRefresh: () => void
   onSelectItem?: (item: VideoItem) => void
-  onContinue?: (params: { sourceItem: VideoItem; prompt: string; model: 'kling-video-o1' | 'kling-v3-omni'; duration: number }) => void
+  onContinue?: (params: { sourceItem: VideoItem; prompt: string; model: 'kling-video-o1' | 'kling-v3-omni'; duration: number; keepSound: boolean }) => void
   promptTemplates: PromptTemplate[]
   setPromptTemplates: React.Dispatch<React.SetStateAction<PromptTemplate[]>>
   onOpenTemplates: () => void
@@ -543,6 +553,7 @@ function VideoCardModal({ item, onClose, onRefresh, onSelectItem, onContinue, pr
   const [contModel, setContModel] = useState<'kling-video-o1' | 'kling-v3-omni'>('kling-video-o1')
   const [contPrompt, setContPrompt] = useState('')
   const [contDuration, setContDuration] = useState(5)
+  const [contKeepSound, setContKeepSound] = useState(item.sound === 'on') // по умолчанию наследуем, если в исходнике был звук
   const [continuing, setContinuing] = useState(false)
   const [contStatus, setContStatus] = useState<'idle'|'processing'|'done'|'error'>('idle')
   const [contError, setContError] = useState('')
@@ -579,7 +590,7 @@ function VideoCardModal({ item, onClose, onRefresh, onSelectItem, onContinue, pr
   // Продолжение теперь запускается в родителе: закрываем карточку, там появится
   // processing-карточка со спиннером и таймером.
   function handleContinue() {
-    onContinue?.({ sourceItem: item, prompt: contPrompt.trim(), model: contModel, duration: contDuration })
+    onContinue?.({ sourceItem: item, prompt: contPrompt.trim(), model: contModel, duration: contDuration, keepSound: contKeepSound })
     onClose()
   }
   const [extPrompt, setExtPrompt] = useState('')
@@ -795,6 +806,18 @@ function VideoCardModal({ item, onClose, onRefresh, onSelectItem, onContinue, pr
             </div>
             {contStatus === 'done' && <p className="text-xs mb-2" style={{ color: '#34a853' }}>✓ Next shot generated and saved</p>}
             {contError && <p className="text-xs mb-2" style={{ color: '#f87171' }}>{contError}</p>}
+            {/* Аудио: новый звук в continuation Kling не генерирует. Можно лишь
+                скопировать дорожку оригинала. O1 звука не отдаёт вообще. */}
+            {contModel === 'kling-video-o1' ? (
+              <p className="text-[10px] mb-1.5" style={{ color: 'var(--text-muted)' }}>⚠ O1 renders without audio</p>
+            ) : item.sound === 'on' ? (
+              <label className="flex items-start gap-1.5 mb-1.5 text-[10px] cursor-pointer" style={{ color: 'var(--text-muted)' }}>
+                <input type="checkbox" checked={contKeepSound} onChange={e => setContKeepSound(e.target.checked)} className="mt-0.5" />
+                <span>Keep source audio — <b>copies the original clip&apos;s soundtrack</b> onto the new shot (no new audio is generated). Good for music/ambient, may mismatch speech.</span>
+              </label>
+            ) : (
+              <p className="text-[10px] mb-1.5" style={{ color: 'var(--text-muted)' }}>🔇 Source has no audio — the result will be silent</p>
+            )}
             <div className="flex justify-center mb-1.5">
               <UsageBadge kind="video" refreshKey={contStatus} />
             </div>
@@ -828,7 +851,7 @@ function VideoCardModal({ item, onClose, onRefresh, onSelectItem, onContinue, pr
 }
 
 // Compress image to max 1280px JPEG to keep API payloads under Vercel 4.5MB limit
-function shrinkForVideo(dataUrl: string, maxPx = 1280): Promise<string> {
+function shrinkForVideo(dataUrl: string, maxPx = 1600, quality = 0.92): Promise<string> {
   return new Promise(resolve => {
     const img = new Image()
     img.onload = () => {
@@ -838,7 +861,7 @@ function shrinkForVideo(dataUrl: string, maxPx = 1280): Promise<string> {
       const canvas = document.createElement('canvas')
       canvas.width = w; canvas.height = h
       canvas.getContext('2d')!.drawImage(img, 0, 0, w, h)
-      resolve(canvas.toDataURL('image/jpeg', 0.88))
+      resolve(canvas.toDataURL('image/jpeg', quality))
     }
     img.onerror = () => resolve(dataUrl)
     img.src = dataUrl
@@ -2006,8 +2029,8 @@ export function VideoPage() {
   }
 
   // Запуск продолжения видео из родителя: создаёт processing-карточку и поллит
-  async function startContinue(params: { sourceItem: VideoItem; prompt: string; model: 'kling-video-o1' | 'kling-v3-omni'; duration: number }) {
-    const { sourceItem, prompt: cPrompt, model: cModel, duration: cDuration } = params
+  async function startContinue(params: { sourceItem: VideoItem; prompt: string; model: 'kling-video-o1' | 'kling-v3-omni'; duration: number; keepSound: boolean }) {
+    const { sourceItem, prompt: cPrompt, model: cModel, duration: cDuration, keepSound: cKeepSound } = params
     const procId = addProcessingVideo(cPrompt || 'Continuation', cModel, cDuration, sourceItem.aspectRatio)
     setQueueActive('kling', true)
     try {
@@ -2016,13 +2039,20 @@ export function VideoPage() {
       if (!urlData.url) throw new Error(urlData.error || 'Failed to get video URL')
       const contextPrompt = sourceItem.prompt.slice(0, 200)
       const fullPrompt = `Scene context: ${contextPrompt}\n\nContinuation: ${cPrompt || 'continue naturally'}`
+      // Наследуем формат исходника (если он известный ратио); иначе пусть Kling
+      // возьмёт его из референс-видео (не навязываем 16:9)
+      const inheritAspect = ['16:9','9:16','1:1'].includes(sourceItem.aspectRatio) ? sourceItem.aspectRatio : undefined
+      // Аудио: генерация нового звука для continuation невозможна (ограничение Kling).
+      // Можно лишь перенести дорожку оригинала — по галочке. O1 звук не отдаёт вообще.
+      const keepSound = (cModel === 'kling-v3-omni' && cKeepSound) ? 'yes' : 'no'
       const res = await fetch('/api/video/omni', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model_name: cModel, prompt: fullPrompt,
           video_url: urlData.url, video_refer_type: 'feature',
           duration: cDuration, mode: 'pro',
-          aspect_ratio: ['16:9','9:16','1:1'].includes(sourceItem.aspectRatio) ? sourceItem.aspectRatio : '16:9',
+          ...(inheritAspect ? { aspect_ratio: inheritAspect } : {}),
+          keep_original_sound: keepSound,
         }),
       })
       const d = await res.json()
@@ -2030,7 +2060,7 @@ export function VideoPage() {
       pollStatus(d.task_id, 'omni-video', {
         prompt: sourceItem.prompt + (cPrompt ? ' [next shot: ' + cPrompt + ']' : ' [next shot]'),
         model: cModel, duration: String(cDuration),
-        aspectRatio: sourceItem.aspectRatio, sound: 'off', inputType: 'video-reference',
+        aspectRatio: sourceItem.aspectRatio, sound: keepSound === 'yes' ? 'on' : 'off', inputType: 'video-reference',
         sourceVideoId: sourceItem.id,
       }, procId)
     } catch (e: any) {

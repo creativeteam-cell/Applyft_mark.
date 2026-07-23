@@ -233,14 +233,17 @@ export async function createOmniVideoTask(params: {
     body.prompt = params.prompt ?? ''
   }
   if (params.video_url) {
-    // Reference video: sound generation must be off per docs
+    // Reference video: генерация нового звука по докам должна быть off.
+    // Звук можно только УНАСЛЕДОВАТЬ из исходника через keep_original_sound.
     body.sound = 'off'
     body.video_list = [{
       video_url: params.video_url,
       refer_type: params.video_refer_type ?? 'feature',
       keep_original_sound: params.keep_original_sound ?? 'no',
     }]
-    if (params.video_refer_type !== 'base') body.aspect_ratio = params.aspect_ratio ?? '16:9'
+    // Соотношение сторон задаём ТОЛЬКО если явно передано — иначе Kling
+    // наследует формат из референс-видео (не навязываем 16:9)
+    if (params.video_refer_type !== 'base' && params.aspect_ratio) body.aspect_ratio = params.aspect_ratio
   } else if (params.first_frame) {
     body.image_list = [{ image_url: params.first_frame, type: 'first_frame' }]
   } else {
