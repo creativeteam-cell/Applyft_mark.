@@ -1924,7 +1924,9 @@ export function VideoPage() {
       : videoMode === 'multishot' ? (shotDescription || shots.map(s => s.prompt).filter(Boolean).join('; ') || 'Multishot video')
       : (prompt || 'Video')
     const procDuration = videoMode === 'multishot' ? totalShotsDuration : (videoMode === 'avatar' ? (avatarAudioDuration || duration) : duration)
-    const procAspect = firstFrame ? '' : aspectRatio
+    // Реальный формат для карточки: при первом кадре берём определённый из картинки
+    const displayAspect = firstFrame ? (detectedAspect || aspectRatio) : aspectRatio
+    const procAspect = displayAspect
     const procId = addProcessingVideo(procPrompt, model, Number(procDuration) || 5, procAspect)
 
     try {
@@ -1968,7 +1970,7 @@ export function VideoPage() {
             body: JSON.stringify({ model_name: model, prompt: effectivePrompt, first_frame: ff, duration: totalDur, aspect_ratio: aspectRatio }),
           })
           setStatus('processing')
-          pollStatus(data.task_id, 'turbo', { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: '', sound: 'off', inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 }, procId)
+          pollStatus(data.task_id, 'turbo', { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: displayAspect, sound: 'off', inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 }, procId)
         } else if (isOmniModel) {
           const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
           const body: any = allShotsHavePrompts
@@ -1983,7 +1985,7 @@ export function VideoPage() {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
           })
           setStatus('processing')
-          pollStatus(data.task_id, 'omni-video', { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: ff ? '' : aspectRatio, sound: soundParam, inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 }, procId)
+          pollStatus(data.task_id, 'omni-video', { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: displayAspect, sound: soundParam, inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 }, procId)
         } else {
           const type = firstFrame ? 'image2video' : 'text2video'
           const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
@@ -1992,7 +1994,7 @@ export function VideoPage() {
             : { model_name: model, prompt: effectivePrompt, mode, duration: String(totalDur), aspect_ratio: aspectRatio, sound: soundParam }
           const data = await fetchWithRetry(`/api/video/${type}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
           setStatus('processing')
-          pollStatus(data.task_id, type, { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: firstFrame ? '' : aspectRatio, sound: soundParam, inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 }, procId)
+          pollStatus(data.task_id, type, { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: displayAspect, sound: soundParam, inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 }, procId)
         }
         return
       }
@@ -2004,7 +2006,7 @@ export function VideoPage() {
           body: JSON.stringify({ model_name: model, prompt, first_frame: ff, duration, aspect_ratio: aspectRatio }),
         })
         setStatus('processing')
-        pollStatus(data.task_id, 'turbo', { prompt, model, duration: String(duration), aspectRatio: '', sound: 'off', inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 }, procId)
+        pollStatus(data.task_id, 'turbo', { prompt, model, duration: String(duration), aspectRatio: displayAspect, sound: 'off', inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 }, procId)
       } else if (isOmniModel) {
         const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
         const body: any = { model_name: model, prompt, duration, mode, sound: soundParam }
@@ -2014,7 +2016,7 @@ export function VideoPage() {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
         })
         setStatus('processing')
-        pollStatus(data.task_id, 'omni-video', { prompt, model, duration: String(duration), aspectRatio: ff ? '' : aspectRatio, sound: soundParam, inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 }, procId)
+        pollStatus(data.task_id, 'omni-video', { prompt, model, duration: String(duration), aspectRatio: displayAspect, sound: soundParam, inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 }, procId)
       } else {
         const type = firstFrame ? 'image2video' : 'text2video'
         const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
@@ -2023,7 +2025,7 @@ export function VideoPage() {
           : { model_name: model, prompt, negative_prompt: negPrompt, mode, duration: String(duration), aspect_ratio: aspectRatio, sound: soundParam }
         const data = await fetchWithRetry(`/api/video/${type}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
         setStatus('processing')
-        pollStatus(data.task_id, type, { prompt, model, duration: String(duration), aspectRatio: firstFrame ? '' : aspectRatio, sound: soundParam, inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 }, procId)
+        pollStatus(data.task_id, type, { prompt, model, duration: String(duration), aspectRatio: displayAspect, sound: soundParam, inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 }, procId)
       }
     } catch (e: any) { setQueueActive('kling', false); setProcessingError(procId, e.message); setStatus('idle') }
   }
