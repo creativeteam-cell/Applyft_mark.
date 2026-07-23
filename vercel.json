@@ -1,9 +1,1 @@
-{
-  "functions": {
-    "src/app/api/dubbing/stitch/route.ts": { "memory": 3009 },
-    "src/app/api/dubbing/voice-lines/route.ts": { "memory": 3009 },
-    "src/app/api/dubbing/cut/route.ts": { "memory": 2048 },
-    "src/app/api/dubbing/align/route.ts": { "memory": 2048 },
-    "src/app/api/dubbing/finalize/route.ts": { "memory": 3009 }
-  }
-}
+{}

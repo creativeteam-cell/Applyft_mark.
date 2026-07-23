@@ -8,11 +8,11 @@ import { PromptTemplate, PromptTemplatesModal, usePromptTemplates, findTemplateI
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type VideoMode = 'standard' | 'multishot' | 'motionControl' | 'avatar' | 'dubbing'
+type VideoMode = 'standard' | 'multishot' | 'motionControl' | 'avatar'
 type Mode = 'std' | 'pro' | '4k'
 type AspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '3:4' | '3:2' | '2:3'
 type TaskStatus = 'idle' | 'pending' | 'processing' | 'done' | 'error'
-type KlingModel = 'kling-v3' | 'kling-v3-turbo' | 'kling-v3-omni' | 'kling-video-o1' | 'kling-v2-6' | 'kling-v2-5-turbo' | 'avatar' | 'dubbing'
+type KlingModel = 'kling-v3' | 'kling-v3-turbo' | 'kling-v3-omni' | 'kling-video-o1' | 'kling-v2-6' | 'kling-v2-5-turbo' | 'avatar'
 
 interface ShotItem { id: string; prompt: string; duration: number }
 interface ModelDef {
@@ -30,6 +30,15 @@ interface VideoItem {
   refThumb?: string | null
   refId?: string | null
   sourceVideoId?: string | null  // ID видео, которое это продолжает
+  quality?: string | null        // std | pro | 4k
+}
+
+// Человекочитаемое качество для карточки
+function qualityLabel(q?: string | null): string | null {
+  if (q === 'std') return '720p'
+  if (q === 'pro') return '1080p'
+  if (q === '4k') return '4K'
+  return null
 }
 interface ProcessingVideo {
   id: string
@@ -86,11 +95,6 @@ const MODELS: ModelDef[] = [
     supportsSound: false, supports4K: false, supportsLastFrame: false, supportsMultishot: false, supportsMotionControl: false, isAvatar: true, supportsImageList: false,
     modes: ['avatar'], aspectRatios: [],
   },
-  {
-    id: 'dubbing', label: 'Dubbing', description: 'Translate any video to another language with lip-sync', tags: ['NEW'],
-    supportsSound: false, supports4K: false, supportsLastFrame: false, supportsMultishot: false, supportsMotionControl: false, isAvatar: false, supportsImageList: false,
-    modes: ['dubbing'], aspectRatios: [],
-  },
 ]
 
 const MODE_LABELS: Record<VideoMode, string> = {
@@ -98,26 +102,7 @@ const MODE_LABELS: Record<VideoMode, string> = {
   multishot: 'Multishot',
   motionControl: 'Motion Control',
   avatar: 'Avatar',
-  dubbing: 'Dubbing',
 }
-
-const DUB_LANGUAGES: [string, string][] = [
-  ['EN', 'English'], ['SP', 'Spanish'], ['PT', 'Portuguese'], ['DE', 'German'],
-  ['FR', 'French'], ['IT', 'Italian'], ['JP', 'Japanese'], ['KR', 'Korean'],
-  ['AR', 'Arabic'], ['HI', 'Hindi'], ['PL', 'Polish'], ['UA', 'Ukrainian'],
-  ['CN', 'Chinese'], ['HE', 'Hebrew'], ['CZ', 'Czech'], ['ND', 'Dutch'],
-]
-
-// Фолбэк, пока не загрузился полный список голосов из /api/dubbing/voices
-const DUB_VOICES: { id: string; label: string }[] = [
-  { id: '21m00Tcm4TlvDq8ikWAM', label: 'Rachel — female, calm' },
-  { id: 'EXAVITQu4vr4xnSDxMaL', label: 'Bella — female, energetic' },
-  { id: 'pNInz6obpgDQGcFmaJgB', label: 'Adam — male, deep' },
-  { id: 'TxGEqnHWrfWFTfGW9XjX', label: 'Josh — male, energetic' },
-]
-
-// Dubbing пока в закрытой бете — виден только этим пользователям
-const DUBBING_ALLOWED_EMAILS = new Set(['valerii.lemberov@applyft.co'])
 
 const TURBO_MODELS = new Set(['kling-v3-turbo'])
 // O1 & Omni share the /v1/videos/omni-video endpoint
@@ -156,8 +141,6 @@ function estimateCost(params: {
     rate = is720 ? 0.3 : 0.5
   } else if (model === 'avatar') {
     rate = is720 ? 0.4 : 0.8
-  } else if (model === 'dubbing') {
-    return null // липсинк 0.5 юнита/5с, длительность заранее неизвестна
   } else {
     rate = is720 ? 0.6 : 0.8
   }
@@ -439,7 +422,6 @@ function ProcessingVideoCard({ pv, onDismiss }: { pv: ProcessingVideo; onDismiss
     if (m.includes('avatar')) return 'usually 5–20 min'
     if (m.includes('o1') || m.includes('omni')) return pv.duration >= 10 ? 'usually 10–20 min' : 'usually 5–12 min'
     if (m.includes('turbo')) return 'usually 2–6 min'
-    if (m.includes('dubbing')) return 'usually 5–15 min'
     return pv.duration >= 10 ? 'usually 5–12 min' : 'usually 3–8 min'
   })()
 
@@ -553,7 +535,9 @@ function VideoCardModal({ item, onClose, onRefresh, onSelectItem, onContinue, pr
   const [contModel, setContModel] = useState<'kling-video-o1' | 'kling-v3-omni'>('kling-video-o1')
   const [contPrompt, setContPrompt] = useState('')
   const [contDuration, setContDuration] = useState(5)
-  const [contKeepSound, setContKeepSound] = useState(item.sound === 'on') // по умолчанию наследуем, если в исходнике был звук
+  // turbo всегда со встроенным звуком (даже если в старых метаданных стоит off)
+  const sourceHasAudio = item.sound === 'on' || (item.model || '').includes('turbo')
+  const [contKeepSound, setContKeepSound] = useState(sourceHasAudio) // по умолчанию наследуем, если в исходнике был звук
   const [continuing, setContinuing] = useState(false)
   const [contStatus, setContStatus] = useState<'idle'|'processing'|'done'|'error'>('idle')
   const [contError, setContError] = useState('')
@@ -645,6 +629,7 @@ function VideoCardModal({ item, onClose, onRefresh, onSelectItem, onContinue, pr
                 prompt: item.prompt + (extPrompt ? ' [extended: ' + extPrompt + ']' : ' [extended]'),
                 model: item.model, duration: item.duration,
                 aspectRatio: item.aspectRatio, sound: item.sound, inputType: item.inputType,
+                quality: item.quality || undefined,
               }),
             })
           }
@@ -685,6 +670,7 @@ function VideoCardModal({ item, onClose, onRefresh, onSelectItem, onContinue, pr
             <span className="rounded px-2 py-1 text-xs font-mono font-medium" style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)' }}>{item.model.replace('kling-','')}</span>
             <span className="rounded px-2 py-1 text-xs font-mono" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>{item.duration}s</span>
             {item.aspectRatio && <span className="rounded px-2 py-1 text-xs font-mono" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>{item.aspectRatio}</span>}
+            {qualityLabel(item.quality) && <span className="rounded px-2 py-1 text-xs font-mono" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' }}>{qualityLabel(item.quality)}</span>}
             {item.createdTime && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{new Date(item.createdTime).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })}</span>}
             {item.userName && (
               <div className="flex items-center gap-1.5 ml-auto">
@@ -810,7 +796,7 @@ function VideoCardModal({ item, onClose, onRefresh, onSelectItem, onContinue, pr
                 скопировать дорожку оригинала. O1 звука не отдаёт вообще. */}
             {contModel === 'kling-video-o1' ? (
               <p className="text-[10px] mb-1.5" style={{ color: 'var(--text-muted)' }}>⚠ O1 renders without audio</p>
-            ) : item.sound === 'on' ? (
+            ) : sourceHasAudio ? (
               <label className="flex items-start gap-1.5 mb-1.5 text-[10px] cursor-pointer" style={{ color: 'var(--text-muted)' }}>
                 <input type="checkbox" checked={contKeepSound} onChange={e => setContKeepSound(e.target.checked)} className="mt-0.5" />
                 <span>Keep source audio — <b>copies the original clip&apos;s soundtrack</b> onto the new shot (no new audio is generated). Good for music/ambient, may mismatch speech.</span>
@@ -1074,7 +1060,6 @@ export function VideoPage() {
       if (!data.url) throw new Error(data.error || 'Failed to get video URL')
       setMotionVideoUrl(data.url)
       setMotionVideoLabel(`From history: ${item.model.replace('kling-', '')} · ${item.duration}s${item.prompt ? ' · ' + item.prompt.slice(0, 40) : ''}`)
-      setDubFileId(item.id)
     } catch (e: any) {
       setMotionVideoError(e.message)
     }
@@ -1128,7 +1113,6 @@ export function VideoPage() {
       if (!urlData.url) throw new Error(urlData.error || 'Failed to get video URL')
       setMotionVideoUrl(urlData.url)
       setMotionVideoLabel(`Uploaded: ${file.name}`)
-      setDubFileId(uploaded.id)
     } catch (err: any) {
       setMotionVideoError(err.message)
     }
@@ -1141,347 +1125,6 @@ export function VideoPage() {
   const [avatarAudioName, setAvatarAudioName] = useState('')
   const [avatarAudioDuration, setAvatarAudioDuration] = useState(0)
   const avatarAudioRef = useRef<HTMLInputElement>(null)
-
-  // ── Dubbing state ──
-  // Источник видео переиспользует motionVideoUrl/motionVideoLabel (режимы взаимоисключающие)
-  const [dubLang, setDubLang] = useState('SP')
-  // Прослушка голоса: играем готовый preview_url от ElevenLabs (бесплатно, без генерации)
-  const voicePreviewRef = useRef<HTMLAudioElement | null>(null)
-  function playVoicePreview(voiceId: string) {
-    const v = dubVoices.find(x => x.id === voiceId)
-    if (!v?.previewUrl) return
-    voicePreviewRef.current?.pause()
-    voicePreviewRef.current = new Audio(v.previewUrl)
-    voicePreviewRef.current.play().catch(() => {})
-  }
-  const [dubFileId, setDubFileId] = useState<string | null>(null) // fileId, если видео из истории
-  const [dubPreparing, setDubPreparing] = useState(false)
-  const [dubPrepared, setDubPrepared] = useState<{ sourceText: string; sourceLang: string; translatedText: string; audioBase64: string | null; speakers: number; segments?: { speaker: string; text: string }[]; speakerIds?: string[]; speakerInfo?: { id: string; role: string; sample: string; start: number; voiceProfile?: string }[]; timings?: { index: number; start: number; end: number }[]; suggestedVoiceMap?: Record<string, string>; aligned?: boolean } | null>(null)
-  const [dubOnScreen, setDubOnScreen] = useState<Record<string, boolean>>({})
-  const [dubProgress, setDubProgress] = useState('')
-  const [dubLipsync, setDubLipsync] = useState(true) // выкл = просто заменить дорожку без движения губ
-  const [dubFaces, setDubFaces] = useState<{ image: string; startMs: number; endMs: number }[] | null>(null)
-  const [dubFaceMap, setDubFaceMap] = useState<Record<string, number>>({}) // speaker → индекс лица
-  const [dubFacesLoading, setDubFacesLoading] = useState(false)
-  const [dubClonedIds, setDubClonedIds] = useState<string[]>([]) // клоны на удаление после дубляжа
-  const [dubVoiceNote, setDubVoiceNote] = useState('') // статус клонирования для показа
-
-  async function cleanupClonedVoices() {
-    if (!dubClonedIds.length) return
-    fetch('/api/dubbing/cleanup', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ voiceIds: dubClonedIds }),
-    }).catch(() => {})
-    setDubClonedIds([])
-  }
-
-  // Страховка: если вкладку закроют во время дубляжа, зависшие клоны всё равно
-  // удаляются через sendBeacon (обычный fetch при закрытии не успевает уйти).
-  const dubClonedRef = useRef<string[]>([])
-  dubClonedRef.current = dubClonedIds
-  useEffect(() => {
-    function onLeave() {
-      const ids = dubClonedRef.current
-      if (ids.length && navigator.sendBeacon) {
-        navigator.sendBeacon('/api/dubbing/cleanup', new Blob([JSON.stringify({ voiceIds: ids })], { type: 'application/json' }))
-      }
-    }
-    window.addEventListener('beforeunload', onLeave)
-    return () => window.removeEventListener('beforeunload', onLeave)
-  }, [])
-  const [dubVoices, setDubVoices] = useState<{ id: string; label: string; previewUrl?: string | null }[]>(DUB_VOICES)
-
-  // Полный список голосов ElevenLabs — один раз при входе в режим дубляжа
-  useEffect(() => {
-    if (videoMode !== 'dubbing') return
-    fetch('/api/dubbing/voices')
-      .then(r => r.json())
-      .then(d => { if (d.voices?.length) setDubVoices(d.voices) })
-      .catch(() => {})
-  }, [videoMode])
-  const [dubVoiceMap, setDubVoiceMap] = useState<Record<string, string>>({})
-  const [dubVoicingDialogue, setDubVoicingDialogue] = useState(false)
-
-  async function handleDubDialogueVoice() {
-    if (!dubPrepared?.segments) return
-    setDubVoicingDialogue(true); setDubError('')
-    try {
-      const segs = dubPrepared.segments || []
-      // Каждая реплика — отдельная озвучка своим голосом, подгонка под её слот
-      // из Scribe. Тайминги эталонные (Scribe), чужие таймстемпы не нужны.
-      const lines = segs.map((seg: any) => ({
-        text: seg.text,
-        voiceId: dubVoiceMap[seg.speaker] || dubVoices[0].id,
-        dstStartMs: seg.origStartMs ?? 0,
-        dstEndMs: seg.origEndMs ?? 0,
-      })).filter((l: any) => l.text?.trim() && l.dstEndMs > l.dstStartMs)
-
-      // Длина дорожки = длина видео (не конец последней реплики)
-      let totalMs = Math.max(...segs.map((s: any) => s.origEndMs || 0))
-      try {
-        const vDur = await new Promise<number>((resolve, reject) => {
-          const v = document.createElement('video')
-          v.preload = 'metadata'
-          v.onloadedmetadata = () => resolve(Math.round(v.duration * 1000))
-          v.onerror = () => reject(new Error('no video duration'))
-          v.src = dubFileId ? `/api/video/file/${dubFileId}` : motionVideoUrl
-        })
-        if (vDur > totalMs) totalMs = vDur
-      } catch {}
-
-      const d = await dubPost('voice', '/api/dubbing/voice-lines', { lines, totalMs })
-      // aligned=true — дорожка уже собрана по таймингам Scribe
-      setDubPrepared(prev => prev ? { ...prev, audioBase64: d.audioBase64, aligned: true } : prev)
-    } catch (e: any) { setDubError(e.message) }
-    setDubVoicingDialogue(false)
-  }
-
-  // Ожидание задачи Kling (для последовательных проходов липсинка)
-  // Безопасный POST: если сервер вернул не-JSON (HTML 504/500 при таймауте/падении),
-  // даём внятную ошибку со шагом и кодом вместо "Unexpected token '<'"
-  async function dubPost(step: string, url: string, body: any): Promise<any> {
-    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-    const ct = res.headers.get('content-type') || ''
-    if (!ct.includes('application/json')) {
-      throw new Error(`${step}: server returned ${res.status} (${res.statusText || 'error'}) — likely timeout on a long video`)
-    }
-    const d = await res.json()
-    if (d.error) throw new Error(`${step}: ${d.error}`)
-    return d
-  }
-
-  async function waitKlingTask(taskId: string, type: string): Promise<{ url: string; id: string; duration?: string }> {
-    for (let i = 0; i < 120; i++) {
-      await new Promise(r => setTimeout(r, 5000))
-      const sr = await fetch(`/api/video/status/${taskId}?type=${type}`)
-      const sd = await sr.json()
-      if (sd.task_status === 'succeed') {
-        const v = sd.task_result?.videos?.[0]
-        if (!v?.url) throw new Error('Task succeeded but no video URL')
-        return { url: v.url, id: v.id ?? '', duration: v.duration }
-      }
-      if (sd.task_status === 'failed') throw new Error(sd.task_status_msg || 'Kling task failed')
-    }
-    throw new Error('Task timed out')
-  }
-  const [dubEditedText, setDubEditedText] = useState('')
-  const [dubRevoicing, setDubRevoicing] = useState(false)
-  const [dubProcessing, setDubProcessing] = useState(false)
-  const [dubStatus, setDubStatus] = useState<'idle'|'processing'|'done'|'error'>('idle')
-  const [dubError, setDubError] = useState('')
-  const dubPollRef = useRef<ReturnType<typeof setInterval>|null>(null)
-
-  async function handleDubPrepare() {
-    if (!motionVideoUrl) return
-    setDubPreparing(true); setDubError(''); setDubPrepared(null)
-    setDubFaces(null); setDubFaceMap({}); setDubFacesLoading(true)
-
-    // Лица грузим ПАРАЛЛЕЛЬНО с prepare (транскрипция+перевод+клон — долго),
-    // чтобы к моменту показа карточек миниатюры уже были готовы
-    const src = dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }
-    const facesPromise = fetch('/api/dubbing/faces', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(src),
-    }).then(r => r.json()).catch(() => ({ faces: [] }))
-
-    try {
-      const res = await fetch('/api/dubbing/prepare', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...(dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }),
-          targetLang: dubLang,
-        }),
-      })
-      const d = await res.json()
-      if (d.error) throw new Error(d.error)
-      setDubPrepared(d)
-      setDubEditedText(d.translatedText)
-      setDubClonedIds(d.clonedVoiceIds || [])
-      setDubVoiceNote(d.voiceNote || '')
-      // Стартовая раскладка голосов (и для одного говорящего, и для диалога):
-      // автоподбор по голосам из видео, чего не хватило — по кругу.
-      // Закадровых (narrator/voice-over) помечаем off-screen.
-      if (d.speakerIds?.length) {
-        const map: Record<string, string> = {}
-        const onScreen: Record<string, boolean> = {}
-        d.speakerIds.forEach((sp: string, i: number) => {
-          map[sp] = d.suggestedVoiceMap?.[sp] || dubVoices[i % dubVoices.length].id
-          const role = (d.speakerInfo?.find((s: any) => s.id === sp)?.role || '').toLowerCase()
-          onScreen[sp] = !/narrator|voice[- ]?over|announcer/.test(role)
-        })
-        setDubVoiceMap(map)
-        setDubOnScreen(onScreen)
-      }
-      // Забираем результат уже стартовавшего параллельно запроса лиц
-      if (d.speakerIds?.length > 1) {
-        const f = await facesPromise
-        if (f.faces?.length) setDubFaces(f.faces)
-      }
-    } catch (e: any) { setDubError(e.message) }
-    setDubPreparing(false); setDubFacesLoading(false)
-  }
-
-  async function handleDubRevoice() {
-    if (!dubPrepared || !dubEditedText.trim()) return
-    setDubRevoicing(true); setDubError('')
-    try {
-      const sp = dubPrepared.speakerIds?.[0] || ''
-      const res = await fetch('/api/dubbing/tts', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: dubEditedText, voiceId: dubVoiceMap[sp] || dubVoices[0].id }),
-      })
-      const d = await res.json()
-      if (d.error) throw new Error(d.error)
-      setDubPrepared(prev => prev ? { ...prev, translatedText: dubEditedText, audioBase64: d.audioBase64 } : prev)
-    } catch (e: any) { setDubError(e.message) }
-    setDubRevoicing(false)
-  }
-
-  function stopDubPoll() { if (dubPollRef.current) { clearInterval(dubPollRef.current); dubPollRef.current = null } }
-
-  async function handleDubStart() {
-    if (!dubPrepared?.audioBase64 || !motionVideoUrl) return
-    const audioB64 = dubPrepared.audioBase64
-    const prepared = dubPrepared
-    // Временные куски (REF_cut_*) — удаляем при ЛЮБОМ исходе, чтобы не засоряли Drive
-    const tempFileIds: string[] = []
-    const purgeTempClips = () => {
-      tempFileIds.forEach(id => fetch(`/api/video/file/${id}`, { method: 'DELETE' }).catch(() => {}))
-      tempFileIds.length = 0
-    }
-    setDubProcessing(true); setDubStatus('processing'); setDubError(''); setDubProgress('')
-    try {
-      // Длительность mp3 берём из аудио-элемента
-      const audioDurationMs = await new Promise<number>((resolve, reject) => {
-        const a = new Audio(`data:audio/mpeg;base64,${audioB64}`)
-        a.onloadedmetadata = () => resolve(Math.round(a.duration * 1000))
-        a.onerror = () => reject(new Error('Failed to read audio duration'))
-      })
-
-      const isDialog = (prepared.speakers > 1) && !!prepared.segments?.length
-
-      // Аудио уже выровнено на шаге Voice dialogue (prepared.aligned) — не трогаем.
-      const workAudio = audioB64
-
-      // Галочка Lip-sync выключена: губы не трогаем, просто кладём озвучку
-      // поверх видео (оригинальный звук выключается), с выравниванием по паузам
-      if (!dubLipsync) {
-        setDubProgress('Mixing audio...')
-        const finRes = await fetch('/api/dubbing/finalize', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...(dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }),
-            audioBase64: workAudio, // уже выровнена (для диалога), для одного голоса — как есть
-            prompt: `[dubbed → ${dubLang}, no lip-sync] ${prepared.sourceText.slice(0, 120)}`,
-            targetLang: dubLang,
-            duration: String(Math.round(audioDurationMs / 1000)),
-          }),
-        })
-        const fin = await finRes.json()
-        if (fin.error) throw new Error(fin.error)
-        setDubStatus('done'); setDubProcessing(false); setDubProgress(''); fetchHistory(); cleanupClonedVoices()
-        return
-      }
-
-      if (!isDialog) {
-        // Один говорящий: один проход на всю дорожку + сохранение результата Kling как есть
-        setDubProgress('Lip-sync...')
-        const res = await fetch('/api/dubbing/lipsync', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...(dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }),
-            audioBase64: workAudio, audioDurationMs,
-          }),
-        })
-        const d = await res.json()
-        if (d.error) throw new Error(d.error)
-        const result = await waitKlingTask(d.task_id, 'advanced-lip-sync')
-        await fetch('/api/video/save', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            videoUrl: result.url, klingVideoId: result.id,
-            prompt: `[dubbed → ${dubLang}] ${prepared.sourceText.slice(0, 120)}`,
-            model: 'dubbing', duration: result.duration || '0',
-            aspectRatio: '', sound: 'on', inputType: 'dubbing',
-          }),
-        })
-        setDubStatus('done'); setDubProcessing(false); setDubProgress(''); fetchHistory(); cleanupClonedVoices()
-        return
-      }
-
-      // ── Диалог: НАРЕЗКА оригинала на непрерывные куски + липсинк по кускам ──
-      // Каждая реплика = один кусок [origStart..origEnd]. Экранная и ≥2с → в Kling
-      // (в куске одно активное лицо, наложения проходов нет). Закадровая/короткая →
-      // кусок без липсинка. Промежутки между репликами — тоже отдельные куски.
-      // В конце всё склеивается, звук — выровненный workAudio.
-      const LEAD_MS = 80 // должно совпадать с LEAD_MS в /api/dubbing/align
-      const segs = prepared.segments!.map((seg: any) => ({
-        startMs: seg.origStartMs ?? 0,
-        endMs: seg.origEndMs ?? 0,
-        speaker: seg.speaker,
-        onScreen: dubOnScreen[seg.speaker] !== false,
-      })).filter((s: any) => s.endMs > s.startMs).sort((a: any, b: any) => a.startMs - b.startMs)
-
-      // Строим непрерывное покрытие [0..videoEnd]: реплики + промежутки-паузы
-      type Piece = { startMs: number; endMs: number; lipsync: boolean; speaker?: string }
-      const pieces: Piece[] = []
-      let cursor = 0
-      const videoEndMs = Math.max(...segs.map((s: any) => s.endMs), Math.round(audioDurationMs))
-      for (const s of segs) {
-        if (s.startMs > cursor + 50) pieces.push({ startMs: cursor, endMs: s.startMs, lipsync: false }) // пауза
-        // ≥2.2с: после укорочения окна звука на 150мс останется ≥2с (минимум Kling),
-        // и звук гарантированно короче куска видео (иначе Kling: "audio end > video")
-        const longEnough = (s.endMs - s.startMs) >= 2200
-        pieces.push({ startMs: s.startMs, endMs: s.endMs, lipsync: s.onScreen && longEnough, speaker: s.speaker })
-        cursor = s.endMs
-      }
-      if (cursor < videoEndMs - 50) pieces.push({ startMs: cursor, endMs: videoEndMs, lipsync: false })
-
-      const lipCount = pieces.filter(p => p.lipsync).length
-      const clipUrls: string[] = []
-      let done = 0
-
-      for (const p of pieces) {
-        // 1. Вырезаем кусок оригинала
-        setDubProgress(`Preparing clips (${clipUrls.length + 1}/${pieces.length})...`)
-        const cut = await dubPost('cut', '/api/dubbing/cut', { ...(dubFileId ? { fileId: dubFileId } : { videoUrl: motionVideoUrl }), startMs: p.startMs, endMs: p.endMs })
-        tempFileIds.push(cut.fileId)
-        let clipUrl: string = cut.url
-
-        // 2. Если кусок под липсинк — прогоняем его через Kling целиком.
-        // Звук — срез workAudio для этой реплики, вставляется с 0 (кусок начинается с неё)
-        if (p.lipsync) {
-          done++
-          setDubProgress(`Lip-sync ${done}/${lipCount}...`)
-          // Эталон лица говорящего: если в куске окажется несколько лиц
-          // (сплошной план — оба в кадре), GPT-vision выберет нужное по картинке
-          const faceIdx = p.speaker ? dubFaceMap[p.speaker] : undefined
-          const faceImageUrl = (dubFaces && faceIdx !== undefined && dubFaces[faceIdx]) ? dubFaces[faceIdx].image : undefined
-          const ld = await dubPost('lip-sync', '/api/dubbing/lipsync', {
-            videoUrl: clipUrl,
-            audioBase64: workAudio, audioDurationMs,
-            // окно короче куска на 150мс — чтобы конец звука не вышел за длину видео
-            window: { soundStartMs: p.startMs + LEAD_MS, soundEndMs: p.endMs + LEAD_MS - 150, insertMs: 0 },
-            originalAudioVolume: 0,
-            faceImageUrl,
-          })
-          const result = await waitKlingTask(ld.task_id, 'advanced-lip-sync')
-          clipUrl = result.url
-        }
-        clipUrls.push(clipUrl)
-      }
-
-      // 3. Склейка кусков + выровненная озвучка поверх
-      setDubProgress('Stitching final video...')
-      await dubPost('stitch', '/api/dubbing/stitch', {
-        clipUrls, audioBase64: workAudio, tempFileIds,
-        prompt: `[dubbed → ${dubLang}] ${prepared.sourceText.slice(0, 120)}`,
-        targetLang: dubLang, duration: String(Math.round(audioDurationMs / 1000)),
-      })
-
-      setDubStatus('done'); setDubProcessing(false); setDubProgress(''); fetchHistory(); cleanupClonedVoices(); purgeTempClips()
-    } catch (e: any) { setDubError(e.message); setDubStatus('error'); setDubProcessing(false); setDubProgress(''); cleanupClonedVoices(); purgeTempClips() }
-  }
 
   // ── Generation state ──
   const [status, setStatus] = useState<TaskStatus>('idle')
@@ -1523,13 +1166,8 @@ export function VideoPage() {
   }
 
   // ── Derived ──
-  const canUseDubbing = DUBBING_ALLOWED_EMAILS.has(session?.user?.email || '')
   const currentModel = MODELS.find(m => m.id === model)!
 
-  // Если dubbing остался в localStorage у пользователя без доступа — сбрасываем
-  useEffect(() => {
-    if (model === 'dubbing' && session && !canUseDubbing) setModel('kling-v3')
-  }, [model, session, canUseDubbing])
   const totalShotsDuration = shots.reduce((s, sh) => s + sh.duration, 0)
   const isTurboModel = TURBO_MODELS.has(model)
   const isOmniModel = OMNI_MODELS.has(model)
@@ -1545,7 +1183,6 @@ export function VideoPage() {
     if (videoMode === 'multishot') return (shots.some(s => s.prompt.trim().length > 0) || shotDescription.trim().length > 0) && totalShotsDuration <= 15
     if (videoMode === 'motionControl') return !!motionImage && !!motionVideoUrl
     if (videoMode === 'avatar') return !!avatarImage && !!avatarAudioBase64
-    if (videoMode === 'dubbing') return false // у дубляжа свои кнопки
     return false
   }, [videoMode, prompt, shots, shotDescription, motionImage, motionVideoUrl, avatarImage, avatarAudioBase64])
 
@@ -1942,7 +1579,7 @@ export function VideoPage() {
           body: JSON.stringify({ image_url: mi, video_url: motionVideoUrl, prompt, model_name: motionModel, character_orientation: motionOrientation, keep_original_sound: motionKeepSound ? 'yes' : 'no', mode }),
         })
         setStatus('processing')
-        pollStatus(data.task_id, 'motion-control', { prompt: prompt || 'Motion control video', model, duration: String(duration), aspectRatio: '', sound: 'off', inputType: 'motion', units: estimatedCost ?? 0 }, procId)
+        pollStatus(data.task_id, 'motion-control', { prompt: prompt || 'Motion control video', model, duration: String(duration), aspectRatio: '', sound: 'off', inputType: 'motion', quality: mode, units: estimatedCost ?? 0 }, procId)
         return
       }
 
@@ -1952,7 +1589,7 @@ export function VideoPage() {
           body: JSON.stringify({ image: ai, sound_file: avatarAudioBase64, prompt, mode }),
         })
         setStatus('processing')
-        pollStatus(data.task_id, 'avatar', { prompt: prompt || 'Avatar video', model, duration: String(avatarAudioDuration || duration), aspectRatio: '', sound: 'off', inputType: 'avatar', units: estimatedCost ?? 0 }, procId)
+        pollStatus(data.task_id, 'avatar', { prompt: prompt || 'Avatar video', model, duration: String(avatarAudioDuration || duration), aspectRatio: '', sound: 'off', inputType: 'avatar', quality: mode, units: estimatedCost ?? 0 }, procId)
         return
       }
 
@@ -1970,7 +1607,7 @@ export function VideoPage() {
             body: JSON.stringify({ model_name: model, prompt: effectivePrompt, first_frame: ff, duration: totalDur, aspect_ratio: aspectRatio }),
           })
           setStatus('processing')
-          pollStatus(data.task_id, 'turbo', { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: displayAspect, sound: 'off', inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 }, procId)
+          pollStatus(data.task_id, 'turbo', { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: displayAspect, sound: 'on', inputType: firstFrame ? 'image' : 'text', quality: mode, units: estimatedCost ?? 0 }, procId)
         } else if (isOmniModel) {
           const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
           const body: any = allShotsHavePrompts
@@ -1985,7 +1622,7 @@ export function VideoPage() {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
           })
           setStatus('processing')
-          pollStatus(data.task_id, 'omni-video', { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: displayAspect, sound: soundParam, inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 }, procId)
+          pollStatus(data.task_id, 'omni-video', { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: displayAspect, sound: soundParam, inputType: firstFrame ? 'image' : 'text', quality: mode, units: estimatedCost ?? 0 }, procId)
         } else {
           const type = firstFrame ? 'image2video' : 'text2video'
           const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
@@ -1994,7 +1631,7 @@ export function VideoPage() {
             : { model_name: model, prompt: effectivePrompt, mode, duration: String(totalDur), aspect_ratio: aspectRatio, sound: soundParam }
           const data = await fetchWithRetry(`/api/video/${type}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
           setStatus('processing')
-          pollStatus(data.task_id, type, { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: displayAspect, sound: soundParam, inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 }, procId)
+          pollStatus(data.task_id, type, { prompt: effectivePrompt, model, duration: String(totalDur), aspectRatio: displayAspect, sound: soundParam, inputType: firstFrame ? 'image' : 'text', quality: mode, units: estimatedCost ?? 0 }, procId)
         }
         return
       }
@@ -2006,7 +1643,7 @@ export function VideoPage() {
           body: JSON.stringify({ model_name: model, prompt, first_frame: ff, duration, aspect_ratio: aspectRatio }),
         })
         setStatus('processing')
-        pollStatus(data.task_id, 'turbo', { prompt, model, duration: String(duration), aspectRatio: displayAspect, sound: 'off', inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 }, procId)
+        pollStatus(data.task_id, 'turbo', { prompt, model, duration: String(duration), aspectRatio: displayAspect, sound: 'on', inputType: firstFrame ? 'image' : 'text', quality: mode, units: estimatedCost ?? 0 }, procId)
       } else if (isOmniModel) {
         const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
         const body: any = { model_name: model, prompt, duration, mode, sound: soundParam }
@@ -2016,7 +1653,7 @@ export function VideoPage() {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
         })
         setStatus('processing')
-        pollStatus(data.task_id, 'omni-video', { prompt, model, duration: String(duration), aspectRatio: displayAspect, sound: soundParam, inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 }, procId)
+        pollStatus(data.task_id, 'omni-video', { prompt, model, duration: String(duration), aspectRatio: displayAspect, sound: soundParam, inputType: firstFrame ? 'image' : 'text', quality: mode, units: estimatedCost ?? 0 }, procId)
       } else {
         const type = firstFrame ? 'image2video' : 'text2video'
         const soundParam = currentModel.supportsSound && sound ? 'on' : 'off'
@@ -2025,7 +1662,7 @@ export function VideoPage() {
           : { model_name: model, prompt, negative_prompt: negPrompt, mode, duration: String(duration), aspect_ratio: aspectRatio, sound: soundParam }
         const data = await fetchWithRetry(`/api/video/${type}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
         setStatus('processing')
-        pollStatus(data.task_id, type, { prompt, model, duration: String(duration), aspectRatio: displayAspect, sound: soundParam, inputType: firstFrame ? 'image' : 'text', units: estimatedCost ?? 0 }, procId)
+        pollStatus(data.task_id, type, { prompt, model, duration: String(duration), aspectRatio: displayAspect, sound: soundParam, inputType: firstFrame ? 'image' : 'text', quality: mode, units: estimatedCost ?? 0 }, procId)
       }
     } catch (e: any) { setQueueActive('kling', false); setProcessingError(procId, e.message); setStatus('idle') }
   }
@@ -2063,7 +1700,7 @@ export function VideoPage() {
         prompt: sourceItem.prompt + (cPrompt ? ' [next shot: ' + cPrompt + ']' : ' [next shot]'),
         model: cModel, duration: String(cDuration),
         aspectRatio: sourceItem.aspectRatio, sound: keepSound === 'yes' ? 'on' : 'off', inputType: 'video-reference',
-        sourceVideoId: sourceItem.id,
+        sourceVideoId: sourceItem.id, quality: 'pro',
       }, procId)
     } catch (e: any) {
       setProcessingError(procId, e.message); setQueueActive('kling', false)
@@ -2083,8 +1720,7 @@ export function VideoPage() {
           {/* Model selector */}
           <div className="mb-3">
             <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Model</div>
-            <ModelDropdown model={model} onSelect={setModel}
-              hiddenIds={canUseDubbing ? undefined : new Set(['dubbing'])} />
+            <ModelDropdown model={model} onSelect={setModel} />
           </div>
 
           {/* Mode selector */}
@@ -2419,266 +2055,11 @@ export function VideoPage() {
             </>
           )}
 
-          {/* ── Dubbing Mode ── */}
-          {videoMode === 'dubbing' && (
-            <>
-              <div className="mb-3">
-                <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Video to dub</div>
-                {motionVideoUrl ? (
-                  <>
-                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl mb-2" style={{ background: 'rgba(79,110,247,0.08)', border: '1px solid var(--border)' }}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--accent)', flexShrink: 0 }}>
-                        <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>
-                      </svg>
-                      <span className="text-xs truncate flex-1" style={{ color: 'var(--text)' }}>{motionVideoLabel || motionVideoUrl}</span>
-                      <button onClick={() => { setMotionVideoUrl(''); setMotionVideoLabel(''); setDubFileId(null); setDubPrepared(null); setDubStatus('idle') }}
-                        className="opacity-50 hover:opacity-100 flex-shrink-0" style={{ color: 'var(--text-muted)' }}>×</button>
-                    </div>
-                    {/* Плеер исходника: послушать, кто как звучит, перед раздачей голосов */}
-                    {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                    <video controls preload="metadata" src={dubFileId ? `/api/video/file/${dubFileId}` : motionVideoUrl}
-                      className="w-full rounded-xl" style={{ maxHeight: 180, border: '1px solid var(--border)' }} />
-                  </>
-                ) : (
-                  <div className="flex gap-2">
-                    <button onClick={() => setMotionVideoPicker(true)}
-                      className="flex-1 py-2.5 rounded-xl text-xs font-medium transition-all"
-                      style={{ background: 'rgba(255,255,255,0.04)', border: '1px dashed var(--border)', color: 'var(--text-muted)' }}>
-                      🎬 From history
-                    </button>
-                    <button onClick={() => motionVideoInputRef.current?.click()} disabled={motionVideoUploading}
-                      className="flex-1 py-2.5 rounded-xl text-xs font-medium transition-all"
-                      style={{ background: 'rgba(255,255,255,0.04)', border: '1px dashed var(--border)', color: 'var(--text-muted)' }}>
-                      {motionVideoUploading ? 'Uploading...' : '⬆ Upload .mp4 / .mov'}
-                    </button>
-                  </div>
-                )}
-                <input ref={motionVideoInputRef} type="file" accept=".mp4,.mov,video/mp4,video/quicktime" className="hidden" onChange={handleMotionVideoUpload} />
-                {motionVideoError && <p className="text-[10px] mt-1" style={{ color: '#f87171' }}>{motionVideoError}</p>}
-                <p className="text-[10px] mt-1" style={{ color: 'rgba(255,255,255,0.2)' }}>2–60 seconds · one visible speaker · up to 100MB</p>
-              </div>
-
-              <div className="mb-3">
-                <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Target language</div>
-                <select value={dubLang} onChange={e => { setDubLang(e.target.value); setDubPrepared(null); setDubStatus('idle') }}
-                  className="w-full rounded-xl px-3 py-2 text-sm outline-none"
-                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }}>
-                  {DUB_LANGUAGES.map(([code, name]) => <option key={code} value={code} style={{ background: '#1a1a2e' }}>{name}</option>)}
-                </select>
-              </div>
-
-              {!dubPrepared && (
-                <button onClick={handleDubPrepare} disabled={!motionVideoUrl || dubPreparing}
-                  className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 mb-3"
-                  style={{ background: motionVideoUrl && !dubPreparing ? 'var(--accent)' : 'rgba(255,255,255,0.05)', color: motionVideoUrl && !dubPreparing ? '#fff' : 'var(--text-muted)' }}>
-                  {dubPreparing ? (
-                    <><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>Transcribing & translating...</>
-                  ) : '1 · Transcribe → Translate → Voice'}
-                </button>
-              )}
-
-              {dubPrepared && (
-                <>
-                  <div className="mb-2">
-                    <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Original ({dubPrepared.sourceLang})</div>
-                    <p className="text-xs px-2 py-1.5 rounded-lg max-h-20 overflow-y-auto" style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--text-muted)' }}>{dubPrepared.sourceText}</p>
-                  </div>
-
-                  {/* Статус клонирования голосов */}
-                  {dubVoiceNote && (
-                    <p className="text-[11px] mb-2 px-2 py-1.5 rounded-lg"
-                      style={{
-                        background: dubVoiceNote.includes('✓') ? 'rgba(52,168,83,0.1)' : 'rgba(251,188,5,0.1)',
-                        color: dubVoiceNote.includes('✓') ? '#34a853' : '#fbbc05',
-                      }}>
-                      {dubVoiceNote.includes('✓') ? '🎙 ' : '⚠ '}{dubVoiceNote}
-                    </p>
-                  )}
-
-                  {dubPrepared.speakers > 1 && dubPrepared.segments ? (
-                    /* Диалог: реплики + раздача голосов по говорящим */
-                    <div className="mb-2">
-                      <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>
-                        Dialogue — {dubPrepared.speakers} speakers, assign voices
-                      </div>
-                      <div className="flex flex-col gap-1.5 mb-2">
-                        {(dubPrepared.speakerIds || []).map((sp, i) => {
-                          const info = dubPrepared.speakerInfo?.find(s => s.id === sp)
-                          return (
-                            <div key={sp} className="rounded-lg px-2 py-1.5" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)' }}>
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="text-[10px] font-mono flex-shrink-0 px-1 py-0.5 rounded" style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)' }}>
-                                  {info ? `${Math.floor(info.start / 60)}:${String(Math.floor(info.start % 60)).padStart(2, '0')}` : ''}
-                                </span>
-                                <span className="text-[11px] font-semibold flex-shrink-0" style={{ color: 'var(--accent)' }}>
-                                  S{i + 1}{info?.role ? ` · ${info.role}` : ''}
-                                </span>
-                                {info?.sample && (
-                                  <span className="text-[10px] italic truncate flex-1" style={{ color: 'var(--text-muted)' }}>«{info.sample}»</span>
-                                )}
-                                <label className="flex items-center gap-1 text-[10px] cursor-pointer flex-shrink-0" style={{ color: 'var(--text-muted)' }}
-                                  title="On-screen: lips of the visible face are synced during this speaker's lines. Off-screen (voice-over): lips are left untouched.">
-                                  <input type="checkbox" checked={dubOnScreen[sp] !== false}
-                                    onChange={e => setDubOnScreen(prev => ({ ...prev, [sp]: e.target.checked }))} />
-                                  On-screen
-                                </label>
-                              </div>
-                              {info?.voiceProfile && (
-                                <div className="text-[9px] mb-0.5" style={{ color: 'rgba(255,255,255,0.3)' }}>
-                                  🎙 voice in source: {info.voiceProfile}{dubPrepared.suggestedVoiceMap?.[sp] === dubVoiceMap[sp] ? ' · auto-matched' : ''}
-                                </div>
-                              )}
-                              {/* Индикатор загрузки лиц — чтобы не выглядело пусто, пока грузятся */}
-                              {dubOnScreen[sp] !== false && dubFacesLoading && !dubFaces && (
-                                <div className="flex items-center gap-1.5 mb-1.5 text-[9px]" style={{ color: 'var(--text-muted)' }}>
-                                  <span className="animate-spin">⟳</span> detecting faces…
-                                </div>
-                              )}
-                              {/* Привязка к лицу: критично, когда в кадре несколько человек */}
-                              {dubOnScreen[sp] !== false && dubFaces && dubFaces.length > 1 && (
-                                <div className="flex items-center gap-1.5 mb-1.5">
-                                  <span className="text-[9px] flex-shrink-0" style={{ color: 'var(--text-muted)' }}>Face:</span>
-                                  {dubFaces.map((f, fi) => (
-                                    <button key={fi} onClick={() => setDubFaceMap(prev => ({ ...prev, [sp]: fi }))}
-                                      title={`Face ${fi + 1} · visible ${Math.round(f.startMs / 1000)}–${Math.round(f.endMs / 1000)}s`}
-                                      className="rounded-lg overflow-hidden transition-all flex-shrink-0"
-                                      style={{
-                                        width: 32, height: 32, padding: 0,
-                                        border: dubFaceMap[sp] === fi ? '2px solid var(--accent)' : '2px solid var(--border)',
-                                        opacity: dubFaceMap[sp] === fi ? 1 : 0.6,
-                                      }}>
-                                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                                      <img src={f.image} alt={`Face ${fi + 1}`} className="w-full h-full object-cover" />
-                                    </button>
-                                  ))}
-                                </div>
-                              )}
-                              {dubClonedIds.includes(dubVoiceMap[sp]) ? (
-                                <div className="text-[11px] px-2 py-1 rounded-lg" style={{ background: 'rgba(52,168,83,0.1)', color: '#34a853' }}>
-                                  🎙 Original voice (cloned)
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-1.5">
-                                  <select value={dubVoiceMap[sp] || dubVoices[0].id}
-                                    onChange={e => setDubVoiceMap(prev => ({ ...prev, [sp]: e.target.value }))}
-                                    className="flex-1 min-w-0 rounded-lg px-2 py-1 text-xs outline-none"
-                                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', textOverflow: 'ellipsis' }}>
-                                    {dubVoices.map(v => <option key={v.id} value={v.id} style={{ background: '#1a1a2e' }}>{v.label}</option>)}
-                                  </select>
-                                  <button onClick={() => playVoicePreview(dubVoiceMap[sp] || dubVoices[0].id)} title="Listen to a sample of this voice"
-                                    className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 transition-all hover:scale-105"
-                                    style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)', fontSize: 9 }}>▶</button>
-                                </div>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                      <div className="max-h-32 overflow-y-auto rounded-lg px-2 py-1.5 mb-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
-                        {dubPrepared.segments.map((s, i) => (
-                          <p key={i} className="text-xs mb-1">
-                            <span className="font-mono text-[10px]" style={{ color: 'var(--accent)' }}>
-                              S{(dubPrepared.speakerIds || []).indexOf(s.speaker) + 1}:
-                            </span>{' '}
-                            <span style={{ color: 'var(--text)' }}>{s.text}</span>
-                          </p>
-                        ))}
-                      </div>
-                      <button onClick={handleDubDialogueVoice} disabled={dubVoicingDialogue || dubFacesLoading}
-                        className="w-full py-2 rounded-lg text-xs font-medium transition-all mb-1"
-                        style={{ background: 'rgba(79,110,247,0.12)', color: 'var(--accent)', border: '1px solid var(--border)', opacity: dubFacesLoading ? 0.5 : 1 }}>
-                        {dubVoicingDialogue ? 'Voicing dialogue...' : dubFacesLoading ? 'Detecting faces…' : dubPrepared.audioBase64 ? '↻ Re-voice dialogue' : '🎭 Voice dialogue'}
-                      </button>
-                    </div>
-                  ) : (
-                    /* Один говорящий: голос + редактируемый перевод */
-                    <div className="mb-2">
-                      {(() => {
-                        const sp = dubPrepared.speakerIds?.[0] || ''
-                        const info = dubPrepared.speakerInfo?.[0]
-                        return (
-                          <div className="mb-2">
-                            <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Voice</div>
-                            {dubClonedIds.includes(dubVoiceMap[sp]) ? (
-                              <div className="text-[11px] px-2 py-1.5 rounded-lg" style={{ background: 'rgba(52,168,83,0.1)', color: '#34a853' }}>
-                                🎙 Original voice (cloned from the source)
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-2">
-                                <select value={dubVoiceMap[sp] || dubVoices[0].id}
-                                  onChange={e => { setDubVoiceMap(prev => ({ ...prev, [sp]: e.target.value })); setDubPrepared(prev => prev ? { ...prev, audioBase64: null } : prev) }}
-                                  className="flex-1 min-w-0 rounded-lg px-2 py-1.5 text-xs outline-none"
-                                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', textOverflow: 'ellipsis' }}>
-                                  {dubVoices.map(v => <option key={v.id} value={v.id} style={{ background: '#1a1a2e' }}>{v.label}</option>)}
-                                </select>
-                                <button onClick={() => playVoicePreview(dubVoiceMap[sp] || dubVoices[0].id)} title="Listen to a sample of this voice"
-                                  className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-all hover:scale-105"
-                                  style={{ background: 'rgba(79,110,247,0.15)', color: 'var(--accent)', fontSize: 10 }}>▶</button>
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })()}
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Translation — edit if needed</div>
-                        <button onClick={handleDubRevoice}
-                          disabled={dubRevoicing || (!!dubPrepared.audioBase64 && dubEditedText === dubPrepared.translatedText)}
-                          className="text-[10px] px-2 py-0.5 rounded-lg font-medium"
-                          style={{ background: 'rgba(79,110,247,0.12)', color: (!dubPrepared.audioBase64 || dubEditedText !== dubPrepared.translatedText) ? 'var(--accent)' : 'rgba(255,255,255,0.2)', border: '1px solid var(--border)' }}>
-                          {dubRevoicing ? 'Voicing...' : dubPrepared.audioBase64 ? '↻ Re-voice' : '🔊 Voice'}
-                        </button>
-                      </div>
-                      <textarea value={dubEditedText} onChange={e => setDubEditedText(e.target.value)} rows={3}
-                        className="w-full rounded-lg resize-none outline-none text-xs p-2"
-                        style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)' }} />
-                    </div>
-                  )}
-
-                  {dubPrepared.audioBase64 && (
-                    /* eslint-disable-next-line jsx-a11y/media-has-caption */
-                    <audio controls src={`data:audio/mpeg;base64,${dubPrepared.audioBase64}`} className="w-full mb-2" style={{ height: 32 }} />
-                  )}
-                  {/* Липсинк можно выключить: тогда озвучка просто ляжет поверх видео
-                      по таймингам оригинала — быстро и без затрат юнитов Kling */}
-                  <label className="flex items-center gap-2 mb-2 cursor-pointer text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                    <input type="checkbox" checked={dubLipsync} onChange={e => setDubLipsync(e.target.checked)} />
-                    Lip-sync (Kling) — {dubLipsync ? 'lips will match the new audio' : 'off: audio overlay only, free & fast'}
-                  </label>
-                  {(() => {
-                    // Если лиц несколько и включён липсинк — требуем привязать лицо
-                    // каждому экранному говорящему, иначе Kling озвучит не того
-                    const onScreenSpeakers = (dubPrepared.speakerIds || []).filter(sp => dubOnScreen[sp] !== false)
-                    const needFace = dubLipsync && !!dubFaces && dubFaces.length > 1 &&
-                      onScreenSpeakers.some(sp => dubFaceMap[sp] === undefined)
-                    if (dubStatus === 'done') return <p className="text-xs mb-2" style={{ color: '#34a853' }}>✓ Dubbed video saved to history</p>
-                    return (
-                      <>
-                        {needFace && (
-                          <p className="text-[11px] mb-2 px-2 py-1.5 rounded-lg" style={{ background: 'rgba(251,188,5,0.1)', color: '#fbbc05' }}>
-                            ⚠ Choose a face for each on-screen speaker above before dubbing
-                          </p>
-                        )}
-                        <button onClick={handleDubStart} disabled={dubProcessing || !dubPrepared.audioBase64 || needFace}
-                          className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 mb-3"
-                          style={{ background: (!dubProcessing && !needFace) ? 'var(--accent)' : 'rgba(255,255,255,0.05)', color: (!dubProcessing && !needFace) ? '#fff' : 'var(--text-muted)' }}>
-                          {dubProcessing ? (
-                            <><svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>{dubProgress || 'Lip-syncing...'}</>
-                          ) : '2 · Dub video (lip-sync)'}
-                        </button>
-                      </>
-                    )
-                  })()}
-                </>
-              )}
-              {dubError && <p className="text-xs mb-2" style={{ color: '#f87171' }}>{dubError}</p>}
-            </>
-          )}
-
           {/* ── Settings (model-dependent) ── */}
           <div style={{ height: 1, background: 'var(--border)', marginBottom: 12, marginTop: 4 }} />
 
           {/* Quality */}
-          {videoMode !== 'avatar' && videoMode !== 'motionControl' && videoMode !== 'dubbing' && (
+          {videoMode !== 'avatar' && videoMode !== 'motionControl' && (
             <div className="mb-3">
               <div className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Quality</div>
               <div className="flex gap-2">
@@ -2701,7 +2082,7 @@ export function VideoPage() {
           )}
 
           {/* Duration slider */}
-          {videoMode !== 'multishot' && videoMode !== 'avatar' && videoMode !== 'dubbing' && videoMode !== 'motionControl' && (
+          {videoMode !== 'multishot' && videoMode !== 'avatar' && videoMode !== 'motionControl' && (
             <div className="mb-3">
               <div className="flex items-center justify-between mb-1.5">
                 <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Duration</div>
@@ -2793,8 +2174,7 @@ export function VideoPage() {
             </div>
           )}
 
-          {/* Generate button (у дубляжа свой двухшаговый флоу) */}
-          {videoMode !== 'dubbing' && (
+          {/* Generate button */}
           <button onClick={handleGenerate} disabled={!canGenerate}
             className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
             style={{ background: canGenerate ? 'var(--accent)' : 'rgba(255,255,255,0.05)', color: canGenerate ? '#fff' : 'var(--text-muted)', cursor: canGenerate ? 'pointer' : 'not-allowed' }}>
@@ -2808,7 +2188,6 @@ export function VideoPage() {
               )}
             </div>
           </button>
-          )}
 
           {/* Личный лимит видео-юнитов (полная инфа по Kling-балансу — в админке) */}
           <div className="mt-2 flex justify-center">
