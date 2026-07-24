@@ -18,9 +18,12 @@ function statsFolderId() {
 
 export async function getAdminEmails(): Promise<string[]> {
   const stored = await redis.get<string[]>(ADMINS_KEY)
-  if (stored && stored.length > 0) return stored
-  await redis.set(ADMINS_KEY, SEED_ADMINS)
-  return SEED_ADMINS
+  const list = Array.isArray(stored) ? stored : []
+  // SEED-админы всегда присутствуют — защита от порчи/перезаписи ключа,
+  // чтобы владельцы (Valerii + Viktoriia) не могли потерять доступ.
+  const merged = Array.from(new Set([...SEED_ADMINS, ...list]))
+  if (list.length === 0) { await redis.set(ADMINS_KEY, SEED_ADMINS).catch(() => {}) }
+  return merged
 }
 
 export async function addAdminEmail(email: string): Promise<string[]> {
