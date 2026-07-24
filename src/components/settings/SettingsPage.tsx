@@ -338,6 +338,7 @@ function AdminPanel({ currentEmail }: { currentEmail: string }) {
   const [defImg, setDefImg] = useState(50)
   const [defVid, setDefVid] = useState(50)
   const [savingDef, setSavingDef] = useState<'image' | 'video' | null>(null)
+  const [statsError, setStatsError] = useState('')
 
   const fetchStats = useCallback(async () => {
     setLoading(true)
@@ -346,7 +347,8 @@ function AdminPanel({ currentEmail }: { currentEmail: string }) {
       const data = await res.json()
       setStats(data.users || [])
       setAdminEmails(data.adminEmails || [])
-    } catch {}
+      setStatsError(data.error || '')
+    } catch (e: any) { setStatsError(e?.message || 'stats request failed') }
     try {
       const dr = await fetch('/api/admin/limits')
       const dd = await dr.json()
@@ -476,13 +478,19 @@ function AdminPanel({ currentEmail }: { currentEmail: string }) {
         {addError && <p className="text-xs mt-1.5" style={{ color: '#f87171' }}>{addError}</p>}
       </div>
 
+      {statsError && (
+        <p className="text-xs mb-3 px-3 py-2 rounded-lg" style={{ color: '#f87171', background: 'rgba(248,113,113,0.1)' }}>
+          Stats error: {statsError}
+        </p>
+      )}
+
       {/* Image generation stats */}
       <div>
         <div className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>
           Image generations
         </div>
         {stats.length === 0 ? (
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No data yet</p>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{statsError ? 'Could not load (see error above)' : 'No data yet'}</p>
         ) : (
           <div className="flex flex-col gap-2">
             {stats.map(u => (

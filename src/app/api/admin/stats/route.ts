@@ -31,11 +31,13 @@ export async function GET(req: NextRequest) {
     pageSize: 200,
   } as any) as any
 
-  const results = await Promise.all([
+  // allSettled: если одна из папок не отдалась — не роняем весь список
+  const results = await Promise.allSettled([
     listFolder(FOLDER_ID),
     VIDEO_FOLDER_ID ? listFolder(VIDEO_FOLDER_ID) : Promise.resolve({ data: { files: [] } }),
   ])
-  const files = results.flatMap((r: any) => (r.data.files || [])) as any[]
+  results.forEach((r, i) => { if (r.status === 'rejected') console.error(`[admin/stats] folder ${i} list failed:`, r.reason?.message) })
+  const files = results.flatMap((r: any) => (r.status === 'fulfilled' ? (r.value?.data?.files || []) : [])) as any[]
 
   const userMap = new Map<string, { email: string; name: string; image: string }>()
   for (const f of files) {
@@ -59,14 +61,18 @@ export async function GET(req: NextRequest) {
     getAllVideoLimits(knownEmails),
   ])
 
-  const usersForReset = stats.map(s => ({
-    email: s.email,
-    name: userMap.get(s.email)?.name || s.email,
-    imageCount: s.imageCount,
-  }))
-  const didReset = await checkAndResetMonth(usersForReset)
-  if (didReset) {
-    stats = await getAllUserStats(knownEmails)
+  // Месячный снапшот — некритичен для отображения; изолируем, чтобы его сбой
+  // не обнулял всю статистику.
+  try {
+    const usersForReset = stats.map(s => ({
+      email: s.email,
+      name: userMap.get(s.email)?.name || s.email,
+      imageCount: s.imageCount,
+    }))
+    const didReset = await checkAndResetMonth(usersForReset)
+    if (didReset) stats = await getAllUserStats(knownEmails)
+  } catch (e: any) {
+    console.error('[admin/stats] checkAndResetMonth failed:', e?.message)
   }
 
   const videoStatsMap = Object.fromEntries(videoStats.map(v => [v.email, v.videoUnits]))
