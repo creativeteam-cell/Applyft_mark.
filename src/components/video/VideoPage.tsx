@@ -1414,6 +1414,15 @@ export function VideoPage() {
           stopPoll(key); setQueueActive('kling', false)
           const url = data.task_result?.videos?.[0]?.url ?? null
           const vid = data.task_result?.videos?.[0]?.id ?? ''
+          // Клейм: если другая вкладка уже взялась за сохранение этого таска — не дублируем
+          const claimKey = 'gen_vid_claim:' + taskId
+          try {
+            if (localStorage.getItem(claimKey)) {
+              if (procId) { removeProcessingVideo(procId); removePending(procId) }
+              return
+            }
+            localStorage.setItem(claimKey, String(Date.now()))
+          } catch {}
           if (url) {
             fetch('/api/video/save', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { incrementVideoUnits } from '@/lib/adminStats'
+import { getDriveClient } from '@/lib/googleDrive'
 
 const VIDEO_FOLDER_ID = process.env.VIDEO_DRIVE_FOLDER_ID!
 export const maxDuration = 60
@@ -17,6 +18,26 @@ export async function POST(req: NextRequest) {
   if (!videoUrl) return NextResponse.json({ error: 'videoUrl required' }, { status: 400 })
 
   try {
+    // Дедуп: если видео с таким klingVideoId уже сохранено (напр. вторая вкладка
+    // опрашивает тот же таск) — не создаём дубль, возвращаем существующий файл.
+    if (klingVideoId) {
+      try {
+        const drive = getDriveClient()
+        const list = await (drive.files.list as any)({
+          supportsAllDrives: true, includeItemsFromAllDrives: true,
+          q: `'${VIDEO_FOLDER_ID}' in parents and mimeType = 'video/mp4' and trashed = false`,
+          fields: 'files(id, description, webViewLink, thumbnailLink)',
+          orderBy: 'createdTime desc', pageSize: 100,
+        })
+        const dup = ((list.data.files || []) as any[]).find(f => {
+          try { return JSON.parse(f.description || '{}').klingVideoId === klingVideoId } catch { return false }
+        })
+        if (dup) {
+          return NextResponse.json({ fileId: dup.id, webViewLink: dup.webViewLink || null, thumbnailLink: dup.thumbnailLink || null, deduped: true })
+        }
+      } catch (e) { console.warn('[video/save] dedup check failed', e) }
+    }
+
     // Сохраняем ОРИГИНАЛ референс-кадра отдельным файлом (для скачивания из карточки).
     // В историю не попадает — она фильтрует только video/mp4.
     let refId = ''
