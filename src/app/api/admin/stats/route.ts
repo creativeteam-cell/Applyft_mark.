@@ -7,6 +7,8 @@ import { getDriveClient } from '@/lib/googleDrive'
 const FOLDER_ID = process.env.GENERATOR_DRIVE_FOLDER_ID!
 const VIDEO_FOLDER_ID = process.env.VIDEO_DRIVE_FOLDER_ID!
 
+export const maxDuration = 60
+
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions)
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -16,6 +18,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
+  try {
   const drive = getDriveClient()
   // Собираем пользователей из ОБЕИХ папок — картинок и видео, иначе тот, кто
   // делал только видео (без картинок), не попадёт в список
@@ -78,4 +81,9 @@ export async function GET(req: NextRequest) {
   })).sort((a, b) => b.imageCount - a.imageCount)
 
   return NextResponse.json({ users, adminEmails })
+  } catch (e: any) {
+    console.error('[admin/stats]', e)
+    // Не роняем панель: отдаём хотя бы список админов, статистика подтянется позже
+    return NextResponse.json({ users: [], adminEmails, error: e.message }, { status: 200 })
+  }
 }

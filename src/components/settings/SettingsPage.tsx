@@ -539,11 +539,11 @@ export function SettingsPage() {
   const [rulesOpen, setRulesOpen] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
 
-  // Check admin status server-side
+  // Check admin status via lightweight endpoint (не зависит от тяжёлой статистики)
   useEffect(() => {
     if (!currentEmail) return
-    fetch('/api/admin/stats').then(r => {
-      setIsAdmin(r.ok)
+    fetch('/api/admin/check').then(r => r.json()).then(d => {
+      setIsAdmin(!!d.isAdmin)
       setAdminChecked(true)
     }).catch(() => setAdminChecked(true))
   }, [currentEmail])
