@@ -1233,6 +1233,59 @@ export function VideoPage() {
   const [avatarAudioDuration, setAvatarAudioDuration] = useState(0)
   const avatarAudioRef = useRef<HTMLInputElement>(null)
 
+  // ── TTS (ElevenLabs) для озвучки аватара ──
+  const [ttsOpen, setTtsOpen] = useState(false)
+  const [ttsVoices, setTtsVoices] = useState<{ id: string; name: string; previewUrl: string | null; labels: any }[]>([])
+  const [ttsVoiceId, setTtsVoiceId] = useState('')
+  const [ttsText, setTtsText] = useState('')
+  const [ttsGenerating, setTtsGenerating] = useState(false)
+  const [ttsError, setTtsError] = useState('')
+  const ttsPreviewRef = useRef<HTMLAudioElement | null>(null)
+
+  // Грузим голоса при первом открытии панели
+  useEffect(() => {
+    if (!ttsOpen || ttsVoices.length) return
+    fetch('/api/tts/voices').then(r => r.json()).then(d => {
+      if (d.voices?.length) { setTtsVoices(d.voices); setTtsVoiceId(v => v || d.voices[0].id) }
+      else if (d.error) setTtsError(d.error)
+    }).catch(e => setTtsError(e.message))
+  }, [ttsOpen, ttsVoices.length])
+
+  function playVoicePreview(url: string | null) {
+    if (!url) return
+    if (ttsPreviewRef.current) ttsPreviewRef.current.pause()
+    const a = new Audio(url); ttsPreviewRef.current = a; a.play().catch(() => {})
+  }
+
+  // Кладём base64-mp3 в слот аватара + считаем длительность
+  function setAvatarAudioFromBase64(b64: string, name: string) {
+    setAvatarAudioBase64(b64)
+    setAvatarAudioName(name)
+    try {
+      const ctx = new AudioContext()
+      const raw = atob(b64)
+      const buf = new Uint8Array(raw.length)
+      for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i)
+      ctx.decodeAudioData(buf.buffer, decoded => { setAvatarAudioDuration(Math.round(decoded.duration)); ctx.close() }, () => ctx.close())
+    } catch {}
+  }
+
+  async function handleGenerateVoice() {
+    if (!ttsVoiceId || !ttsText.trim() || ttsGenerating) return
+    setTtsGenerating(true); setTtsError('')
+    try {
+      const res = await fetch('/api/tts/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voiceId: ttsVoiceId, text: ttsText.trim() }),
+      })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error || 'TTS failed')
+      const voiceName = ttsVoices.find(v => v.id === ttsVoiceId)?.name || 'voice'
+      setAvatarAudioFromBase64(d.audioBase64, `${voiceName}.mp3`)
+    } catch (e: any) { setTtsError(e.message) }
+    setTtsGenerating(false)
+  }
+
   // ── Generation state ──
   const [status, setStatus] = useState<TaskStatus>('idle')
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
@@ -2176,6 +2229,48 @@ export function VideoPage() {
                 )}
                 <input ref={avatarAudioRef} type="file" accept=".mp3,.wav,.m4a,.aac" className="hidden" onChange={handleAvatarAudio} />
                 <p className="text-[10px] mt-1" style={{ color: 'rgba(255,255,255,0.2)' }}>2–300 seconds · max 5MB</p>
+
+                {/* Генерация голоса через ElevenLabs — результат падает в слот выше */}
+                <div className="mt-2 rounded-xl" style={{ border: '1px solid var(--border)' }}>
+                  <button onClick={() => setTtsOpen(o => !o)} className="w-full flex items-center justify-between px-3 py-2">
+                    <span className="text-[11px] font-medium flex items-center gap-1.5" style={{ color: 'var(--text)' }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+                      Generate voice (ElevenLabs)
+                    </span>
+                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" className="transition-transform" style={{ transform: ttsOpen ? 'rotate(180deg)' : 'none', color: 'var(--text-muted)' }}>
+                      <path d="M3 4.5L6 7.5l3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                  {ttsOpen && (
+                    <div className="p-3 pt-0 flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <select value={ttsVoiceId} onChange={e => setTtsVoiceId(e.target.value)}
+                          className="flex-1 rounded-lg px-2 py-1.5 text-xs outline-none" style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                          {ttsVoices.length === 0 && <option value="">Loading voices…</option>}
+                          {ttsVoices.map(v => (
+                            <option key={v.id} value={v.id}>{v.name}{v.labels?.language ? ` · ${v.labels.language}` : ''}{v.labels?.gender ? ` · ${v.labels.gender}` : ''}</option>
+                          ))}
+                        </select>
+                        <button onClick={() => playVoicePreview(ttsVoices.find(v => v.id === ttsVoiceId)?.previewUrl || null)}
+                          title="Preview voice" className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text)' }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        </button>
+                      </div>
+                      <textarea value={ttsText} onChange={e => setTtsText(e.target.value)} rows={3} maxLength={5000}
+                        placeholder="Text to speak…"
+                        className="w-full rounded-lg px-2.5 py-2 text-xs resize-none outline-none" style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+                      {ttsError && <p className="text-[10px]" style={{ color: '#f87171' }}>{ttsError}</p>}
+                      <button onClick={handleGenerateVoice} disabled={ttsGenerating || !ttsVoiceId || !ttsText.trim()}
+                        className="py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5"
+                        style={{ background: 'var(--accent)', color: '#fff', opacity: (ttsGenerating || !ttsVoiceId || !ttsText.trim()) ? 0.6 : 1 }}>
+                        {ttsGenerating
+                          ? <><svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>Generating…</>
+                          : 'Generate & use'}
+                      </button>
+                      <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.25)' }}>Generated audio goes into the slot above.</p>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="mb-3">
