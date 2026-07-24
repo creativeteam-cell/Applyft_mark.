@@ -55,13 +55,12 @@ function aspectFromDims(w: number, h: number): string | null {
   return best
 }
 
-// Языки для перевода видео (код → название для GPT)
+// Языки для перевода видео (код → название для GPT).
+// Только те, для которых Omni умеет НАТИВНУЮ речь с липсинком —
+// EN, ES, JP, KR, CN, TW. Остальные модель произносит как тарабарщину.
 const TRANSLATE_LANGUAGES: [string, string][] = [
-  ['EN', 'English'], ['PT', 'Portuguese'], ['SP', 'Spanish'], ['FR', 'French'],
-  ['DE', 'German'], ['IT', 'Italian'], ['RU', 'Russian'], ['UA', 'Ukrainian'],
-  ['AR', 'Arabic'], ['JP', 'Japanese'], ['KR', 'Korean'], ['HE', 'Hebrew'],
-  ['BG', 'Bulgarian'], ['CN', 'Chinese (Simplified)'], ['CZ', 'Czech'], ['HI', 'Hindi'],
-  ['PL', 'Polish'], ['TW', 'Chinese (Traditional)'], ['TR', 'Turkish'], ['DA', 'Danish'], ['ND', 'Dutch'],
+  ['EN', 'English'], ['SP', 'Spanish'], ['JP', 'Japanese'],
+  ['KR', 'Korean'], ['CN', 'Chinese (Simplified)'], ['TW', 'Chinese (Traditional)'],
 ]
 // Ставка Omni на pro/1080p со звуком — для подсчёта юнитов перевода
 const OMNI_TRANSLATE_RATE = 1.0
