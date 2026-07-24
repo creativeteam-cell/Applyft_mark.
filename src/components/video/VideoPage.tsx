@@ -64,6 +64,16 @@ const TRANSLATE_LANGUAGES: [string, string][] = [
 ]
 // Ставка Omni на pro/1080p со звуком — для подсчёта юнитов перевода
 const OMNI_TRANSLATE_RATE = 1.0
+
+// Модели ElevenLabs TTS (id → подпись)
+const TTS_MODELS: [string, string][] = [
+  ['eleven_multilingual_v2', 'Multilingual v2 · quality'],
+  ['eleven_turbo_v2_5', 'Turbo v2.5 · fast'],
+  ['eleven_flash_v2_5', 'Flash v2.5 · cheapest'],
+  ['eleven_v3', 'v3 · expressive + emotions'],
+]
+// Эмоции/тэги — только для v3 (инлайн в тексте)
+const V3_TAGS = ['[excited]', '[happy]', '[sad]', '[angry]', '[whispers]', '[shouts]', '[laughs]', '[sighs]', '[sarcastic]']
 interface ProcessingVideo {
   id: string
   prompt: string
@@ -1231,6 +1241,7 @@ export function VideoPage() {
   const [avatarAudioBase64, setAvatarAudioBase64] = useState<string | null>(null)
   const [avatarAudioName, setAvatarAudioName] = useState('')
   const [avatarAudioDuration, setAvatarAudioDuration] = useState(0)
+  const [avatarAudioMime, setAvatarAudioMime] = useState('audio/mpeg')
   const avatarAudioRef = useRef<HTMLInputElement>(null)
 
   // ── TTS (ElevenLabs) для озвучки аватара ──
@@ -1240,6 +1251,7 @@ export function VideoPage() {
   const [ttsText, setTtsText] = useState('')
   const [ttsGenerating, setTtsGenerating] = useState(false)
   const [ttsError, setTtsError] = useState('')
+  const [ttsModel, setTtsModel] = useState('eleven_multilingual_v2')
   const ttsPreviewRef = useRef<HTMLAudioElement | null>(null)
 
   // Грузим голоса при первом открытии панели
@@ -1261,6 +1273,7 @@ export function VideoPage() {
   function setAvatarAudioFromBase64(b64: string, name: string) {
     setAvatarAudioBase64(b64)
     setAvatarAudioName(name)
+    setAvatarAudioMime('audio/mpeg')
     try {
       const ctx = new AudioContext()
       const raw = atob(b64)
@@ -1276,7 +1289,7 @@ export function VideoPage() {
     try {
       const res = await fetch('/api/tts/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ voiceId: ttsVoiceId, text: ttsText.trim() }),
+        body: JSON.stringify({ voiceId: ttsVoiceId, text: ttsText.trim(), modelId: ttsModel }),
       })
       const d = await res.json()
       if (!res.ok) throw new Error(d.error || 'TTS failed')
@@ -1540,6 +1553,7 @@ export function VideoPage() {
       const b64 = dataUrl.split(',')[1]
       setAvatarAudioBase64(b64)
       setAvatarAudioName(file.name)
+      setAvatarAudioMime(file.type || 'audio/mpeg')
       // Read audio duration via AudioContext
       try {
         const ctx = new AudioContext()
@@ -2216,7 +2230,11 @@ export function VideoPage() {
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--accent)', flexShrink: 0 }}>
                       <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
                     </svg>
-                    <span className="text-xs truncate flex-1" style={{ color: 'var(--text)' }}>{avatarAudioName}</span>
+                    <span className="text-xs truncate flex-1" style={{ color: 'var(--text)' }}>{avatarAudioName}{avatarAudioDuration ? ` · ${avatarAudioDuration}s` : ''}</span>
+                    <button onClick={() => playVoicePreview(`data:${avatarAudioMime};base64,${avatarAudioBase64}`)}
+                      title="Play" className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.08)', color: 'var(--accent)' }}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    </button>
                     <button onClick={() => { setAvatarAudioBase64(null); setAvatarAudioName(''); setAvatarAudioDuration(0) }}
                       className="opacity-50 hover:opacity-100 flex-shrink-0" style={{ color: 'var(--text-muted)' }}>×</button>
                   </div>
@@ -2243,9 +2261,13 @@ export function VideoPage() {
                   </button>
                   {ttsOpen && (
                     <div className="p-3 pt-0 flex flex-col gap-2">
+                      <select value={ttsModel} onChange={e => setTtsModel(e.target.value)}
+                        className="rounded-lg px-2 py-1.5 text-xs outline-none" style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                        {TTS_MODELS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                      </select>
                       <div className="flex items-center gap-2">
                         <select value={ttsVoiceId} onChange={e => setTtsVoiceId(e.target.value)}
-                          className="flex-1 rounded-lg px-2 py-1.5 text-xs outline-none" style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                          className="flex-1 min-w-0 rounded-lg px-2 py-1.5 text-xs outline-none" style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }}>
                           {ttsVoices.length === 0 && <option value="">Loading voices…</option>}
                           {ttsVoices.map(v => (
                             <option key={v.id} value={v.id}>{v.name}{v.labels?.language ? ` · ${v.labels.language}` : ''}{v.labels?.gender ? ` · ${v.labels.gender}` : ''}</option>
@@ -2257,8 +2279,20 @@ export function VideoPage() {
                         </button>
                       </div>
                       <textarea value={ttsText} onChange={e => setTtsText(e.target.value)} rows={3} maxLength={5000}
-                        placeholder="Text to speak…"
+                        placeholder={ttsModel === 'eleven_v3' ? 'Text to speak… use [emotion] tags, e.g. [excited] Hello!' : 'Text to speak…'}
                         className="w-full rounded-lg px-2.5 py-2 text-xs resize-none outline-none" style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)' }} />
+                      {/* Эмоции-тэги — только для v3 */}
+                      {ttsModel === 'eleven_v3' && (
+                        <div className="flex flex-wrap gap-1">
+                          {V3_TAGS.map(tag => (
+                            <button key={tag} onClick={() => setTtsText(t => (t ? t + ' ' : '') + tag + ' ')}
+                              className="px-1.5 py-0.5 rounded text-[10px] font-mono transition-all"
+                              style={{ background: 'rgba(79,110,247,0.12)', color: 'var(--accent)', border: '1px solid var(--border)' }}>
+                              {tag}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       {ttsError && <p className="text-[10px]" style={{ color: '#f87171' }}>{ttsError}</p>}
                       <button onClick={handleGenerateVoice} disabled={ttsGenerating || !ttsVoiceId || !ttsText.trim()}
                         className="py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5"
